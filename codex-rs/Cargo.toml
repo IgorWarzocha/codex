@@ -612,6 +612,8 @@ ignored = [
 ]
 
 [profile.dev]
+# Avoid retaining large incremental caches; test and dev-small inherit this.
+incremental = false
 # The test profile inherits dev. Keep source locations in ordinary builds;
 # use CARGO_PROFILE_DEV_DEBUG=full (or CARGO_PROFILE_TEST_DEBUG=full) for locals.
 debug = "line-tables-only"
