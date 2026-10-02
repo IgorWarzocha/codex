@@ -1,4 +1,6 @@
-This development fork adds a [persistent Deno Notebook runtime](docs/notebook.md). It is not an official OpenAI release.
+This development fork adds a [persistent Deno Notebook runtime](docs/notebook.md) and a compact [baseline prompt](codex-rs/models-manager/prompt.md). It is not an official OpenAI release.
+
+New threads use the compact baseline instead of the default model catalog's prompt. Explicit instruction overrides and custom model catalogs remain authoritative. Resumed threads retain their saved baseline.
 
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">

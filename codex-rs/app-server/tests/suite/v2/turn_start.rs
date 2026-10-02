@@ -2645,24 +2645,7 @@ async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_de
 }
 
 fn assert_fallback_model_instructions(request: &responses::ResponsesRequest) {
-    let instructions = request.instructions_text();
-    let expected_intro = BASE_INSTRUCTIONS
-        .lines()
-        .next()
-        .expect("fallback prompt has an opening sentence");
-    let expected_personality = BASE_INSTRUCTIONS
-        .lines()
-        .find(|line| line.starts_with("Your default personality and tone"))
-        .expect("fallback prompt has a Friendly personality section");
-
-    assert!(
-        instructions.contains(expected_intro),
-        "expected fallback model identity instructions in the request"
-    );
-    assert!(
-        instructions.contains(expected_personality),
-        "expected baked Friendly instructions in the request"
-    );
+    assert_eq!(request.instructions_text(), BASE_INSTRUCTIONS);
 }
 
 #[tokio::test]

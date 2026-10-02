@@ -744,30 +744,50 @@ async fn dynamic_manager_preserves_requested_model_when_fallback_is_allowed() {
 }
 
 #[tokio::test]
-async fn get_model_info_tracks_fallback_usage() {
+async fn default_manager_keeps_compact_baseline_and_catalog_capabilities() {
     let codex_home = tempdir().expect("temp dir");
     let config = ModelsManagerConfig::default();
     let manager = openai_manager_for_tests(
         codex_home.path().to_path_buf(),
         TestModelsEndpoint::new(Vec::new()),
     );
-    let known_slug = manager
-        .get_remote_models()
-        .await
-        .first()
-        .expect("bundled models should include at least one model")
-        .slug
-        .clone();
-
-    let known = manager.get_model_info(known_slug.as_str(), &config).await;
-    assert!(!known.used_fallback_model_metadata);
-    assert_eq!(known.slug, known_slug);
+    let candidates = manager.get_remote_models().await;
+    assert!(!candidates.is_empty());
+    let known_slug = candidates.first().expect("bundled model").slug.clone();
+    for candidate in candidates {
+        for slug in [
+            candidate.slug.clone(),
+            format!("custom/{}-snapshot", candidate.slug),
+        ] {
+            let selected = manager.get_model_info(&slug, &config).await;
+            let mut expected = candidate.clone();
+            expected.slug = slug;
+            expected.used_fallback_model_metadata = false;
+            let messages = expected.model_messages.get_or_insert_default();
+            messages.instructions_template = Some(model_info::BASE_INSTRUCTIONS.to_string());
+            messages.instructions_variables = None;
+            assert_eq!(selected, expected);
+        }
+    }
 
     let unknown = manager
         .get_model_info("model-that-does-not-exist", &config)
         .await;
     assert!(unknown.used_fallback_model_metadata);
     assert_eq!(unknown.slug, "model-that-does-not-exist");
+    assert_eq!(
+        codex_prompts::render_model_instructions(&unknown),
+        model_info::BASE_INSTRUCTIONS
+    );
+    for literal in ["custom {{ personality }}\n# Personality\nKeep me", ""] {
+        let overrides = ModelsManagerConfig {
+            base_instructions: Some(literal.to_string()),
+            personality: Some(codex_protocol::config_types::Personality::None),
+            ..Default::default()
+        };
+        let selected = manager.get_model_info(&known_slug, &overrides).await;
+        assert_eq!(codex_prompts::render_model_instructions(&selected), literal);
+    }
 }
 
 #[tokio::test]
@@ -794,7 +814,7 @@ async fn get_model_info_applies_long_context_override_to_bundled_gpt_5_6_models(
 }
 
 #[tokio::test]
-async fn get_model_info_uses_custom_catalog() {
+async fn custom_catalog_authority_survives_sparse_model_switch_overrides() {
     let config = ModelsManagerConfig::default();
     let mut overlay = remote_model("gpt-overlay", "Overlay", /*priority*/ 0);
     overlay.supports_image_detail_original = true;
@@ -812,6 +832,12 @@ async fn get_model_info_uses_custom_catalog() {
     assert_eq!(model_info.context_window, Some(272_000));
     assert!(model_info.supports_image_detail_original);
     assert!(!model_info.used_fallback_model_metadata);
+    // Native per-turn settings clear model_catalog after the manager captures it.
+    assert!(config.model_catalog.is_none());
+    assert_eq!(
+        codex_prompts::render_model_instructions(&model_info),
+        "base instructions"
+    );
 }
 
 #[tokio::test]

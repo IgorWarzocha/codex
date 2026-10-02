@@ -9,6 +9,7 @@ use codex_protocol::openai_models::ConfirmationPolicies;
 use codex_protocol::openai_models::GuardianV2ModelConfig;
 use codex_protocol::openai_models::ModelInstructionsVariables;
 use codex_protocol::openai_models::ModelTokenBudgetConfig;
+use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::MultiAgentMessages;
 use codex_protocol::openai_models::MultiAgentModeMessages;
 use codex_protocol::openai_models::MultiAgentRoleMessages;
@@ -18,15 +19,16 @@ use codex_protocol::openai_models::ToolMessage;
 use codex_protocol::openai_models::ToolMessages;
 use pretty_assertions::assert_eq;
 
-fn config_with_personality(personality: Option<Personality>) -> ModelsManagerConfig {
+fn custom_catalog_config_with_personality(personality: Option<Personality>) -> ModelsManagerConfig {
     ModelsManagerConfig {
         personality,
+        model_catalog: Some(ModelsResponse { models: Vec::new() }),
         ..Default::default()
     }
 }
 
 #[test]
-fn base_instruction_override_is_literal_and_preserves_catalog_messages() {
+fn catalog_resolution_preserves_runtime_messages_and_literal_overrides() {
     let override_instructions = "override {{ personality }}\n# Personality\nKeep me";
     let persistent_instructions = "Follow up on the active task.";
     let async_message_description = "Catalog async message description.";
@@ -81,7 +83,7 @@ fn base_instruction_override_is_literal_and_preserves_catalog_messages() {
         browser_use: Some("# Browser policy\n\n{{literal_markdown}}\n".to_string()),
         computer_use: Some("  # Native policy\r\n\n${native_markdown}\n".to_string()),
     };
-    let mut messages = ModelMessages {
+    let messages = ModelMessages {
         content_filter_guidance: None,
         persistent_instructions: Some(persistent_instructions.to_string()),
         tools: Some(ToolMessages {
@@ -114,23 +116,52 @@ fn base_instruction_override_is_literal_and_preserves_catalog_messages() {
         guardian_v2: Some(guardian_v2),
     };
     model.model_messages = Some(messages.clone());
-    let config = ModelsManagerConfig {
-        base_instructions: Some(override_instructions.to_string()),
-        personality: Some(Personality::None),
-        ..Default::default()
-    };
-
-    let updated = with_config_overrides(model, &config);
-
-    messages.instructions_template = Some(override_instructions.to_string());
-    messages.instructions_variables = None;
-    assert_eq!(updated.model_messages, Some(messages));
-    assert_eq!(render_model_instructions(&updated), override_instructions);
+    for (base_instructions, model_catalog, expected_template) in [
+        (
+            Some(override_instructions.to_string()),
+            None,
+            override_instructions,
+        ),
+        (None, None, "template"),
+        (
+            None,
+            Some(ModelsResponse {
+                models: vec![model.clone()],
+            }),
+            "template",
+        ),
+        (
+            Some(override_instructions.to_string()),
+            Some(ModelsResponse {
+                models: vec![model.clone()],
+            }),
+            override_instructions,
+        ),
+    ] {
+        let config = ModelsManagerConfig {
+            base_instructions,
+            model_catalog,
+            personality: Some(Personality::None),
+            ..Default::default()
+        };
+        let updated = crate::manager::construct_model_info_from_candidates(
+            &model.slug,
+            &[model.clone()],
+            &config,
+        );
+        let mut expected = messages.clone();
+        expected.instructions_template = Some(expected_template.to_string());
+        if config.base_instructions.is_some() {
+            expected.instructions_variables = None;
+        }
+        assert_eq!(updated.model_messages, Some(expected));
+        assert_eq!(render_model_instructions(&updated), expected_template);
+    }
 }
 
 #[test]
 fn personality_none_strips_catalog_instruction_sources_through_the_next_h1() {
-    let config = config_with_personality(Some(Personality::None));
+    let config = custom_catalog_config_with_personality(Some(Personality::None));
     for (instructions, expected) in [
         (
             "Intro\n\n# Personality\n\nRemove me\n\n## Writing Style\n\nRemove me too\n\n# Safety\n\nKeep me",
@@ -194,9 +225,9 @@ fn personality_none_strips_catalog_instruction_sources_through_the_next_h1() {
 fn baked_personality_section_is_preserved_without_explicit_none() {
     let instructions = "Intro\n# Personality\nKeep me\n# General\nKeep me too";
     let configs = [
-        config_with_personality(/*personality*/ None),
-        config_with_personality(Some(Personality::Friendly)),
-        config_with_personality(Some(Personality::Pragmatic)),
+        custom_catalog_config_with_personality(/*personality*/ None),
+        custom_catalog_config_with_personality(Some(Personality::Friendly)),
+        custom_catalog_config_with_personality(Some(Personality::Pragmatic)),
     ];
 
     for config in configs {
@@ -243,7 +274,6 @@ fn explicit_empty_base_instructions_stay_empty_with_personality_none() {
 #[test]
 fn unknown_model_uses_builtin_instruction_template() {
     let model = model_info_from_slug("unknown-model");
-
     assert_eq!(render_model_instructions(&model), BASE_INSTRUCTIONS);
     assert!(model.used_fallback_model_metadata);
 }

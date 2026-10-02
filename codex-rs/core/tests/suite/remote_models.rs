@@ -203,10 +203,8 @@ async fn remote_models_get_model_info_uses_longest_matching_prefix() -> Result<(
         .await;
 
     assert_eq!(model_info.slug, "gpt-5.3-codex-test");
-    assert_eq!(
-        render_model_instructions(&model_info),
-        render_model_instructions(&specific)
-    );
+    assert_eq!(model_info.display_name, specific.display_name);
+    assert_eq!(render_model_instructions(&model_info), BASE_INSTRUCTIONS);
 
     Ok(())
 }
@@ -479,7 +477,7 @@ async fn remote_models_long_model_slug_is_sent_with_supported_reasoning(
     assert_eq!(body["model"].as_str(), Some(requested_model));
     assert_eq!(reasoning_effort, Some(expected_wire_effort));
     assert_eq!(reasoning_summary, Some("detailed"));
-    assert_eq!(request.instructions_text(), base_instructions);
+    assert_eq!(request.instructions_text(), BASE_INSTRUCTIONS);
     assert!(
         request
             .message_input_texts("developer")

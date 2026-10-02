@@ -468,7 +468,16 @@ impl ModelsManager for OpenAiModelsManager {
             let models = self.get_remote_models().await;
             match &self.catalog_source {
                 CatalogSource::Default => {
-                    construct_model_info_from_candidates(model, &models, config)
+                    let mut selected = construct_model_info_from_candidates(model, &models, config);
+                    // Catalog authority belongs to the manager, not sparse per-turn overrides.
+                    // Default catalogs supply native contracts; explicit catalogs keep their text.
+                    if config.base_instructions.is_none() {
+                        let messages = selected.model_messages.get_or_insert_default();
+                        messages.instructions_template =
+                            Some(model_info::BASE_INSTRUCTIONS.to_string());
+                        messages.instructions_variables = None;
+                    }
+                    selected
                 }
                 CatalogSource::ExplicitProvider(_) => construct_model_info(
                     model,
