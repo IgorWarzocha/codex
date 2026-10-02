@@ -85,6 +85,22 @@ impl Store {
         })
     }
 
+    /// Construct a source for profile loading without creating project or session paths.
+    pub(crate) fn for_profile_reads(
+        codex_home: PathBuf,
+        cwd: &Path,
+        thread_id: &str,
+        budget: PersistenceBudget,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            state: Arc::new(Mutex::new(State {
+                paths: Paths::for_profile_reads(codex_home, cwd, thread_id)?,
+                baseline: None,
+                budget,
+            })),
+        })
+    }
+
     // Filesystem work, lock waits, validation and base64 decoding stay off the
     // async executor. The shared state serializes this Store's operations too.
     async fn run<T: Send + 'static>(
@@ -283,7 +299,8 @@ impl Store {
             if !path.exists() {
                 return Err(format!("Notebook profile not found: {name}"));
             }
-            let _lock = files::lock(&path)?;
+            // Writers atomically replace profile.json. Reads need no write lock,
+            // which also lets ephemeral notebooks load profiles without disk writes.
             read_profile(&path, &name, state.budget)?
                 .ok_or_else(|| format!("Notebook profile not found: {name}"))?
                 .snapshot

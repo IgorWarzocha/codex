@@ -70,7 +70,7 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
     let test = test_codex()
         .with_config(move |config| {
             config.code_mode.runtime = CodeModeRuntime::Notebook;
-            config.code_mode.deno_program = deno;
+            config.code_mode.deno_program = Some(deno);
             config.ephemeral = true;
             config.features.enable(Feature::TokenBudget).unwrap();
         })

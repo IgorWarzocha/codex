@@ -1175,7 +1175,8 @@ const DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS: u64 = 30_000;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeModeConfig {
     pub runtime: codex_features::CodeModeRuntime,
-    pub deno_program: PathBuf,
+    pub deno_program: Option<PathBuf>,
+    pub notebook_profile: Option<String>,
     pub default_exec_yield_time_ms: u64,
     /// Show handler duration, code-mode host duration, and harness overhead
     /// in each code-mode cell response.
@@ -1192,7 +1193,8 @@ impl Default for CodeModeConfig {
     fn default() -> Self {
         Self {
             runtime: codex_features::CodeModeRuntime::V8,
-            deno_program: PathBuf::from("deno"),
+            deno_program: None,
+            notebook_profile: None,
             default_exec_yield_time_ms: DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS,
             experimental_show_cell_overhead: false,
             tool_input_schema_max_bytes: None,
@@ -2755,9 +2757,8 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
 
     CodeModeConfig {
         runtime: base.and_then(|config| config.runtime).unwrap_or_default(),
-        deno_program: base
-            .and_then(|config| config.deno_program.clone())
-            .unwrap_or_else(|| PathBuf::from("deno")),
+        deno_program: base.and_then(|config| config.deno_program.clone()),
+        notebook_profile: base.and_then(|config| config.notebook_profile.clone()),
         default_exec_yield_time_ms: base
             .and_then(|config| config.default_exec_yield_time_ms)
             .unwrap_or(DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS),

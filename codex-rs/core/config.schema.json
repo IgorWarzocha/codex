@@ -578,7 +578,7 @@
           "type": "integer"
         },
         "deno_program": {
-          "description": "Deno executable for the Notebook runtime. Defaults to `deno` on PATH.",
+          "description": "Explicit Deno executable. Otherwise use PATH or install the pinned Notebook runtime.",
           "type": "string"
         },
         "direct_only_tool_namespaces": {
@@ -601,6 +601,10 @@
         "experimental_show_cell_overhead": {
           "description": "Show handler duration, code-mode host duration, and harness overhead in each code-mode cell response. Experimental: this option and the response format may change or be removed.",
           "type": "boolean"
+        },
+        "notebook_profile": {
+          "description": "Named Notebook profile to seed fresh threads. Restored bindings take precedence.",
+          "type": "string"
         },
         "runtime": {
           "allOf": [

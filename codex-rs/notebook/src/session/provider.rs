@@ -27,10 +27,11 @@ use crate::storage::Store;
 
 /// One unsandboxed Deno Jupyter kernel per Codex thread. No TypeScript host controller.
 pub struct DenoNotebookSessionProvider {
-    pub(super) deno_program: PathBuf,
+    pub(super) deno_program: Option<PathBuf>,
     cwd: PathBuf,
     identity: Option<Identity>,
     ephemeral: bool,
+    default_profile: Option<String>,
     session: Mutex<Weak<Session>>,
     creation_gate: Semaphore,
     startup_error: Mutex<Option<String>>,
@@ -44,11 +45,16 @@ struct Identity {
 
 impl DenoNotebookSessionProvider {
     pub fn new(deno_program: PathBuf, cwd: PathBuf) -> Self {
+        Self::without_identity(Some(deno_program), cwd)
+    }
+
+    fn without_identity(deno_program: Option<PathBuf>, cwd: PathBuf) -> Self {
         Self {
             deno_program,
             cwd,
             identity: None,
             ephemeral: false,
+            default_profile: None,
             session: Mutex::new(Weak::new()),
             creation_gate: Semaphore::new(1),
             startup_error: Mutex::new(None),
@@ -61,12 +67,22 @@ impl DenoNotebookSessionProvider {
         codex_home: PathBuf,
         thread_id: String,
     ) -> Self {
+        Self::from_config(Some(deno_program), cwd, codex_home, thread_id)
+    }
+
+    /// Omit the executable to use PATH, then the managed pinned runtime if absent.
+    pub fn from_config(
+        deno_program: Option<PathBuf>,
+        cwd: PathBuf,
+        codex_home: PathBuf,
+        thread_id: String,
+    ) -> Self {
         Self {
             identity: Some(Identity {
                 codex_home,
                 thread_id,
             }),
-            ..Self::new(deno_program, cwd)
+            ..Self::without_identity(deno_program, cwd)
         }
     }
 
@@ -75,13 +91,20 @@ impl DenoNotebookSessionProvider {
         self
     }
 
-    fn resolved_deno(&self) -> Result<PathBuf, String> {
-        which::which_in(&self.deno_program, std::env::var_os("PATH"), &self.cwd).map_err(|error| {
-            format!(
-                "Deno program unavailable: {}: {error}",
-                self.deno_program.display()
-            )
-        })
+    pub fn with_default_profile(mut self, profile: Option<String>) -> Self {
+        self.default_profile = profile;
+        self
+    }
+
+    async fn resolved_deno(&self) -> Result<PathBuf, String> {
+        crate::deno::resolve(
+            self.deno_program.as_deref(),
+            &self.cwd,
+            self.identity
+                .as_ref()
+                .map(|identity| identity.codex_home.as_path()),
+        )
+        .await
     }
 
     pub async fn control(&self, request: NotebookRequest) -> Result<NotebookControlResult, String> {
@@ -144,7 +167,7 @@ impl DenoNotebookSessionProvider {
             return match self.identity.as_ref().filter(|_| !self.ephemeral) {
                 Some(identity) => {
                     crate::diagnostics::diagnostics_with_runtime(
-                        &self.resolved_deno()?,
+                        &self.resolved_deno().await?,
                         &self.cwd,
                         &identity.codex_home,
                         &identity.thread_id,
@@ -193,8 +216,13 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
                 self.cwd.display()
             ));
         }
-        self.resolved_deno()?;
-        Ok(())
+        crate::deno::availability(
+            self.deno_program.as_deref(),
+            &self.cwd,
+            self.identity
+                .as_ref()
+                .map(|identity| identity.codex_home.as_path()),
+        )
     }
 
     fn create_session(&self) -> CodeModeSessionProviderFuture<'_> {
@@ -222,7 +250,7 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
             }
             self.availability()?;
             let options = KernelOptions {
-                deno: self.resolved_deno()?,
+                deno: self.resolved_deno().await?,
                 cwd: Some(self.cwd.clone()),
                 // Foreground observation deadlines yield, they do not kill the kernel.
                 execute_timeout: Duration::from_secs(24 * 60 * 60),
@@ -230,6 +258,23 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
             };
             let identity = self.identity.as_ref().filter(|_| !self.ephemeral);
             let budget = PersistenceBudget::from_heap_mib(options.max_heap_mib);
+            let default_profile = self
+                .default_profile
+                .as_ref()
+                .map(|name| {
+                    let identity = self.identity.as_ref().ok_or_else(|| {
+                        "Configured Notebook profiles require a CODEX_HOME storage identity"
+                            .to_string()
+                    })?;
+                    Store::for_profile_reads(
+                        identity.codex_home.clone(),
+                        &self.cwd,
+                        &identity.thread_id,
+                        budget,
+                    )
+                    .map(|store| (store, name.clone()))
+                })
+                .transpose()?;
             let store = identity
                 .map(|identity| {
                     Store::with_budget(
@@ -261,7 +306,8 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
                     "__CREDENTIAL__",
                     &serde_json::to_string(&bridge.credential).map_err(|e| e.to_string())?,
                 );
-            let lifecycle = match Lifecycle::start(options, bootstrap, store).await {
+            let lifecycle = match Lifecycle::start(options, bootstrap, store, default_profile).await
+            {
                 Ok(lifecycle) => lifecycle,
                 Err(error) => {
                     *self

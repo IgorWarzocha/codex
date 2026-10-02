@@ -4,7 +4,7 @@ This fork adds an opt-in persistent JavaScript and TypeScript runtime to Codex's
 
 ## Run
 
-Install Deno and build the fork's CLI from `codex-rs`. On Linux or macOS:
+Build the fork's CLI from `codex-rs`. On Linux or macOS:
 
 ```sh
 CARGO_PROFILE_DEV_DEBUG=0 cargo build -p codex-cli --bin codex
@@ -24,16 +24,22 @@ cargo build -p codex-cli --bin codex
 
 Use this only in a trusted local working directory. Deno Jupyter always has full filesystem, network and subprocess access. Notebook refuses restricted permissions, managed network proxies and remote or multiple execution environments. The fork does not change your global Codex configuration.
 
+Notebook uses Deno from `PATH` when available. Otherwise, its first authorized startup downloads the pinned Deno 2.9.7 release from `denoland/deno` into `$CODEX_HOME/notebook/runtime`. The download and extracted executable must match the bundled SHA-256 hashes and sizes before installation. The cached runtime is reused without another download. Nothing is installed globally. Linux, macOS and Windows assets are provided for x86-64 and ARM64.
+
 For persistent configuration:
 
 ```toml
 [features.code_mode]
 runtime = "notebook"
-# Optional executable override. Otherwise use deno from PATH.
+# Optional explicit executable. A missing override fails without downloading.
 deno_program = "/absolute/path/to/deno"
+# Optional saved profile for fresh Notebook threads.
+notebook_profile = "daily"
 ```
 
 Full-access permissions must still be selected separately. Omit `runtime` or set it to `"v8"` to retain upstream behavior.
+
+Omit `deno_program` to allow automatic installation. Set it to `"deno"` to require an existing executable on `PATH`, including for offline environments. Network and verification failures are reported rather than falling back to an unverified runtime. Ephemeral threads can share the managed runtime cache without persisting Notebook state.
 
 Keep the same Cargo profile and build flags between runs to reuse incremental artifacts. Use `CARGO_BUILD_JOBS` to tune concurrency for your machine. Building tests for a previously unbuilt dependency feature set can compile additional artifacts even when the CLI is already built.
 
@@ -50,6 +56,8 @@ The workspace has a distinct prerelease version. Keep a real version rather than
 - Ordinary JavaScript errors retain the kernel. Cancellation and terminal kernel failures invalidate its in-memory state. Ask the agent to restart the notebook from its checkpoint, or reset it to durable project state. Neither operation replays failed work or reverses external side effects.
 
 The agent's `notebook` tool manages status, checkpoints, profiles and pins. Ask it to inspect retained bindings, pin a reusable helper, save a named profile, or prune unpinned temporary state. Pinned functions can run after startup or nested tool results. These hooks run with the same full host access as notebook cells.
+
+To choose a default profile, first save one with `notebook`'s `save` action, then set `features.code_mode.notebook_profile` to its name. Fresh threads load its missing bindings before startup hooks. Existing project bindings win, and status reports loaded and skipped names. Profile bindings remain thread-private unless pinned. A resumed private checkpoint takes precedence over the configured profile, even if that profile has changed or been removed. Restart and reset do not reapply the profile within a running thread. Missing or invalid profiles fail fresh startup visibly. Ephemeral threads may read a default profile without writing state. Explicit `notebook load` retains its stricter collision checks.
 
 Historical cells are saved as bounded `.ipynb` journals. Diagnostics checks that history with Deno's language server, separately from the current kernel's health. Journals are not a recovery script.
 

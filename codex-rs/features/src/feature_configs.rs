@@ -41,9 +41,12 @@ pub struct CodeModeConfigToml {
     /// Notebook uses a persistent Deno kernel and requires unrestricted local execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<CodeModeRuntime>,
-    /// Deno executable for the Notebook runtime. Defaults to `deno` on PATH.
+    /// Explicit Deno executable. Otherwise use PATH or install the pinned Notebook runtime.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deno_program: Option<std::path::PathBuf>,
+    /// Named Notebook profile to seed fresh threads. Restored bindings take precedence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notebook_profile: Option<String>,
     /// Default yield timeout for code-mode exec calls, in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_exec_yield_time_ms: Option<u64>,

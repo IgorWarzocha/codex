@@ -4,7 +4,9 @@
 
 Deno Jupyter runs with unrestricted filesystem, network, and subprocess access. This provider is not a sandbox. The integrating caller must require explicit `danger-full-access` before exposing it. The kernel must run on the same local machine as the localhost tool bridge.
 
-Construct `DenoNotebookSessionProvider::new(deno_program, cwd)` and use the existing Code Mode `exec`, `wait`, and delegate contracts. Deno must support `deno jupyter --kernel`. The deterministic runtime tests were exercised with Deno 2.9.6.
+Construct `DenoNotebookSessionProvider::new(deno_program, cwd)` for an explicit executable, or `from_config(None, cwd, codex_home, thread_id)` for PATH discovery and managed installation. Availability checks never download or execute Deno. Session creation resolves the executable only after the caller's access validation. Use the existing Code Mode `exec`, `wait`, and delegate contracts.
+
+`with_default_profile` selects a saved profile for fresh threads. Restored bindings take precedence, and resumed private checkpoints bypass the profile. Ephemeral threads may read a profile without writing Notebook state. See the runtime guide for configuration and managed Deno verification.
 
 ## Cell behavior
 

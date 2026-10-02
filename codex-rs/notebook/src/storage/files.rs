@@ -24,6 +24,18 @@ pub(crate) struct Paths {
 
 impl Paths {
     pub fn new(home: PathBuf, cwd: &Path, thread_id: &str) -> Result<Self, String> {
+        Self::resolve(home, cwd, thread_id, true)
+    }
+
+    pub(crate) fn for_profile_reads(
+        home: PathBuf,
+        cwd: &Path,
+        thread_id: &str,
+    ) -> Result<Self, String> {
+        Self::resolve(home, cwd, thread_id, false)
+    }
+
+    fn resolve(home: PathBuf, cwd: &Path, thread_id: &str, create: bool) -> Result<Self, String> {
         if thread_id.is_empty() || thread_id.len() > 4096 {
             return Err("Invalid notebook thread identifier".into());
         }
@@ -38,19 +50,23 @@ impl Paths {
             .to_path_buf();
         // CODEX_HOME itself may intentionally be linked. All storage-owned paths
         // beneath its resolved target must be real directories and private files.
-        fs::create_dir_all(&home).map_err(|error| error.to_string())?;
+        if create {
+            fs::create_dir_all(&home).map_err(|error| error.to_string())?;
+        }
         let root = fs::canonicalize(home)
             .map_err(|error| error.to_string())?
             .join("notebook");
-        directory(&root)?;
         let projects = root.join("projects");
-        directory(&projects)?;
         let directory_path = projects.join(key(project.as_os_str().as_encoded_bytes()));
-        directory(&directory_path)?;
         let sessions = directory_path.join("sessions");
-        directory(&sessions)?;
         let profiles = root.join("profiles");
-        directory(&profiles)?;
+        if create {
+            directory(&root)?;
+            directory(&projects)?;
+            directory(&directory_path)?;
+            directory(&sessions)?;
+            directory(&profiles)?;
+        }
         Ok(Self {
             project,
             directory: directory_path,

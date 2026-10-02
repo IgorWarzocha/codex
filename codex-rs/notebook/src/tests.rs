@@ -413,7 +413,7 @@ async fn unpin_runtime_only_replacement_preserves_project_value_without_repinnin
     let home = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let provider = DenoNotebookSessionProvider::new_with_identity(
-        provider().deno_program,
+        provider().deno_program.unwrap(),
         project.path().to_path_buf(),
         home.path().to_path_buf(),
         "unpin".into(),

@@ -102,13 +102,14 @@ impl CodeModeService {
             .then(|| config.cwd.clone());
         let notebook_provider = notebook_cwd.as_ref().map(|_| {
             Arc::new(
-                codex_notebook::DenoNotebookSessionProvider::new_with_identity(
+                codex_notebook::DenoNotebookSessionProvider::from_config(
                     config.code_mode.deno_program.clone(),
                     config.cwd.to_path_buf(),
                     config.codex_home.to_path_buf(),
                     thread_id.to_string(),
                 )
-                .with_ephemeral(config.ephemeral),
+                .with_ephemeral(config.ephemeral)
+                .with_default_profile(config.code_mode.notebook_profile.clone()),
             )
         });
         let session_provider = notebook_provider
@@ -631,26 +632,34 @@ mod tests {
 
     #[tokio::test]
     async fn notebook_control_checks_access_before_session_initialization() {
-        let (session, mut turn) = make_session_and_context().await;
-        let mut config = (*turn.config).clone();
-        config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
-        // Even an unusable runtime must report the permission boundary first.
-        config.code_mode.deno_program = std::path::PathBuf::from("/nonexistent/notebook-deno");
-        turn.config = Arc::new(config);
-        let service = super::CodeModeService::new(
-            codex_protocol::ThreadId::new(),
-            Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
-            &turn.config,
-            session.services.executed_tool_calls.clone(),
-        );
-        let step = StepContext::for_test(Arc::new(turn));
-        assert!(!service.can_prewarm());
-        let error = service
-            .control_notebook(codex_notebook::NotebookRequest::Reset, &step)
-            .await
-            .expect_err("restricted control must fail");
-        assert!(error.contains("danger-full-access"), "{error}");
-        assert!(service.session.get().is_none());
+        for deno_program in [
+            Some(std::path::PathBuf::from("/nonexistent/notebook-deno")),
+            None,
+        ] {
+            let (session, mut turn) = make_session_and_context().await;
+            let mut config = (*turn.config).clone();
+            config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
+            // Both explicit and managed runtimes must report the permission boundary first.
+            config.code_mode.deno_program = deno_program;
+            let notebook_home = config.codex_home.join("notebook");
+            assert!(!notebook_home.exists());
+            turn.config = Arc::new(config);
+            let service = super::CodeModeService::new(
+                codex_protocol::ThreadId::new(),
+                Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
+                &turn.config,
+                session.services.executed_tool_calls.clone(),
+            );
+            let step = StepContext::for_test(Arc::new(turn));
+            assert!(!service.can_prewarm());
+            let error = service
+                .control_notebook(codex_notebook::NotebookRequest::Reset, &step)
+                .await
+                .expect_err("restricted control must fail");
+            assert!(error.contains("danger-full-access"), "{error}");
+            assert!(service.session.get().is_none());
+            assert!(!notebook_home.exists());
+        }
     }
 
     #[tokio::test]

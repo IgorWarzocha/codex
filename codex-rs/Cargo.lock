@@ -4205,6 +4205,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "codex-code-mode-protocol",
+ "codex-http-client",
  "codex-notebook-kernel",
  "codex-protocol",
  "regex",
@@ -4215,9 +4216,11 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "tracing",
  "url",
  "uuid",
  "which 8.0.0",
+ "zip",
 ]
 
 [[package]]

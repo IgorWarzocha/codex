@@ -4,6 +4,7 @@
 mod bridge;
 mod cell;
 mod control;
+mod deno;
 mod diagnostics;
 mod import_history;
 mod journal;
