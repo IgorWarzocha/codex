@@ -1113,7 +1113,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::CodeModePrewarm,
         key: "code_mode_prewarm",
         stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::CodeModeInterrupt,
@@ -1239,7 +1239,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::ApplyPatchPreserveLineEndings,
         key: "apply_patch_preserve_line_endings",
         stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ExecPermissionApprovals,
@@ -1375,7 +1375,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::MultiAgentV2,
         key: "multi_agent_v2",
         stage: Stage::Stable,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ModelCatalogInContext,
@@ -1387,7 +1387,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::MultiAgentV2DynamicTools,
         key: "multi_agent_v2_dynamic_tools",
         stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::DeferMailboxPreemption,

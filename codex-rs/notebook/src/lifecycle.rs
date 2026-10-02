@@ -46,6 +46,7 @@ pub(crate) struct Lifecycle {
 impl Lifecycle {
     pub(crate) async fn start(
         options: KernelOptions,
+        prewarmed_kernel: Option<Kernel>,
         bootstrap: String,
         store: Option<Store>,
         default_profile: Option<(Store, String)>,
@@ -72,7 +73,15 @@ impl Lifecycle {
             checkpoint_details: json!({"state":"not_saved"}),
             persistence_error: None,
         };
-        lifecycle.restore(false).await?;
+        let kernel = match prewarmed_kernel {
+            Some(kernel) => kernel,
+            None => Kernel::start(lifecycle.options.clone())
+                .await
+                .map_err(|e| e.to_string())?,
+        };
+        lifecycle.initialize_kernel(kernel).await?;
+        let skip_profile = std::mem::take(&mut lifecycle.skip_profile_once);
+        lifecycle.finish_restore(false, skip_profile).await?;
         // Persist profile values and startup-hook mutations before exposing the session.
         if lifecycle.default_profile.is_some()
             && let Err(error) = lifecycle.checkpoint(&[]).await
@@ -87,15 +96,6 @@ impl Lifecycle {
         self.shutdown().await?;
         self.default_profile = None;
         let skip_profile = reset || std::mem::take(&mut self.skip_profile_once);
-        if let Some(history) = &self.import_history {
-            match history.read().await {
-                Ok(imports) => {
-                    self.imports = imports;
-                    self.imports_error = None;
-                }
-                Err(error) => self.imports_error = Some(error),
-            }
-        }
         if reset && let Some(store) = &mut self.store {
             store.reset_session().await?;
         }
@@ -104,9 +104,15 @@ impl Lifecycle {
             // Reset must remain authoritative even before another cell succeeds.
             self.snapshot = json!({"entries":[],"skipped":[]});
         }
-        let mut kernel = Kernel::start(self.options.clone())
+        let kernel = Kernel::start(self.options.clone())
             .await
             .map_err(|e| e.to_string())?;
+        self.initialize_kernel(kernel).await?;
+        self.finish_restore(reset, skip_profile).await
+    }
+
+    /// Only bundled runtime code runs here. Saved source and hooks belong to finish_restore.
+    async fn initialize_kernel(&mut self, mut kernel: Kernel) -> Result<(), String> {
         let initialization = async {
             let result = kernel
                 .execute(include_str!("kernel-state.js"))
@@ -134,6 +140,19 @@ impl Lifecycle {
         };
         self.baseline = names.into_iter().collect();
         self.kernel = Some(kernel);
+        Ok(())
+    }
+
+    async fn finish_restore(&mut self, reset: bool, skip_profile: bool) -> Result<(), String> {
+        if let Some(history) = &self.import_history {
+            match history.read().await {
+                Ok(imports) => {
+                    self.imports = imports;
+                    self.imports_error = None;
+                }
+                Err(error) => self.imports_error = Some(error),
+            }
+        }
         let restored = async {
             self.restore_values(reset, skip_profile).await?;
             self.refresh_status().await

@@ -91,6 +91,55 @@ fn selection_precedence_is_authoritative_and_cold() {
 }
 
 #[tokio::test]
+async fn prewarm_cache_probe_never_installs_or_repairs() {
+    let home = tempfile::tempdir().unwrap();
+    let bytes = archive(&[("deno", b"binary")]);
+    let asset = fixture(&bytes, b"binary");
+    let absent = home.path().join("absent");
+    assert!(
+        install::resolve_cached(&absent, &asset)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(!absent.exists());
+    assert!(
+        install::resolve_cached(home.path(), &asset)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+    let directory = home
+        .path()
+        .join("notebook/runtime")
+        .join(assets::VERSION)
+        .join(asset.target);
+    fs::create_dir_all(&directory).unwrap();
+    let executable = directory.join(asset.executable);
+    assert!(
+        install::resolve_cached(home.path(), &asset)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    install::publish(&directory, &asset, &bytes).await.unwrap();
+    assert_eq!(
+        install::resolve_cached(home.path(), &asset).await.unwrap(),
+        Some(executable.clone())
+    );
+    fs::write(&executable, b"broken").unwrap();
+    assert!(
+        install::resolve_cached(home.path(), &asset)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(fs::read(&executable).unwrap(), b"broken");
+    assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
+}
+
+#[tokio::test]
 async fn verified_publication_and_corrupt_cache_repair() {
     let directory = tempfile::tempdir().unwrap();
     let bytes = archive(&[("deno", b"binary")]);

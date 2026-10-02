@@ -10623,6 +10623,8 @@ async fn make_multi_agent_v2_usage_hint_test_session(
         |config| {
             if enable_multi_agent_v2 {
                 let _ = config.features.enable(Feature::MultiAgentV2);
+            } else {
+                let _ = config.features.disable(Feature::MultiAgentV2);
             }
             config.multi_agent_v2.root_agent_usage_hint_text = Some("Root guidance.".to_string());
             config.multi_agent_v2.subagent_usage_hint_text = Some("Subagent guidance.".to_string());

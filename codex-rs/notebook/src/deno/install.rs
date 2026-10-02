@@ -25,6 +25,25 @@ const CHUNK_BYTES: usize = 64 * 1024;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(240);
 
+/// A read-only probe for startup warmup. No directories, install lock or staging are created.
+pub(super) async fn resolve_cached(home: &Path, asset: &Asset) -> Result<Option<PathBuf>, String> {
+    let home = match fs::canonicalize(home) {
+        Ok(home) => home,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let directory = home
+        .join("notebook")
+        .join("runtime")
+        .join(VERSION)
+        .join(asset.target);
+    if !directory.exists() {
+        return Ok(None);
+    }
+    let executable = directory.join(asset.executable);
+    Ok(cached(&executable, asset).await?.then_some(executable))
+}
+
 pub(super) async fn resolve(home: &Path, asset: &Asset) -> Result<PathBuf, String> {
     let directory = runtime_directory(home, asset)?;
     let _lock = lock(&directory).await?;

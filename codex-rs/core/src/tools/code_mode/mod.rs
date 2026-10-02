@@ -141,9 +141,32 @@ impl CodeModeService {
     }
 
     pub(crate) fn can_prewarm(&self) -> bool {
-        // Notebook startup can restore function source and run hooks. Only a captured,
-        // validated step may initialize it, never the capability-free startup warmup.
-        self.notebook_provider.is_none() && self.is_available()
+        self.is_available()
+    }
+
+    pub(crate) async fn prewarm(&self, turn: &TurnContext) -> Result<(), String> {
+        if self.shutdown_token.is_cancelled() {
+            return Ok(());
+        }
+        match &self.notebook_provider {
+            Some(provider) => {
+                // Launching even a bare executable is unrestricted execution. Require the same
+                // full-access local environment authority before resolving PATH or spawning it.
+                let Some(cwd) = &self.notebook_cwd else {
+                    return Ok(());
+                };
+                if turn.config.code_mode.runtime != codex_features::CodeModeRuntime::Notebook {
+                    return Ok(());
+                }
+                if let Err(error) = notebook::validate_prewarm_access(turn, cwd) {
+                    tracing::debug!(%error, "Notebook prewarm deferred until authorized access");
+                    return Ok(());
+                }
+                // Saved-code restoration still waits for a captured, validated step.
+                provider.prewarm().await
+            }
+            None => self.session().await.map(|_| ()),
+        }
     }
 
     pub(crate) fn take_unavailable_warning(&self, tool_mode: ToolMode) -> Option<String> {
@@ -274,8 +297,12 @@ impl CodeModeService {
 
     async fn shutdown_with_mode(&self, mode: ShutdownMode) -> Result<(), String> {
         self.shutdown_token.cancel();
+        let prewarm_cleanup = match &self.notebook_provider {
+            Some(provider) => provider.shutdown_prewarm().await,
+            None => Ok(()),
+        };
         // Join any initialization already in progress without initializing an unused service.
-        match self
+        let session_cleanup = match self
             .session
             .get_or_try_init(|| async {
                 Err::<Arc<dyn CodeModeSession>, String>(
@@ -289,7 +316,8 @@ impl CodeModeService {
                 ShutdownMode::WithoutCleanup => session.shutdown_without_cleanup().await,
             },
             Err(_) => Ok(()),
-        }
+        };
+        session_cleanup.and(prewarm_cleanup)
     }
 
     pub(crate) fn mark_cell_ready_for_dispatch(
@@ -660,7 +688,6 @@ mod tests {
                 session.services.executed_tool_calls.clone(),
             );
             let step = StepContext::for_test(Arc::new(turn));
-            assert!(!service.can_prewarm());
             let error = service
                 .control_notebook(codex_notebook::NotebookRequest::Reset, &step)
                 .await

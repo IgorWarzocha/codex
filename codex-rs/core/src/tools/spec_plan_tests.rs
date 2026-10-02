@@ -503,7 +503,7 @@ fn has_windows_shell_guidance(spec: &ToolSpec) -> bool {
     let ToolSpec::Function(tool) = spec else {
         return false;
     };
-    tool.description.contains("Windows safety rules:")
+    tool.description.contains("Windows safety:")
 }
 
 fn apply_patch_accepts_environment_id(spec: &ToolSpec) -> bool {
@@ -2513,15 +2513,13 @@ async fn request_plugin_install_description_requires_exhausting_tool_search() {
     else {
         panic!("expected request_plugin_install function spec");
     };
-    assert!(request_description.contains("only from <recommended_plugins>"));
-    assert!(
-        request_description.contains("specific unavailable plugin the user explicitly requested")
-    );
+    assert!(request_description.contains("from <recommended_plugins>"));
+    assert!(request_description.contains("explicit user-requested unavailable plugin"));
     assert!(request_description.contains("after exhausting tool search"));
     assert!(!request_description.contains("`tool_search`"));
-    assert!(request_description.contains("Do not call in parallel with other tools."));
     assert!(
-        request_description.contains("Not for adjacent capabilities or general recommendations.")
+        request_description
+            .contains("No adjacent capabilities, general recommendations, or parallel tool calls")
     );
     assert!(!request_description.contains("list_available_plugins_to_install"));
     assert!(!request_description.contains("github"));
@@ -2666,7 +2664,7 @@ async fn code_mode_config_updates_exec_description() {
             panic!("expected code mode exec tool");
         };
         assert!(exec.description.contains(&format!(
-            "defaults {expected_yield_time_ms} ms/10000 tokens."
+            "defaults {expected_yield_time_ms} ms/10000 tokens"
         )));
     }
 }
@@ -2857,6 +2855,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
         update_config(turn, |config| {
             config.multi_agent_v2.max_concurrent_threads_per_session = 17;
+            config.multi_agent_v2.wait_agent_enabled = true;
         });
     })
     .await;
@@ -2917,9 +2916,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
     assert!(!spawn_agent_description.contains("max_concurrent_threads_per_session"));
     assert_eq!(
         spawn_agent_properties["fork_turns"].description.as_deref(),
-        Some(
-            "History to inherit: all (default), none, or a positive integer string for recent turns"
-        )
+        Some("History: all (default), none, or positive integer string for recent turns")
     );
 
     let direct_model_only = probe(|turn| {
@@ -2978,14 +2975,8 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_can_disable_wait_agent() {
-    let plan = probe(|turn| {
-        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
-        update_config(turn, |config| {
-            config.multi_agent_v2.wait_agent_enabled = false;
-        });
-    })
-    .await;
+async fn multi_agent_v2_hides_wait_agent_by_default_and_allows_opt_in() {
+    let plan = probe(|_| {}).await;
 
     assert_eq!(
         plan.namespace_function_names(MULTI_AGENT_V2_NAMESPACE),
@@ -2998,8 +2989,25 @@ async fn multi_agent_v2_can_disable_wait_agent() {
         ]
     );
     plan.assert_visible_lacks(&["clock"]);
-    plan.assert_registered_lacks(&["collaboration.wait_agent", "clock.sleep"]);
+    let wait_agent_name = ToolName::namespaced(MULTI_AGENT_V2_NAMESPACE, "wait_agent").to_string();
+    plan.assert_registered_lacks(&[
+        wait_agent_name.as_str(),
+        ToolName::namespaced("clock", "sleep").to_string().as_str(),
+    ]);
     assert!(plan.can_manage_children);
+
+    let opted_in = probe(|turn| {
+        update_config(turn, |config| {
+            config.multi_agent_v2.wait_agent_enabled = true;
+        });
+    })
+    .await;
+    opted_in.assert_registered_contains(&[wait_agent_name.as_str()]);
+    assert!(
+        opted_in
+            .namespace_function_names(MULTI_AGENT_V2_NAMESPACE)
+            .contains(&"wait_agent".to_string())
+    );
 }
 
 #[tokio::test]
@@ -3061,7 +3069,7 @@ async fn v1_multi_agent_tools_defer_when_tool_search_available() {
     let ToolSpec::ToolSearch { description, .. } = plan.visible_spec("tool_search") else {
         panic!("expected visible tool_search spec");
     };
-    assert!(description.contains("- Multi-agent tools: Spawn and manage sub-agents."));
+    assert!(description.contains("- Multi-agent tools: Spawn and manage sub-agents"));
 }
 
 #[tokio::test]
@@ -3070,6 +3078,7 @@ async fn multi_agent_v2_can_use_configured_tool_namespace() {
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
         update_config(turn, |config| {
             config.multi_agent_v2.tool_namespace = Some("agents".to_string());
+            config.multi_agent_v2.wait_agent_enabled = true;
         });
     })
     .await;
@@ -3207,6 +3216,7 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
         update_config(turn, |config| {
             config.multi_agent_v2.non_code_mode_only = true;
             config.multi_agent_v2.tool_namespace = Some("agents".to_string());
+            config.multi_agent_v2.wait_agent_enabled = true;
         });
     })
     .await;

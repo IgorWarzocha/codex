@@ -20,15 +20,61 @@ fn sleep_tool_config_rejects_unknown_mode() {
 }
 
 #[test]
-fn under_development_features_are_disabled_by_default() {
+fn under_development_features_require_fork_approval_to_default_on() {
     for spec in crate::FEATURES {
         if matches!(spec.stage, Stage::UnderDevelopment) {
+            let approved = matches!(
+                spec.id,
+                Feature::ApplyPatchPreserveLineEndings
+                    | Feature::CodeModePrewarm
+                    | Feature::MultiAgentV2DynamicTools
+            );
             assert_eq!(
-                spec.default_enabled, false,
-                "feature `{}` is under development and must be disabled by default",
+                spec.default_enabled, approved,
+                "feature `{}` must follow the fork's approved development defaults",
                 spec.key
             );
         }
+    }
+}
+
+#[test]
+fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
+    let approved = [
+        Feature::ApplyPatchPreserveLineEndings,
+        Feature::CodeModePrewarm,
+        Feature::MultiAgentV2,
+        Feature::MultiAgentV2DynamicTools,
+    ];
+    let defaults = Features::from_sources(
+        FeatureConfigSource::default(),
+        FeatureConfigSource::default(),
+        FeatureOverrides::default(),
+    );
+    for feature in approved {
+        assert!(defaults.enabled(feature), "{}", feature.key());
+    }
+
+    let features_toml: FeaturesToml = toml::from_str(
+        r#"
+apply_patch_preserve_line_endings = false
+code_mode_prewarm = false
+multi_agent_v2_dynamic_tools = false
+[multi_agent_v2]
+enabled = false
+"#,
+    )
+    .expect("toolkit opt-outs should parse");
+    let overridden = Features::from_sources(
+        FeatureConfigSource {
+            features: Some(&features_toml),
+            ..Default::default()
+        },
+        FeatureConfigSource::default(),
+        FeatureOverrides::default(),
+    );
+    for feature in approved {
+        assert!(!overridden.enabled(feature), "{}", feature.key());
     }
 }
 
@@ -109,12 +155,18 @@ fn codex_apps_mcp_protocol_can_be_enabled_independently_of_generic_mcp() {
 }
 
 #[test]
-fn default_enabled_features_are_stable() {
+fn default_enabled_features_are_stable_or_fork_approved() {
     for spec in crate::FEATURES {
         if spec.default_enabled {
             assert!(
-                matches!(spec.stage, Stage::Stable | Stage::Removed),
-                "feature `{}` is enabled by default but is not stable/removed ({:?})",
+                matches!(spec.stage, Stage::Stable | Stage::Removed)
+                    || matches!(
+                        spec.id,
+                        Feature::ApplyPatchPreserveLineEndings
+                            | Feature::CodeModePrewarm
+                            | Feature::MultiAgentV2DynamicTools
+                    ),
+                "feature `{}` is enabled by default but is not stable or fork-approved ({:?})",
                 spec.key,
                 spec.stage
             );

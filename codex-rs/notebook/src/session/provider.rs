@@ -9,6 +9,7 @@ use std::time::Duration;
 use codex_code_mode_protocol::CodeModeSession;
 use codex_code_mode_protocol::CodeModeSessionProvider;
 use codex_code_mode_protocol::CodeModeSessionProviderFuture;
+use codex_notebook_kernel::Kernel;
 use codex_notebook_kernel::KernelOptions;
 use serde_json::json;
 use tokio::sync::Semaphore;
@@ -39,6 +40,8 @@ pub struct DenoNotebookSessionProvider {
     skip_profile_once: AtomicBool,
     session: Mutex<Weak<Session>>,
     creation_gate: Semaphore,
+    prewarmed_kernel: Mutex<Option<Kernel>>,
+    prewarm_cancellation: CancellationToken,
     startup_error: Mutex<Option<String>>,
 }
 
@@ -76,6 +79,8 @@ impl DenoNotebookSessionProvider {
             skip_profile_once: AtomicBool::new(false),
             session: Mutex::new(Weak::new()),
             creation_gate: Semaphore::new(1),
+            prewarmed_kernel: Mutex::new(None),
+            prewarm_cancellation: CancellationToken::new(),
             startup_error: Mutex::new(None),
         }
     }
@@ -148,6 +153,85 @@ impl DenoNotebookSessionProvider {
                 .map(|identity| identity.codex_home.as_path()),
         )
         .await
+    }
+
+    fn kernel_options(&self, deno: PathBuf) -> KernelOptions {
+        KernelOptions {
+            deno,
+            cwd: Some(self.cwd.clone()),
+            max_heap_mib: Some(self.max_heap_mib),
+            // Foreground observation deadlines yield, they do not kill the kernel.
+            execute_timeout: Duration::from_secs(24 * 60 * 60),
+            ..KernelOptions::default()
+        }
+    }
+
+    /// Warm only the process and Jupyter transport, not storage, saved imports or hooks.
+    /// The creation gate transfers this kernel to the first authorized session exactly once.
+    pub async fn prewarm(&self) -> Result<(), String> {
+        let _creation = tokio::select! {
+            biased;
+            _ = self.prewarm_cancellation.cancelled() => return Ok(()),
+            permit = self.creation_gate.acquire() => permit.map_err(|e| e.to_string())?,
+        };
+        if self
+            .prewarmed_kernel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+            || self
+                .session
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .upgrade()
+                .is_some()
+        {
+            return Ok(());
+        }
+        self.availability()?;
+        let Some(deno) = crate::deno::resolve_for_prewarm(
+            self.deno_program.as_deref(),
+            &self.cwd,
+            self.identity
+                .as_ref()
+                .map(|identity| identity.codex_home.as_path()),
+        )
+        .await?
+        else {
+            tracing::debug!("Notebook prewarm deferred until authorized Deno acquisition");
+            return Ok(());
+        };
+        let mut kernel =
+            Kernel::start_cancellable(self.kernel_options(deno), self.prewarm_cancellation.clone())
+                .await
+                .map_err(|e| e.to_string())?;
+        if self.prewarm_cancellation.is_cancelled() {
+            return kernel.shutdown().await.map_err(|e| e.to_string());
+        }
+        *self
+            .prewarmed_kernel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(kernel);
+        Ok(())
+    }
+
+    /// Cancel startup and reap an unused process without restoring or checkpointing it.
+    pub async fn shutdown_prewarm(&self) -> Result<(), String> {
+        self.prewarm_cancellation.cancel();
+        let _creation = self
+            .creation_gate
+            .acquire()
+            .await
+            .map_err(|e| e.to_string())?;
+        let kernel = self
+            .prewarmed_kernel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(mut kernel) = kernel {
+            kernel.shutdown().await.map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     pub async fn control(&self, request: NotebookRequest) -> Result<NotebookControlResult, String> {
@@ -313,14 +397,7 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
                 }
             }
             self.availability()?;
-            let options = KernelOptions {
-                deno: self.resolved_deno().await?,
-                cwd: Some(self.cwd.clone()),
-                max_heap_mib: Some(self.max_heap_mib),
-                // Foreground observation deadlines yield, they do not kill the kernel.
-                execute_timeout: Duration::from_secs(24 * 60 * 60),
-                ..KernelOptions::default()
-            };
+            let options = self.kernel_options(self.resolved_deno().await?);
             let identity = self.identity.as_ref().filter(|_| !self.ephemeral);
             let budget = self.persistence_budget();
             let default_profile = self
@@ -372,8 +449,14 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
                     "__CREDENTIAL__",
                     &serde_json::to_string(&bridge.credential).map_err(|e| e.to_string())?,
                 );
+            let prewarmed_kernel = self
+                .prewarmed_kernel
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             let lifecycle = match Lifecycle::start(
                 options,
+                prewarmed_kernel,
                 bootstrap,
                 store,
                 default_profile,
@@ -422,3 +505,7 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
 #[cfg(test)]
 #[path = "heap_tests.rs"]
 mod heap_tests;
+
+#[cfg(test)]
+#[path = "prewarm_tests.rs"]
+mod prewarm_tests;

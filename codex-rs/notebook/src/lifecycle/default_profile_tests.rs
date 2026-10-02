@@ -112,7 +112,7 @@ async fn start(
         .replace("__PLAIN_COMMAND_OUTPUT__", "false")
         .replace("__ENDPOINT__", "\"http://127.0.0.1:1\"")
         .replace("__CREDENTIAL__", "\"test\"");
-    Lifecycle::start(options, bootstrap, store, profile, false).await
+    Lifecycle::start(options, None, bootstrap, store, profile, false).await
 }
 
 async fn execute(lifecycle: &mut Lifecycle, source: &str) {

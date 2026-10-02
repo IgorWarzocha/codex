@@ -12141,6 +12141,41 @@ smart_approvals = true
 }
 
 #[tokio::test]
+async fn approved_toolkit_defaults_and_explicit_overrides() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    for explicit_overrides in [false, true] {
+        if explicit_overrides {
+            std::fs::write(
+                codex_home.path().join(CONFIG_TOML_FILE),
+                r#"[features]
+apply_patch_preserve_line_endings = false
+code_mode_prewarm = false
+multi_agent_v2_dynamic_tools = false
+[features.multi_agent_v2]
+enabled = false
+wait_agent_enabled = true
+"#,
+            )?;
+        }
+        let config = ConfigBuilder::without_managed_config_for_tests()
+            .codex_home(codex_home.path().to_path_buf())
+            .fallback_cwd(Some(codex_home.path().to_path_buf()))
+            .build()
+            .await?;
+        for feature in [
+            Feature::ApplyPatchPreserveLineEndings,
+            Feature::CodeModePrewarm,
+            Feature::MultiAgentV2,
+            Feature::MultiAgentV2DynamicTools,
+        ] {
+            assert_eq!(config.features.enabled(feature), !explicit_overrides);
+        }
+        assert_eq!(config.multi_agent_v2.wait_agent_enabled, explicit_overrides);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn multi_agent_v2_config_from_feature_table() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     std::fs::write(
@@ -12268,7 +12303,7 @@ max_concurrent_threads_per_session = 17
     let config = resolve_multi_agent_v2_config(&config_toml);
     let concurrency_guidance = "Active-agent limit, including you: 17";
     let messages = ResolvedModelMessages::bundled().multi_agent();
-    assert!(config.wait_agent_enabled);
+    assert!(!config.wait_agent_enabled);
     for wait_agent_enabled in [true, false] {
         let mut config = config.clone();
         config.wait_agent_enabled = wait_agent_enabled;
@@ -12278,10 +12313,7 @@ max_concurrent_threads_per_session = 17
         for hint in [usage_hints.root, usage_hints.subagent] {
             let hint = hint.expect("default usage hints should be present").body();
             assert!(hint.contains(concurrency_guidance));
-            assert_eq!(
-                hint.contains("`wait_agent`: waits of minutes preferred over busy polling"),
-                wait_agent_enabled
-            );
+            assert_eq!(hint.contains("wait_agent"), wait_agent_enabled);
         }
     }
 

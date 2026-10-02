@@ -4177,7 +4177,8 @@ async fn resume_agent_releases_slot_after_resume_failure() {
 
 #[tokio::test]
 async fn spawn_child_completion_notifies_parent_history() {
-    let harness = AgentControlHarness::new().await;
+    let mut harness = AgentControlHarness::new().await;
+    let _ = harness.config.features.disable(Feature::MultiAgentV2);
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
     let child_thread_id = harness
@@ -4901,7 +4902,8 @@ async fn resume_agent_from_paginated_rollout_loads_model_context() {
 
 #[tokio::test]
 async fn list_agent_subtree_thread_ids_includes_anonymous_and_closed_descendants() {
-    let harness = AgentControlHarness::new().await;
+    let mut harness = AgentControlHarness::new().await;
+    let _ = harness.config.features.disable(Feature::MultiAgentV2);
     let (parent_thread_id, _parent_thread) = harness.start_thread().await;
     let worker_path = AgentPath::root().join("worker").expect("worker path");
     let reviewer_path = AgentPath::root().join("reviewer").expect("reviewer path");
@@ -5358,7 +5360,8 @@ async fn resume_agent_from_rollout_does_not_reopen_closed_descendants() {
 
 #[tokio::test]
 async fn resume_closed_child_reopens_open_descendants() {
-    let harness = AgentControlHarness::new().await;
+    let mut harness = AgentControlHarness::new().await;
+    let _ = harness.config.features.disable(Feature::MultiAgentV2);
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
     let child_thread_id = harness
@@ -5455,7 +5458,8 @@ async fn resume_closed_child_reopens_open_descendants() {
 
 #[tokio::test]
 async fn resume_agent_from_rollout_reopens_open_descendants_after_manager_shutdown() {
-    let harness = AgentControlHarness::new().await;
+    let mut harness = AgentControlHarness::new().await;
+    let _ = harness.config.features.disable(Feature::MultiAgentV2);
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
     let child_thread_id = harness
@@ -5546,7 +5550,8 @@ async fn resume_agent_from_rollout_reopens_open_descendants_after_manager_shutdo
 
 #[tokio::test]
 async fn resume_agent_from_rollout_uses_edge_data_when_descendant_metadata_source_is_stale() {
-    let harness = AgentControlHarness::new().await;
+    let mut harness = AgentControlHarness::new().await;
+    let _ = harness.config.features.disable(Feature::MultiAgentV2);
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
     let child_thread_id = harness

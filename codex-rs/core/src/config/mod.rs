@@ -1385,7 +1385,7 @@ impl MultiAgentV2Config {
             tool_namespace: Some(DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE.to_string()),
             hide_spawn_agent_metadata: true,
             expose_spawn_agent_model_overrides: true,
-            wait_agent_enabled: true,
+            wait_agent_enabled: false,
             disable_direct_message: false,
             message_board_in_memory: false,
             message_board_remote: None,

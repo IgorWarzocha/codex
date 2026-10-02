@@ -42,6 +42,20 @@ pub(crate) async fn resolve(
     }
 }
 
+/// Startup warmup only reads existing runtimes. Installation remains authorized-use only.
+pub(crate) async fn resolve_for_prewarm(
+    configured: Option<&Path>,
+    cwd: &Path,
+    codex_home: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    match select(configured, cwd, codex_home, std::env::var_os("PATH"))? {
+        Selection::Existing(path) => Ok(Some(path)),
+        Selection::Managed => {
+            install::resolve_cached(codex_home.ok_or_else(missing_home)?, assets::current()?).await
+        }
+    }
+}
+
 fn select(
     configured: Option<&Path>,
     cwd: &Path,
