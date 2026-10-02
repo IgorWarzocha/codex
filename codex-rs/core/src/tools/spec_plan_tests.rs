@@ -2223,8 +2223,10 @@ async fn code_mode_uses_the_first_normalized_tool_identity() {
             panic!("expected code mode exec tool");
         };
         assert!(!exec.description.contains("lookup dynamic tool"));
+        assert!(!exec.description.contains("lookup test tool"));
         assert_eq!(
-            exec.description.contains("lookup test tool"),
+            exec.description
+                .contains("- tools.normalized_alias__lookup(args: "),
             code_mode_only && winner_exposure == ToolExposure::Direct,
         );
     }
@@ -2509,11 +2511,16 @@ async fn request_plugin_install_description_requires_exhausting_tool_search() {
     else {
         panic!("expected request_plugin_install function spec");
     };
-    assert!(request_description.contains("listed in `<recommended_plugins>`"));
-    assert!(request_description.contains("explicitly asks to use a specific plugin"));
-    assert!(request_description.contains("Tool search has already been exhausted"));
+    assert!(request_description.contains("only from <recommended_plugins>"));
+    assert!(
+        request_description.contains("specific unavailable plugin the user explicitly requested")
+    );
+    assert!(request_description.contains("after exhausting tool search"));
     assert!(!request_description.contains("`tool_search`"));
-    assert!(request_description.contains("DO NOT call this tool in parallel with other tools"));
+    assert!(request_description.contains("Do not call in parallel with other tools."));
+    assert!(
+        request_description.contains("Not for adjacent capabilities or general recommendations.")
+    );
     assert!(!request_description.contains("list_available_plugins_to_install"));
     assert!(!request_description.contains("github"));
     assert!(has_parameter(request_spec, "plugin_id"));
@@ -2619,10 +2626,9 @@ async fn code_mode_config_updates_exec_description() {
         let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
             panic!("expected code mode exec tool");
         };
-        assert!(
-            exec.description
-                .contains(&format!("Defaults to {expected_yield_time_ms} ms."))
-        );
+        assert!(exec.description.contains(&format!(
+            "defaults {expected_yield_time_ms} ms/10000 tokens."
+        )));
     }
 }
 
@@ -2870,9 +2876,12 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
     }
     let spawn_agent_description = spawn_agent.description.as_str();
     assert!(!spawn_agent_description.contains("max_concurrent_threads_per_session"));
-    assert!(spawn_agent_description.contains(
-        "Note that passing `fork_turns=\"none\"` will not pass any surrounding context to the spawned subagent"
-    ));
+    assert_eq!(
+        spawn_agent_properties["fork_turns"].description.as_deref(),
+        Some(
+            "History to inherit: all (default), none, or a positive integer string for recent turns"
+        )
+    );
 
     let direct_model_only = probe(|turn| {
         set_features(

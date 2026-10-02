@@ -74,6 +74,7 @@ struct SyntheticFileSystem {
     alias_root: PathUri,
     canonical_root: PathUri,
     has_plugin_manifest: bool,
+    reference: Option<&'static str>,
 }
 
 impl SyntheticFileSystem {
@@ -94,6 +95,8 @@ impl SyntheticFileSystem {
     async fn read_file(&self, path: &PathUri) -> io::Result<Vec<u8>> {
         if path == &self.path("skill/SKILL.md")? {
             Ok(SKILL_CONTENTS.as_bytes().to_vec())
+        } else if path == &self.path("skill/references/a.md")? && self.reference.is_some() {
+            Ok(self.reference.unwrap_or_default().as_bytes().to_vec())
         } else if self.has_plugin_manifest && path == &self.path(".claude-plugin/plugin.json")? {
             Ok(PLUGIN_MANIFEST.as_bytes().to_vec())
         } else {
@@ -109,8 +112,22 @@ impl SyntheticFileSystem {
                 is_file: false,
             }])
         } else if path == &self.path("skill")? {
-            Ok(vec![ReadDirectoryEntry {
+            let mut entries = vec![ReadDirectoryEntry {
                 file_name: "SKILL.md".to_string(),
+                is_directory: false,
+                is_file: true,
+            }];
+            if self.reference.is_some() {
+                entries.push(ReadDirectoryEntry {
+                    file_name: "references".to_string(),
+                    is_directory: true,
+                    is_file: false,
+                });
+            }
+            Ok(entries)
+        } else if path == &self.path("skill/references")? && self.reference.is_some() {
+            Ok(vec![ReadDirectoryEntry {
+                file_name: "a.md".to_string(),
                 is_directory: false,
                 is_file: true,
             }])
@@ -123,9 +140,15 @@ impl SyntheticFileSystem {
         let skill_dir = self.path("skill")?;
         let skill_path = self.path("skill/SKILL.md")?;
         let manifest_path = self.path(".claude-plugin/plugin.json")?;
-        let (is_directory, is_file) = if path == &self.canonical_root || path == &skill_dir {
+        let (is_directory, is_file) = if path == &self.canonical_root
+            || path == &skill_dir
+            || self.reference.is_some() && path == &self.path("skill/references")?
+        {
             (true, false)
-        } else if path == &skill_path || self.has_plugin_manifest && path == &manifest_path {
+        } else if path == &skill_path
+            || self.has_plugin_manifest && path == &manifest_path
+            || self.reference.is_some() && path == &self.path("skill/references/a.md")?
+        {
             (false, true)
         } else {
             return Err(io::Error::new(io::ErrorKind::NotFound, "not found"));
@@ -161,14 +184,14 @@ impl ExecutorFileSystem for SyntheticFileSystem {
 
     fn read_file_stream<'a>(
         &'a self,
-        _path: &'a PathUri,
+        path: &'a PathUri,
         _sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> ExecutorFileSystemFuture<'a, FileSystemReadStream> {
-        Box::pin(async {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "synthetic filesystem does not support streaming reads",
-            ))
+        Box::pin(async move {
+            let bytes = self.read_file(path).await?;
+            Ok(FileSystemReadStream::new(futures::stream::once(
+                async move { Ok(bytes.into()) },
+            )))
         })
     }
 
@@ -293,6 +316,7 @@ async fn skill_loading_and_reads_use_the_supplied_executor_file_system() {
                 alias_root: PathUri::from_abs_path(&alias_root),
                 canonical_root: PathUri::from_abs_path(&canonical_root),
                 has_plugin_manifest: false,
+                reference: None,
             })),
         )
         .await;
@@ -310,6 +334,167 @@ async fn skill_loading_and_reads_use_the_supplied_executor_file_system() {
         snapshot.read_skill_text(&skill).await.expect("skill body"),
         SKILL_CONTENTS
     );
+}
+
+#[tokio::test]
+async fn progressive_reads_disambiguate_identical_paths_in_two_environments()
+-> Result<(), Box<dyn std::error::Error>> {
+    use codex_extension_api::ConversationHistory;
+    use codex_extension_api::ExtensionData;
+    use codex_extension_api::ExtensionRegistryBuilder;
+    use codex_extension_api::NoopTurnItemEmitter;
+    use codex_extension_api::ThreadStartInput;
+    use codex_extension_api::ToolCall;
+    use codex_extension_api::ToolCallSource;
+    use codex_extension_api::ToolEnvironment;
+    use codex_extension_api::ToolPayload;
+    use codex_protocol::protocol::SessionSource;
+    use codex_protocol::protocol::TruncationPolicy;
+    use codex_skills_extension::SkillProviders;
+    use codex_skills_extension::SkillsExtensionConfig;
+    use codex_skills_extension::install_with_providers;
+    use codex_skills_extension::provider::SkillProviderFuture;
+    use codex_skills_extension::provider::SkillSearchRequest;
+
+    struct Provider {
+        catalog: SkillCatalog,
+        native: ExecutorSkillProvider,
+    }
+    impl SkillProvider for Provider {
+        fn list(&self, _: SkillListQuery) -> SkillProviderFuture<'_, SkillCatalog> {
+            Box::pin(async { Ok(self.catalog.clone()) })
+        }
+        fn read<'a>(
+            &'a self,
+            request: SkillReadRequest<'a>,
+        ) -> SkillProviderFuture<'a, codex_skills_extension::catalog::SkillReadResult> {
+            self.native.read(request)
+        }
+        fn search(
+            &self,
+            request: SkillSearchRequest,
+        ) -> SkillProviderFuture<'_, codex_skills_extension::catalog::SkillSearchResult> {
+            self.native.search(request)
+        }
+    }
+    let root = PathUri::parse("file:///skills")?;
+    let fs_a: Arc<dyn ExecutorFileSystem> = Arc::new(SyntheticFileSystem {
+        alias_root: root.clone(),
+        canonical_root: root.clone(),
+        has_plugin_manifest: false,
+        reference: Some("A_REFERENCE"),
+    });
+    let fs_b: Arc<dyn ExecutorFileSystem> = Arc::new(SyntheticFileSystem {
+        alias_root: root.clone(),
+        canonical_root: root.clone(),
+        has_plugin_manifest: false,
+        reference: Some("B_REFERENCE"),
+    });
+    let access_a = FileSystemEnvironmentAccessor::unrestricted(&fs_a);
+    let access_b = FileSystemEnvironmentAccessor::unrestricted(&fs_b);
+    let main = root.join("skill/SKILL.md")?;
+    let entries = ["a", "b"].map(|id| {
+        SkillCatalogEntry::new(
+            SkillPackageId(format!("skill://{id}/skills/skill")),
+            SkillAuthority::new(SkillSourceKind::Executor, id),
+            "synthetic",
+            "Synthetic",
+            SkillResourceId::environment(
+                format!("skill://{id}/skills/skill/SKILL.md"),
+                id,
+                main.clone(),
+            ),
+        )
+    });
+    let mut builder = ExtensionRegistryBuilder::<bool>::new();
+    install_with_providers(
+        &mut builder,
+        SkillProviders::new().with_executor_provider(Arc::new(Provider {
+            catalog: SkillCatalog {
+                entries: entries.to_vec(),
+                warnings: vec![],
+            },
+            native: ExecutorSkillProvider::new_with_restriction_product(
+                Arc::new(EnvironmentManager::default_for_tests()),
+                None,
+            ),
+        })),
+        |_| SkillsExtensionConfig {
+            include_instructions: true,
+            max_context_tokens: None,
+            bundled_skills_enabled: false,
+            cloud_skill_enabled: false,
+            shadow_selection_enabled: false,
+        },
+    );
+    let registry = builder.build();
+    let session = ExtensionData::new("session");
+    let thread = ExtensionData::new("thread");
+    registry.thread_lifecycle_contributors()[0]
+        .on_thread_start(ThreadStartInput {
+            config: &false,
+            session_source: &SessionSource::Cli,
+            persistent_thread_state_available: true,
+            environments: &[],
+            mcp_resource_client: None,
+            extension_metrics: None,
+            session_store: &session,
+            thread_store: &thread,
+        })
+        .await;
+    let step = ExtensionData::new("step");
+    let manager = EnvironmentManager::default_for_tests();
+    step.insert(
+        manager
+            .resolve_selected_capability_roots(
+                &[SelectedCapabilityRoot {
+                    id: "fixture".to_string(),
+                    location: CapabilityRootLocation::Environment {
+                        environment_id: "local".to_string(),
+                        path: root.clone(),
+                    },
+                }],
+                &Default::default(),
+            )
+            .await,
+    );
+    let tools = registry.tool_contributors()[0].tools_for_step(&session, &thread, &step);
+    let call = |command: &str| ToolCall {
+        turn_id: "turn".to_string(),
+        call_id: "call".to_string(),
+        tool_name: tools[0].tool_name(),
+        model: "test".to_string(),
+        codex_turn_metadata: None,
+        truncation_policy: TruncationPolicy::Bytes(128 * 1024),
+        source: ToolCallSource::Direct,
+        conversation_history: ConversationHistory::default(),
+        turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+        environments: vec![
+            ToolEnvironment::new("a".to_string(), root.clone(), &access_a),
+            ToolEnvironment::new("b".to_string(), root.clone(), &access_b),
+        ],
+        payload: ToolPayload::Custom {
+            input: command.to_string(),
+        },
+    };
+    let inventory = tools[0]
+        .handle(call("read skill://b/skills/skill"))
+        .await?
+        .log_output();
+    assert!(inventory.contains("skill://b/skills/skill/references/a.md"));
+    assert!(inventory.contains("Skill root (b): /skills/skill"));
+    let reference = tools[0]
+        .handle(call(
+            "read skill://b/skills/skill skill://b/skills/skill/references/a.md",
+        ))
+        .await?
+        .log_output();
+    assert!(reference.starts_with("B_REFERENCE"));
+    assert!(!reference.contains("A_REFERENCE"));
+    assert!(
+        matches!(tools[0].handle(call("read skill://b/skills/skill /skills/skill/references/a.md")).await, Err(codex_extension_api::FunctionCallError::RespondToModel(message)) if message.contains("Ambiguous source path") && message.contains("skill://a/") && message.contains("skill://b/"))
+    );
+    Ok(())
 }
 
 /// Restricted skill reads must fail closed when the Windows executor has no sandbox selected.

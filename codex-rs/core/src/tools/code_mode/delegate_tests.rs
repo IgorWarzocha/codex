@@ -130,6 +130,7 @@ async fn detached_code_mode_callback_keeps_thread_id_on_dispatch_span() -> anyho
     let delegate = CodeModeCellDelegate {
         broker: Arc::clone(&broker),
         step_context: Arc::clone(&step),
+        outer_call_id: "outer-audit-call".to_string(),
     };
     let _worker = broker.start_turn_worker(
         Arc::new(session),
@@ -186,6 +187,7 @@ async fn dropped_tool_callbacks_release_the_origin_before_dispatch() {
     let delegate = CodeModeCellDelegate {
         broker: Arc::clone(&broker),
         step_context: StepContext::for_test(Arc::clone(&turn)),
+        outer_call_id: "outer-queued-call".to_string(),
     };
     let origin = Arc::downgrade(&delegate.step_context);
     let cell_id = CellId::new("queued-cell".to_string());

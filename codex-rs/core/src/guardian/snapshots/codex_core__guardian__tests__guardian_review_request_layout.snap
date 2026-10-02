@@ -6,8 +6,8 @@ Scenario: Guardian review request layout
 
 ## Window 1
 -- request 1 (request; Guardian Review Request) --
-00:additional_tools/developer (1; hash=ae2f2f1f9dcd0cd9):
-        - namespace/functions; hash=fd8638eaf7cabb95
+00:additional_tools/developer (1; hash=b2e0268bd8a06979):
+        - namespace/functions; hash=a696d2dfef1364d5
           - custom/exec
           - function/wait
 01:message/developer:

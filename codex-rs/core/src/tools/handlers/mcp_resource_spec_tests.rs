@@ -9,25 +9,28 @@ fn list_mcp_resources_tool_matches_expected_spec() {
         create_list_mcp_resources_tool(/*messages*/ None),
         ToolSpec::Function(ResponsesApiTool {
             name: "list_mcp_resources".to_string(),
-            description: "Lists resources provided by MCP servers. Resources allow servers to share data that provides context to language models, such as files, database schemas, or application-specific information. Prefer resources over web search when possible.".to_string(),
+            description: "List MCP context resources. Prefer available resources over web search"
+                .to_string(),
             strict: false,
             defer_loading: None,
-            parameters: JsonSchema::object(BTreeMap::from([
+            parameters: JsonSchema::object(
+                BTreeMap::from([
                     (
                         "server".to_string(),
                         JsonSchema::string(Some(
-                                "MCP server name. Omit to list resources from every configured server."
-                                    .to_string(),
-                            ),),
+                            "Server name, defaults to all configured servers".to_string(),
+                        ),),
                     ),
                     (
                         "cursor".to_string(),
                         JsonSchema::string(Some(
-                                "Opaque cursor from a previous list_mcp_resources call; omit for the first page."
-                                    .to_string(),
-                            ),),
+                            "Cursor from the previous resource page".to_string(),
+                        ),),
                     ),
-                ]), /*required*/ None, Some(false.into())),
+                ]),
+                /*required*/ None,
+                Some(false.into())
+            ),
             output_schema: None,
         })
     );
@@ -39,21 +42,21 @@ fn list_mcp_resource_templates_tool_matches_expected_spec() {
         create_list_mcp_resource_templates_tool(/*messages*/ None),
         ToolSpec::Function(ResponsesApiTool {
             name: "list_mcp_resource_templates".to_string(),
-            description: "Lists resource templates provided by MCP servers. Parameterized resource templates allow servers to share data that takes parameters and provides context to language models, such as files, database schemas, or application-specific information. Prefer resource templates over web search when possible.".to_string(),
+            description: "List parameterized MCP context resources. Prefer available templates over web search".to_string(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(BTreeMap::from([
                     (
                         "server".to_string(),
                         JsonSchema::string(Some(
-                                "MCP server name. Omit to list resource templates from every configured server."
+                                "Server name, defaults to all configured servers"
                                     .to_string(),
                             ),),
                     ),
                     (
                         "cursor".to_string(),
                         JsonSchema::string(Some(
-                                "Opaque cursor from a previous list_mcp_resource_templates call; omit for the first page."
+                                "Cursor from the previous template page"
                                     .to_string(),
                             ),),
                     ),
@@ -69,27 +72,25 @@ fn read_mcp_resource_tool_matches_expected_spec() {
         create_read_mcp_resource_tool(/*messages*/ None),
         ToolSpec::Function(ResponsesApiTool {
             name: "read_mcp_resource".to_string(),
-            description:
-                "Read a specific resource from an MCP server given the server name and resource URI."
-                    .to_string(),
+            description: "Read an MCP context resource".to_string(),
             strict: false,
             defer_loading: None,
-            parameters: JsonSchema::object(BTreeMap::from([
+            parameters: JsonSchema::object(
+                BTreeMap::from([
                     (
                         "server".to_string(),
                         JsonSchema::string(Some(
-                                "MCP server name exactly as configured. Must match the 'server' field returned by list_mcp_resources."
-                                    .to_string(),
-                            ),),
+                            "Exact server value from list_mcp_resources".to_string(),
+                        ),),
                     ),
                     (
                         "uri".to_string(),
-                        JsonSchema::string(Some(
-                                "Resource URI to read. Must be one of the URIs returned by list_mcp_resources."
-                                    .to_string(),
-                            ),),
+                        JsonSchema::string(Some("URI returned by list_mcp_resources".to_string(),),),
                     ),
-                ]), Some(vec!["server".to_string(), "uri".to_string()]), Some(false.into())),
+                ]),
+                Some(vec!["server".to_string(), "uri".to_string()]),
+                Some(false.into())
+            ),
             output_schema: None,
         })
     );

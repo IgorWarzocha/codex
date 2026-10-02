@@ -39,7 +39,6 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::CodeModeToolMessages;
-use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ToolMessage;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::EnvironmentConfigState;
@@ -773,13 +772,12 @@ async fn astra_omits_disabled_executor_and_plugin_skills_from_model_context() ->
         &server,
         vec![
             sse(vec![
-                ev_function_call_with_namespace(
-                    "list-skills",
-                    "skills",
-                    "list",
-                    r#"{"authority":{"kind":"executor"}}"#,
-                ),
+                ev_custom_tool_call("list-skills", "skills", "list"),
                 ev_completed("first-step"),
+            ]),
+            sse(vec![
+                ev_custom_tool_call("next-skills", "skills", "list"),
+                ev_completed("second-step"),
             ]),
             sse(vec![
                 ev_assistant_message("skills", "The next-helper skill is available."),
@@ -865,18 +863,17 @@ async fn astra_omits_disabled_executor_and_plugin_skills_from_model_context() ->
     wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    let first_step_tool = requests[1]
-        .function_call_output_text("list-skills")
-        .expect("first step's skills.list output");
+    assert_eq!(requests.len(), 3);
+    let first_output = requests[1].custom_tool_call_output("list-skills");
+    let first_step_tool = first_output["output"]
+        .as_str()
+        .expect("first step's skills output");
     assert!(first_step_tool.contains("active-helper"));
     assert!(!first_step_tool.contains("next-helper"));
-    let developer_texts = requests[1].message_input_texts("developer");
-    let latest_skills = developer_texts
-        .iter()
-        .rev()
-        .find(|text| text.contains("## Skills"))
-        .expect("second step's skills section");
+    let next_output = requests[2].custom_tool_call_output("next-skills");
+    let latest_skills = next_output["output"]
+        .as_str()
+        .expect("second step's skills output");
     assert!(latest_skills.contains("next-helper"));
     assert!(!latest_skills.contains("active-helper"));
     let mut bodies = requests
@@ -889,15 +886,6 @@ async fn astra_omits_disabled_executor_and_plugin_skills_from_model_context() ->
         assert!(!input.contains("disabled-plugin-helper"));
         // Normalize opaque skill locators before snapshot truncation and hashing.
         body["input"] = serde_json::from_str(&input.replace(&skill_files, "<SKILLS_ROOT>/"))?;
-        // Cargo and Bazel can serialize the JSON inside the tool output in different key orders.
-        for item in body["input"].as_array_mut().expect("request input") {
-            if item["type"] == "function_call_output" && item["call_id"] == "list-skills" {
-                let mut output: serde_json::Value =
-                    serde_json::from_str(item["output"].as_str().expect("skills.list output"))?;
-                output.sort_all_objects();
-                item["output"] = output.to_string().into();
-            }
-        }
     }
     let entries = bodies.iter().map(SnapshotEntry::body).collect::<Vec<_>>();
     insta::assert_snapshot!(

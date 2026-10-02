@@ -1382,3 +1382,7 @@ fn user_message_positions(items: &[ResponseItemEnvelope]) -> Vec<usize> {
 #[cfg(test)]
 #[path = "history_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "exec_relay_tests.rs"]
+mod exec_relay_tests;

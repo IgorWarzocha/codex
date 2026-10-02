@@ -452,13 +452,11 @@ fn normalize_json(value: &mut Value, normalize: &mut impl FnMut(&str) -> String)
 // Shell guidance and its yield-time wording intentionally differ on Windows. Compare all other
 // tool schema fields, while keeping the context snapshots identical across operating systems.
 pub(super) fn portable_tool_schema(tool: &Value) -> Value {
-    const BASE: &str =
-        "Runs a command in a PTY, returning output or a session ID for ongoing interaction.";
+    const BASE: &str = "Run a shell command. Returns output and a session ID while running.";
     // Exact current Windows-only suffix. A change to its wording must be reviewed explicitly.
     const WINDOWS_SAFETY_SUFFIX_HASH: u64 = 0x6de3_23e4_7060_6128;
-    const UNIX_WAIT: &str =
-        "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms.";
-    const WINDOWS_WAIT: &str = "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms.";
+    const UNIX_WAIT: &str = "Wait before yielding, default 10000 ms, range 250-30000 ms";
+    const WINDOWS_WAIT: &str = "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately";
     let mut stable = tool.clone();
     if let Some(Value::Array(members)) = stable.get_mut("tools") {
         for member in members {
@@ -472,28 +470,7 @@ pub(super) fn portable_tool_schema(tool: &Value) -> Value {
     } else {
         &mut stable
     };
-    if definition.get("name").and_then(Value::as_str) == Some("exec") {
-        if let Some(Value::String(description)) = definition.get_mut("description") {
-            // Code mode embeds the exec_command description and its TypeScript declaration
-            // inside the exec tool. Apply the same narrow platform normalization there.
-            if let Some((start, section)) = description.split_once("### `exec_command`\n")
-                && let Some(rest) = section.strip_prefix(BASE)
-                && let Some((suffix, _)) = rest.split_once("\n\nexec tool declaration:")
-                && suffix.starts_with("\n\nWindows safety rules:")
-                && fnv1a(normalize_line_endings(suffix).as_bytes()) == WINDOWS_SAFETY_SUFFIX_HASH
-            {
-                *description =
-                    format!("{start}### `exec_command`\n{BASE}{}", &rest[suffix.len()..]);
-            }
-            for platform_wait in [UNIX_WAIT, WINDOWS_WAIT] {
-                *description = description.replace(
-                    &format!("  // {platform_wait}"),
-                    "  // <PLATFORM_WAIT_GUIDANCE>",
-                );
-            }
-        }
-        return stable;
-    }
+    // Compact exec inventories contain signatures, not platform-specific tool prose.
     if definition.get("name").and_then(Value::as_str) != Some("exec_command") {
         return stable;
     }

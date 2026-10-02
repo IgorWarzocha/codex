@@ -1632,6 +1632,17 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
     let function_calls = gather_ids(items, "function_call");
     let tool_search_calls = gather_ids(items, "tool_search_call");
     let custom_tool_calls = gather_ids(items, "custom_tool_call");
+    let exec_calls = items
+        .iter()
+        .filter(|item| item["type"] == "custom_tool_call" && item["name"] == "exec")
+        .filter(|item| {
+            matches!(
+                item.get("namespace").and_then(Value::as_str),
+                None | Some("") | Some(codex_protocol::DEFAULT_FUNCTION_NAMESPACE)
+            )
+        })
+        .filter_map(get_call_id)
+        .collect::<HashSet<_>>();
     let local_shell_calls = gather_ids(items, "local_shell_call");
     let function_call_outputs = gather_output_ids(
         items,
@@ -1645,9 +1656,23 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
         "orphan custom_tool_call_output with empty call_id should be dropped",
     );
 
-    for cid in &function_call_outputs {
+    for item in items
+        .iter()
+        .filter(|item| item["type"] == "function_call_output")
+    {
+        let Some(cid) = get_call_id(item) else {
+            continue;
+        };
+        // Live Responses accepts encrypted nested results under an outer custom
+        // exec ID, but not arbitrary function outputs paired with custom calls.
+        let encrypted_exec_relay = exec_calls.contains(cid)
+            && item["output"].as_array().is_some_and(|content| {
+                content
+                    .iter()
+                    .any(|item| item["type"] == "encrypted_content")
+            });
         assert!(
-            function_calls.contains(cid) || local_shell_calls.contains(cid),
+            function_calls.contains(cid) || local_shell_calls.contains(cid) || encrypted_exec_relay,
             "function_call_output without matching call in input: {cid}",
         );
     }

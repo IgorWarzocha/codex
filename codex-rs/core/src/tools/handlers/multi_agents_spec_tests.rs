@@ -35,8 +35,8 @@ fn spawn_agent_tool_v2_requires_task_name() {
         .properties
         .as_ref()
         .expect("spawn_agent should use object params");
-    assert!(description.contains("Spawns an agent to work on the specified task."));
-    assert!(description.contains("The spawned agent will have the same tools as you"));
+    assert!(description.contains("Spawn an agent for the task."));
+    assert!(description.contains("Agents have your tools"));
     assert!(!description.contains("max_concurrent_threads_per_session"));
     assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
     assert!(properties.contains_key("task_name"));
@@ -60,7 +60,7 @@ fn spawn_agent_tool_v2_requires_task_name() {
         properties
             .get("reasoning_effort")
             .and_then(|schema| schema.description.as_deref()),
-        Some("Reasoning effort override for the new agent. Omit to inherit the parent effort.")
+        Some("Reasoning effort override, defaults to parent effort")
     );
     assert!(!properties.contains_key("service_tier"));
     assert_eq!(
@@ -105,7 +105,7 @@ fn spawn_agent_catalog_description_preserves_generated_context() {
     assert!(
         !configured_tool
             .description
-            .contains("Spawns an agent to work on the specified task.")
+            .contains("Spawn an agent for the task.")
     );
     configured_tool.description = default_tool.description.clone();
     assert_eq!(configured_tool, default_tool);
@@ -271,7 +271,7 @@ fn send_message_tool_requires_message_and_has_no_output_schema() {
         properties
             .get("target")
             .and_then(|schema| schema.description.as_deref()),
-        Some("Relative or canonical task name to message (from spawn_agent).")
+        Some("Relative or canonical task name from spawn_agent")
     );
     assert_eq!(
         parameters.required.as_ref(),
@@ -295,7 +295,7 @@ fn followup_task_tool_requires_message_and_has_no_output_schema() {
     assert_eq!(name, "followup_task");
     assert_eq!(
         description,
-        "Send a follow-up task to an existing non-root target agent and trigger a turn if it is idle. If the target is already running, deliver the task promptly at message boundaries while sampling, or after the pending tool call completes."
+        "Assign a follow-up task to a non-root agent. Starts a turn if idle; otherwise delivers at a message boundary or after the pending tool call"
     );
     assert_eq!(
         parameters.schema_type,
@@ -346,21 +346,20 @@ fn wait_agent_tool_v2_uses_timeout_only_summary_output() {
         .expect("wait_agent should use object params");
     assert!(!properties.contains_key("targets"));
     assert!(properties.contains_key("timeout_ms"));
-    assert!(description.contains(
-        "Does not return the content; returns either a summary of which agents have updates (if any)"
-    ));
+    assert!(
+        description
+            .contains("Returns an update, interruption, or timeout summary, not message content")
+    );
     assert_eq!(
         properties
             .get("timeout_ms")
             .and_then(|schema| schema.description.as_deref()),
-        Some("Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000.")
+        Some("Wait ms, default 30000, min 10000, max 3600000")
     );
     assert_eq!(parameters.required.as_ref(), None);
     assert_eq!(
         output_schema.expect("wait output schema").to_value()["properties"]["message"]["description"],
-        json!(
-            "Brief wait summary without the agent's final content, including any timeout adjustment."
-        )
+        json!("Summary without final content, including timeout adjustments")
     );
 }
 
@@ -387,7 +386,7 @@ fn list_agents_tool_includes_path_prefix_and_agent_fields() {
         properties
             .get("path_prefix")
             .and_then(|schema| schema.description.as_deref()),
-        Some("Task-path prefix filter without a trailing slash. Omit to list all live agents.")
+        Some("Task-path prefix without trailing slash, defaults to all live agents")
     );
     assert_eq!(
         output_schema.expect("list_agents output schema").to_value()["properties"]["agents"]["items"]

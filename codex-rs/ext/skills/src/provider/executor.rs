@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use codex_exec_server::EnvironmentAccess;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::FileSystemEnvironmentAccessor;
 use codex_extension_api::SelectedPluginSnapshot;
@@ -12,7 +11,6 @@ use codex_protocol::protocol::SkillScope;
 use codex_skills::EnvironmentSkillMetadata;
 use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
-use futures::StreamExt;
 
 use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalog;
@@ -25,7 +23,7 @@ use crate::catalog::SkillSearchResult;
 use crate::catalog::SkillSourceKind;
 use crate::loader::load_environment_skills_from_discovery;
 use crate::loader::load_environment_skills_from_root;
-use crate::provider::MAX_SKILL_RESOURCE_CONTENT_BYTES;
+use crate::package::PackageAccess;
 use crate::provider::SkillListQuery;
 use crate::provider::SkillProvider;
 use crate::provider::SkillProviderFuture;
@@ -179,7 +177,18 @@ impl SkillProvider for ExecutorSkillProvider {
                     "executor skill resource is not bound to an environment",
                 ));
             };
-            let contents = read_bounded_text(fs, resource_path, request.resource.as_str()).await?;
+            let root = request
+                .resource
+                .environment_package_root()
+                .ok_or_else(|| SkillProviderError::new("skill resource has no package root"))?;
+            let contents = PackageAccess::Executor(fs)
+                .read_text(root, resource_path)
+                .await
+                .map_err(|err| {
+                    SkillProviderError::new(format!(
+                        "failed to read executor skill resource: {err}"
+                    ))
+                })?;
 
             Ok(SkillReadResult {
                 resource: request.resource,
@@ -308,35 +317,4 @@ fn normalized_environment_path(path: &PathUri) -> String {
         Some(PathConvention::Windows) => path.replace('\\', "/"),
         Some(PathConvention::Posix) | None => path,
     }
-}
-
-async fn read_bounded_text(
-    file_system: &dyn EnvironmentAccess,
-    path: &PathUri,
-    resource: &str,
-) -> Result<String, SkillProviderError> {
-    let read_error = |err| {
-        SkillProviderError::new(format!(
-            "failed to read executor skill resource {resource}: {err}"
-        ))
-    };
-    let mut stream = file_system
-        .read_file_stream(path)
-        .await
-        .map_err(&read_error)?;
-    let mut contents = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(&read_error)?;
-        if contents.len().saturating_add(chunk.len()) > MAX_SKILL_RESOURCE_CONTENT_BYTES {
-            return Err(SkillProviderError::new(format!(
-                "executor skill resource {resource} exceeds {MAX_SKILL_RESOURCE_CONTENT_BYTES} bytes"
-            )));
-        }
-        contents.extend_from_slice(&chunk);
-    }
-    String::from_utf8(contents).map_err(|_| {
-        SkillProviderError::new(format!(
-            "executor skill resource {resource} is not valid UTF-8"
-        ))
-    })
 }

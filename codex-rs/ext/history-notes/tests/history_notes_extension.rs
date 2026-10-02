@@ -71,10 +71,8 @@ async fn installed_extension_exposes_and_invokes_history_notes_tools() -> TestRe
         .build()
         .await?;
     config.model_provider.base_url = Some(format!("{}/backend-api/codex", server.uri()));
-    config.token_budget = Some(TokenBudgetConfig {
-        use_history_notes_extension: true,
-        ..TokenBudgetConfig::default()
-    });
+    // Notes must not depend on token-budget activation or model defaults.
+    config.token_budget = None;
     let controller = NetworkPolicyController::default();
     config.application_network_policy = controller.policy();
     assert!(controller.publish(
@@ -272,6 +270,24 @@ async fn installed_extension_exposes_and_invokes_history_notes_tools() -> TestRe
             serde_json::to_value(output.to_response_item(&call.call_id, &call.payload))?,
             json!({"type": "function_call_output", "call_id": call.call_id, "output": expected_output})
         );
+        let mut nested_call = call.clone();
+        nested_call.source = ToolCallSource::CodeMode {
+            cell_id: "cell-1".to_string(),
+            runtime_tool_call_id: "nested-1".to_string(),
+        };
+        let nested = tool.handle(nested_call).await?;
+        assert_eq!(
+            nested.code_mode_result(&call.payload),
+            json!({"delivered_to_model": true, "call_id": call.call_id})
+        );
+        assert_eq!(
+            serde_json::to_value(
+                nested
+                    .code_mode_model_output(&call.payload)
+                    .expect("model-only output")
+            )?,
+            json!(expected_output)
+        );
         arguments["context"] = json!({
             "session_id": "session-123",
             "current_agent_name": "/root/worker",
@@ -294,7 +310,12 @@ async fn installed_extension_exposes_and_invokes_history_notes_tools() -> TestRe
                 .iter()
                 .map(|request| serde_json::from_slice::<serde_json::Value>(&request.body))
                 .collect::<Result<Vec<_>, _>>()?,
-            vec![arguments]
+            vec![arguments.clone(), arguments]
+        );
+        assert!(
+            !requests[1]
+                .headers
+                .contains_key("x-openai-encrypted-tool-arguments")
         );
     }
 
@@ -372,7 +393,7 @@ async fn installed_extension_exposes_and_invokes_history_notes_tools() -> TestRe
     );
 
     let mut disabled_config = config.clone();
-    disabled_config.token_budget = None;
+    disabled_config.model_provider = ModelProviderInfo::create_amazon_bedrock_provider(None);
     for contributor in registry.config_contributors() {
         contributor.on_config_changed(&session_store, &thread_store, &config, &disabled_config);
     }

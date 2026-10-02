@@ -1,18 +1,14 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use codex_exec_server::EnvironmentAccessKey;
 use codex_extension_api::ExtensionMetrics;
 use codex_mcp::McpResourceClient;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
 
 use crate::SkillsExtensionConfig;
 use crate::SkillsExtensionState;
-use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalog;
 use crate::catalog::SkillCatalogEntry;
-use crate::catalog::SkillPackageId;
 use crate::catalog::SkillProviderError;
 use crate::catalog::SkillProviderResult;
 use crate::catalog::SkillReadResult;
@@ -45,7 +41,6 @@ pub struct SkillsThreadState {
     cloud_skills_available: bool,
     skills_extension_state: Mutex<SkillsExtensionState>,
     shadow_selection_turn: Mutex<Option<ShadowSelectionTurn>>,
-    pub(crate) executor_read_snapshot: Mutex<Option<ExecutorReadSnapshot>>,
     pub(crate) recent_skill_invocations: Arc<RecentSkillInvocations>,
     pub(crate) shadow_task_context: Arc<ShadowTaskContext>,
 }
@@ -57,7 +52,6 @@ impl SkillsThreadState {
             cloud_skills_available,
             skills_extension_state: Mutex::new(SkillsExtensionState::default()),
             shadow_selection_turn: Mutex::new(None),
-            executor_read_snapshot: Mutex::new(None),
             recent_skill_invocations: Arc::new(RecentSkillInvocations::default()),
             shadow_task_context: Arc::new(ShadowTaskContext::default()),
         }
@@ -403,31 +397,9 @@ impl SkillsThreadState {
     }
 }
 
-/// One bounded executor resource, retained for continuations until replacement or thread drop.
-/// Interleaved resources may evict it; misses reread and validate the content-bound cursor.
-pub(crate) struct ExecutorReadSnapshot {
-    pub(crate) authority: SkillAuthority,
-    pub(crate) package: SkillPackageId,
-    // The key binds cached contents to their source filesystem and callback permissions.
-    pub(crate) access: EnvironmentAccessKey,
-    pub(crate) result: Arc<SkillReadResult>,
-}
-
 struct ShadowSelectionTurn {
     turn_id: String,
     state: Arc<ShadowSelectionTurnState>,
-}
-
-#[derive(Default)]
-pub(crate) struct EmittedCatalogBudgetWarnings(Mutex<HashSet<String>>);
-
-impl EmittedCatalogBudgetWarnings {
-    pub(crate) fn insert(&self, warning: &str) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(warning.to_string())
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -437,9 +409,6 @@ pub(crate) struct SkillsTurnState {
     pub(crate) warnings: Vec<String>,
     pub(crate) main_prompts_injected: bool,
 }
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct HostSkillsCatalogInWorldState;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ExecutorSkillsStepState(pub(crate) SkillCatalog);

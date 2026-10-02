@@ -62,7 +62,7 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
         r#"await tools.test_sync_tool({{barrier: {{
             id: "yielded-skill-turns", participants: 2, timeout_ms: 60000
         }}}});
-        text(await tools.skills__read({{package: "{PACKAGE}"}}));"#
+        text(await tools.skills("read {PACKAGE}"));"#
     );
     mount_sse_once(
         &server,

@@ -17,10 +17,12 @@ mod collaboration;
 mod guardian;
 mod multi_agent;
 pub(crate) mod permissions;
+mod workflow;
 
 pub use collaboration::ResolvedCollaborationModeMessages;
 pub use guardian::ResolvedAutoReviewMessages;
 pub use multi_agent::ResolvedMultiAgentMessages;
+pub use workflow::apply_default_catalog_workflow;
 
 /// Text together with whether it was supplied by the catalog, even when it equals the default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

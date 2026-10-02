@@ -1005,10 +1005,12 @@ pub(super) async fn mcp_schema_max_bytes_scenario() -> Result<Vec<ResponsesReque
     let lookup = r#"
 const results = ["default_schema", "expanded_schema"].map(server => {
   const description = ALL_TOOLS.find(({name}) => name === `mcp__${server}__search`)?.description ?? "";
-  return [description.includes("budget_description_marker"), description.includes("query: string;")];
+  const [declaration, schema] = description.split("\n\nInput schema: ");
+  return [declaration.includes("budget_description_marker"), declaration.includes("query: string;"), schema.includes("budget_description_marker")];
 });
 const shared = ALL_TOOLS.find(({name}) => name === "mcp__default_schema__shared")?.description ?? "";
-results.push([shared.includes("code_mode_description_marker"), shared.includes("term: string;")]);
+const [sharedDeclaration, sharedSchema] = shared.split("\n\nInput schema: ");
+results.push([sharedDeclaration.includes("code_mode_description_marker"), sharedDeclaration.includes("term: string;"), sharedSchema.includes("code_mode_description_marker")]);
 text(JSON.stringify(results));"#;
     let responses = responses::mount_sse_sequence(
         &server,
@@ -1036,38 +1038,33 @@ text(JSON.stringify(results));"#;
         .find(|tool| tool["name"] == "exec")
         .and_then(|tool| tool["description"].as_str())
         .expect("exec description");
-    for (name, preserves_description) in [("default_schema", false), ("expanded_schema", true)] {
+    for name in ["default_schema", "expanded_schema"] {
         let declaration = exec_description
-            .split_once(&format!("### `mcp__{name}__search`"))
+            .lines()
+            .find(|line| line.starts_with(&format!("- tools.mcp__{name}__search(")))
             .expect("MCP tool declaration")
-            .1
-            .split("\n### `")
-            .next()
-            .expect("tool section");
+            .to_string();
         assert_eq!(
-            declaration.contains("budget_description_marker"),
-            preserves_description,
-            "{name}"
-        );
-        assert!(
-            declaration.contains("query: string;"),
-            "{name}: argument type should remain available"
+            declaration,
+            format!("- tools.mcp__{name}__search(args: {{ query: string; }})")
         );
     }
     let shared_declaration = exec_description
-        .split_once("### `mcp__default_schema__shared`")
-        .expect("shared MCP tool declaration")
-        .1
-        .split("\n### `")
-        .next()
-        .expect("tool section");
-    assert!(shared_declaration.contains("code_mode_description_marker"));
-    assert!(shared_declaration.contains("term: string;"));
+        .lines()
+        .find(|line| line.starts_with("- tools.mcp__default_schema__shared("))
+        .expect("shared MCP tool declaration");
+    assert_eq!(
+        shared_declaration,
+        "- tools.mcp__default_schema__shared(args: { query0?: object; query1?: object; query2?: object; query3?: object; query4?: object; query5?: object; query6?: object; query7?: object; })"
+    );
     let (output, success) = custom_tool_output_body_and_success(&requests[1], "lookup");
     assert_ne!(success, Some(false), "ALL_TOOLS lookup failed: {output}");
     let output =
         custom_tool_output_last_non_empty_text(&requests[1], "lookup").expect("ALL_TOOLS output");
-    assert_eq!(output, "[[false,true],[true,true],[true,true]]");
+    assert_eq!(
+        output,
+        "[[false,true,false],[true,true,true],[true,true,true]]"
+    );
     Ok(requests)
 }
 
@@ -3715,8 +3712,8 @@ if (!tool) {
             })
         })
         .expect("exec description should be present");
-    assert!(exec_description.contains("filter `ALL_TOOLS` by `name` and `description`"));
-    assert!(exec_description.contains("Shared MCP Types:"));
+    assert!(exec_description.contains("filtering ALL_TOOLS by name and description"));
+    assert!(!exec_description.contains("Shared MCP Types:"));
     assert!(!exec_description.contains("calendar_timezone_option_99"));
 
     let request = follow_up_mock.single_request();
@@ -6456,10 +6453,7 @@ image({{
         .and_then(|tools| tools.iter().find(|tool| tool["name"] == "exec"))
         .and_then(|tool| tool["description"].as_str())
         .expect("the model request should contain the code-mode exec tool");
-    assert!(
-        exec_description
-            .contains("`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`")
-    );
+    assert!(exec_description.contains("image(dataUrl | { image_url } | ImageContent): emit image"));
     assert!(!exec_description.contains("codex/imageDetail"));
     assert!(!exec_description.contains("detail?:"));
 
@@ -6502,7 +6496,7 @@ async fn code_mode_unified_image_budget_preserves_legacy_contract_for_unsupporte
         .and_then(|tool| tool["description"].as_str())
         .expect("the model request should contain the code-mode exec tool");
     assert!(exec_description.contains("codex/imageDetail"));
-    assert!(exec_description.contains("detail?:"));
+    assert!(exec_description.contains("detail?"));
 
     Ok(())
 }
@@ -7871,7 +7865,24 @@ text(JSON.stringify(tool));
         parsed,
         serde_json::json!({
             "name": "view_image",
-            "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.\n\nexec tool declaration:\n```ts\ndeclare const tools: { view_image(args: {\n  // Local filesystem path to an image file.\n  path: string;\n}): Promise<{\n  // Image detail hint returned by view_image. Returns `high` for default resized behavior or `original` when original resolution is preserved.\n  detail: \"high\" | \"original\";\n  // Data URL for the loaded image.\n  image_url: string;\n}>; };\n```",
+            "description": format!(
+                "Inspect a local image\n\nexec tool declaration:\n```ts\ndeclare const tools: {{ view_image(args: {{\n  // Local image path\n  path: string;\n}}): Promise<{{\n  // high is resized; original preserves resolution\n  detail: \"high\" | \"original\";\n  // Image data URL\n  image_url: string;\n}}>; }};\n```\n\nInput schema: {}\n\nOutput schema: {}",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string", "description": "Local image path"}},
+                    "required": ["path"],
+                    "additionalProperties": false
+                }),
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "detail": {"type": "string", "enum": ["high", "original"], "description": "high is resized; original preserves resolution"},
+                        "image_url": {"type": "string", "description": "Image data URL"}
+                    },
+                    "required": ["image_url", "detail"],
+                    "additionalProperties": false
+                })
+            ),
         })
     );
 
@@ -7905,20 +7916,42 @@ text(JSON.stringify(tool));
         &custom_tool_output_last_non_empty_text(&req, "call-1")
             .expect("exec ALL_TOOLS MCP lookup should emit JSON"),
     )?;
+    assert_eq!(parsed["name"], "mcp__rmcp__echo");
+    let description = parsed["description"].as_str().expect("MCP help");
+    let (declaration, schemas) = description
+        .split_once("\n\nInput schema: ")
+        .expect("lossless input schema");
     assert_eq!(
-        parsed,
+        declaration,
+        concat!(
+            "Use these tools to exercise the rmcp test server.\n\n",
+            "Echo back the provided message and include environment data.\n\n",
+            "exec tool declaration:\n",
+            "```ts\n",
+            "declare const tools: { mcp__rmcp__echo(args: { env_var?: string; message: string; }): ",
+            "Promise<CallToolResult<{ echo: string; env: string | null; }>>; };\n",
+            "```",
+        )
+    );
+    let (input, output) = schemas
+        .split_once("\n\nOutput schema: ")
+        .expect("lossless output schema");
+    let (output, _mcp_types) = output
+        .split_once("\n\nShared MCP Types:")
+        .expect("MCP types in help");
+    assert_eq!(
+        serde_json::from_str::<Value>(input)?,
         serde_json::json!({
-            "name": "mcp__rmcp__echo",
-            "description": concat!(
-                "Use these tools to exercise the rmcp test server.\n\n",
-                "Echo back the provided message and include environment data.\n\n",
-                "exec tool declaration:\n",
-                "```ts\n",
-                "declare const tools: { mcp__rmcp__echo(args: { env_var?: string; message: string; }): ",
-                "Promise<CallToolResult<{ echo: string; env: string | null; }>>; };\n",
-                "```",
-            ),
+            "type": "object", "properties": {"message": {"type": "string"}, "env_var": {"type": "string"}},
+            "required": ["message"], "additionalProperties": false,
         })
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(output)?,
+        codex_tools::mcp_call_tool_result_output_schema(serde_json::json!({
+            "type": "object", "properties": {"echo": {"type": "string"}, "env": {"anyOf": [{"type": "string"}, {"type": "null"}]}},
+            "required": ["echo", "env"], "additionalProperties": false,
+        }))
     );
 
     Ok(())
@@ -8121,7 +8154,7 @@ text(JSON.stringify({
                         "exec tool declaration:\n",
                         "```ts\n",
                         "declare const tools: { foo_bar(args: {}): Promise<unknown>; };\n",
-                        "```",
+                        "```\n\nInput schema: {\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}",
                     ),
                 ),
                 ("foo_bar", "Shadowed normalized dynamic tool."),
@@ -8167,7 +8200,7 @@ text(JSON.stringify({
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_renders_local_refs_in_outbound_exec_description() -> Result<()> {
+async fn code_mode_compacts_local_refs_in_outbound_exec_description() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -8244,7 +8277,12 @@ async fn code_mode_renders_local_refs_in_outbound_exec_description() -> Result<(
                 .flatten()
         })
         .expect("Code Mode exec should remain available");
-    assert!(exec_description.contains("query?: string | { clauses?: Array<"));
+    assert_eq!(
+        exec_description
+            .lines()
+            .find(|line| line.starts_with("- tools.boolean_search(")),
+        Some("- tools.boolean_search(args: { clauses?: Array<object>; })"),
+    );
 
     Ok(())
 }

@@ -12,14 +12,17 @@ use super::HistoryNotesToolOutput;
 
 #[test]
 fn preserves_encrypted_history_output() {
-    let result = HistoryNotesToolOutput::new(json!({"encrypted_output": "enc_payload"}))
-        .expect("valid output")
-        .to_response_item(
-            "call-1",
-            &ToolPayload::Function {
-                arguments: "{}".to_string(),
-            },
-        );
+    let result = HistoryNotesToolOutput::new(
+        json!({"encrypted_output": "enc_payload"}),
+        "call-1".to_string(),
+    )
+    .expect("valid output")
+    .to_response_item(
+        "call-1",
+        &ToolPayload::Function {
+            arguments: "{}".to_string(),
+        },
+    );
 
     let ResponseInputItem::FunctionCallOutput { output, .. } = result else {
         panic!("expected function-call output");
@@ -37,15 +40,18 @@ fn preserves_encrypted_history_output() {
 
 #[test]
 fn preserves_images_as_separate_output_items_without_logging_bytes() {
-    let output = HistoryNotesToolOutput::new(json!({
-        "encrypted_output": "enc_payload",
-        "images": [
-            {"data": "cG5n", "mime_type": "image/png", "detail": "original"},
-            {"data": "anBlZw==", "mime_type": "image/jpeg", "detail": "low"},
-            {"data": "Z2lm", "mime_type": "image/gif"},
-            {"data": "d2VicA==", "mime_type": "image/webp", "detail": null}
-        ]
-    }))
+    let output = HistoryNotesToolOutput::new(
+        json!({
+            "encrypted_output": "enc_payload",
+            "images": [
+                {"data": "cG5n", "mime_type": "image/png", "detail": "original"},
+                {"data": "anBlZw==", "mime_type": "image/jpeg", "detail": "low"},
+                {"data": "Z2lm", "mime_type": "image/gif"},
+                {"data": "d2VicA==", "mime_type": "image/webp", "detail": null}
+            ]
+        }),
+        "call-1".to_string(),
+    )
     .expect("valid image output");
     assert_eq!(
         output.log_output(),
@@ -118,7 +124,8 @@ fn accepts_empty_attachments_and_legacy_plaintext_results() {
             FunctionCallOutputPayload::from_text(json!({"text": "legacy result"}).to_string()),
         ),
     ] {
-        let output = HistoryNotesToolOutput::new(result).expect("valid output");
+        let output =
+            HistoryNotesToolOutput::new(result, "call-1".to_string()).expect("valid output");
         assert_eq!(
             output.to_response_item(
                 "call-1",
@@ -146,6 +153,7 @@ fn rejects_malformed_attachments_instead_of_silently_dropping_them() {
     ] {
         let result = HistoryNotesToolOutput::new(
             json!({"encrypted_output": "enc_payload", "images": images}),
+            "call-1".to_string(),
         );
         let Err(codex_extension_api::FunctionCallError::RespondToModel(message)) = result else {
             panic!("expected a model-facing image error");

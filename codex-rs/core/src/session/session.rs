@@ -743,9 +743,7 @@ impl Session {
             analytics_enabled: Some(self.services.analytics_events_client.is_enabled()),
             history_ingest_requested: turn_context
                 .config
-                .token_budget
-                .as_ref()
-                .is_some_and(|config| config.use_history_notes_extension)
+                .uses_native_history_notes(&self.services.auth_manager)
                 .then_some(true),
             forked_from_ordinal_exclusive: self
                 .forked_from_ordinal_exclusive

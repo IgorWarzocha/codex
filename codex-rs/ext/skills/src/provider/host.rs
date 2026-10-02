@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use crate::SkillLoadOutcome;
 use codex_skills::SkillMetadata;
+use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 
 use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalog;
@@ -12,6 +14,7 @@ use crate::catalog::SkillReadResult;
 use crate::catalog::SkillResourceId;
 use crate::catalog::SkillSearchResult;
 use crate::catalog::SkillSourceKind;
+use crate::package::PackageAccess;
 use crate::provider::SkillListQuery;
 use crate::provider::SkillProvider;
 use crate::provider::SkillProviderFuture;
@@ -62,8 +65,9 @@ impl SkillProvider for HostSkillProvider {
             };
             let Some(skill) = host_snapshot.outcome().skills.iter().find(|skill| {
                 let skill_path = skill.path_to_skills_md.to_string_lossy();
-                skill_path == request.resource.as_str()
-                    || skill_path.replace('\\', "/") == request.resource.as_str()
+                host_snapshot.outcome().is_skill_enabled(skill)
+                    && (skill_path == request.package.0
+                        || skill_path.replace('\\', "/") == request.package.0)
             }) else {
                 return Err(SkillProviderError::new(format!(
                     "host skill resource is not loaded: {}",
@@ -71,12 +75,30 @@ impl SkillProvider for HostSkillProvider {
                 )));
             };
 
-            let contents = host_snapshot.read_skill_text(skill).await.map_err(|err| {
-                SkillProviderError::new(format!(
-                    "failed to read host skill resource {}: {err}",
-                    request.resource.as_str()
-                ))
-            })?;
+            let main = PathUri::from_abs_path(&skill.path_to_skills_md);
+            let root = main
+                .parent()
+                .ok_or_else(|| SkillProviderError::new("skill has no package directory"))?;
+            let path = AbsolutePathBuf::try_from(request.resource.as_str())
+                .map(|path| PathUri::from_abs_path(&path))
+                .map_err(|_| {
+                    SkillProviderError::new("host skill resource must be an absolute package path")
+                })?;
+            if !path.starts_with(&root) {
+                return Err(SkillProviderError::new(
+                    "host skill resource does not match its package",
+                ));
+            }
+            let fs = host_snapshot.file_system_for_skill(skill);
+            let contents = PackageAccess::Host(fs.as_ref())
+                .read_text(&root, &path)
+                .await
+                .map_err(|err| {
+                    SkillProviderError::new(format!(
+                        "failed to read host skill resource {}: {err}",
+                        request.resource.as_str()
+                    ))
+                })?;
 
             Ok(SkillReadResult {
                 resource: request.resource,
@@ -144,6 +166,10 @@ fn catalog_entry_from_skill(skill: &SkillMetadata, enabled: bool) -> SkillCatalo
     .with_display_path(display_path)
     .with_prompt_scope(skill.scope)
     .with_dependencies(skill.dependencies.clone());
+
+    entry.analytics_scope = Some(skill.scope);
+    entry.plugin_id = skill.plugin_id.clone();
+    entry.remote_plugin_id = skill.remote_plugin_id.clone();
 
     if !enabled {
         entry = entry.disabled();

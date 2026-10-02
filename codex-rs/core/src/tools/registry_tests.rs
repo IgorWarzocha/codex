@@ -694,6 +694,70 @@ fn post_tool_use_feedback_output_keeps_code_mode_result_typed() {
     );
 }
 
+#[test]
+fn post_tool_use_feedback_cannot_replace_model_only_code_mode_output() {
+    struct RelayOutput(FunctionCallOutputPayload);
+
+    impl ToolOutput for RelayOutput {
+        fn log_output(&self) -> String {
+            "receipt".to_string()
+        }
+
+        fn success_for_logging(&self) -> bool {
+            true
+        }
+
+        fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
+            ResponseInputItem::FunctionCallOutput {
+                call_id: call_id.to_string(),
+                output: self.0.clone(),
+            }
+        }
+
+        fn code_mode_model_output(
+            &self,
+            _payload: &ToolPayload,
+        ) -> Option<FunctionCallOutputPayload> {
+            Some(self.0.clone())
+        }
+
+        fn code_mode_result(&self, _payload: &ToolPayload) -> Value {
+            serde_json::json!({"delivered_to": "model"})
+        }
+    }
+
+    let native = FunctionCallOutputPayload::from_content_items(vec![
+        codex_protocol::models::FunctionCallOutputContentItem::EncryptedContent {
+            encrypted_content: "opaque".to_string(),
+        },
+    ]);
+    let result = AnyToolResult {
+        call_id: "nested-call".to_string(),
+        payload: ToolPayload::Function {
+            arguments: "{}".to_string(),
+        },
+        result: Box::new(PostToolUseFeedbackOutput {
+            original: Box::new(RelayOutput(native.clone())),
+            model_visible: FunctionToolOutput::from_text("hook feedback".to_string(), None),
+        }),
+        post_tool_use_payload: None,
+    };
+    assert_eq!(result.code_mode_model_output(), Some(native));
+    assert_eq!(
+        result.code_mode_result(),
+        serde_json::json!({"delivered_to": "model"})
+    );
+    assert_eq!(
+        Box::new(codex_tools::JsonToolOutput::new(
+            serde_json::json!({"typed": true})
+        ))
+        .code_mode_model_output(&ToolPayload::Function {
+            arguments: "{}".to_string()
+        }),
+        None,
+    );
+}
+
 #[test_case::test_case(false; "success")]
 #[test_case::test_case(true; "tool error")]
 fn post_tool_use_feedback_output_preserves_mcp_result_metadata(tool_error: bool) {

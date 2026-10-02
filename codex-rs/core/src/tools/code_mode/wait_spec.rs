@@ -8,39 +8,29 @@ pub(crate) fn create_wait_tool(
     parameters_override: Option<&str>,
 ) -> ToolSpec {
     let properties = BTreeMap::from([
-        (
-            "cell_id".to_string(),
-            JsonSchema::string(Some("Identifier of the running exec cell.".to_string())),
-        ),
+        ("cell_id".to_string(), JsonSchema::string(None)),
         (
             "yield_time_ms".to_string(),
-            JsonSchema::number(Some(
-                "Wait before yielding more output. Defaults to 10000 ms.".to_string(),
-            )),
+            JsonSchema::number(Some("Wait ms, default 10000".to_string())),
         ),
         (
             "max_tokens".to_string(),
-            JsonSchema::number(Some(
-                "Output token budget for this wait call. Defaults to 10000 tokens.".to_string(),
-            )),
+            JsonSchema::number(Some("Output tokens, default 10000".to_string())),
         ),
         (
             "terminate".to_string(),
             JsonSchema::boolean(Some(
-                "True stops the running exec cell; false or omitted waits for output.".to_string(),
+                "Stop cell instead of waiting. Notebook cancellation terminates the kernel"
+                    .to_string(),
             )),
         ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: codex_code_mode::WAIT_TOOL_NAME.to_string(),
-        description: description_override.map(str::to_owned).unwrap_or_else(|| {
-            format!(
-                "Waits on a yielded `{}` cell and returns new output or completion.\n{}",
-                codex_code_mode::PUBLIC_TOOL_NAME,
-                codex_code_mode::build_wait_tool_description().trim()
-            )
-        }),
+        description: description_override
+            .map(str::to_owned)
+            .unwrap_or_else(|| codex_code_mode::build_wait_tool_description().to_string()),
         strict: false,
         parameters: parameters_override
             .and_then(
@@ -79,39 +69,33 @@ mod tests {
             create_wait_tool(/*description_override*/ None, /*parameters_override*/ None),
             ToolSpec::Function(ResponsesApiTool {
                 name: codex_code_mode::WAIT_TOOL_NAME.to_string(),
-                description: format!(
-                    "Waits on a yielded `{}` cell and returns new output or completion.\n{}",
-                    codex_code_mode::PUBLIC_TOOL_NAME,
-                    codex_code_mode::build_wait_tool_description().trim()
-                ),
+                description: codex_code_mode::build_wait_tool_description().to_string(),
                 strict: false,
                 defer_loading: None,
                 parameters: JsonSchema::object(
                     BTreeMap::from([
                         (
                             "cell_id".to_string(),
-                            JsonSchema::string(Some(
-                                "Identifier of the running exec cell.".to_string()
-                            )),
+                            JsonSchema::string(None),
                         ),
                         (
                             "max_tokens".to_string(),
                             JsonSchema::number(Some(
-                                "Output token budget for this wait call. Defaults to 10000 tokens."
+                                "Output tokens, default 10000"
                                     .to_string(),
                             )),
                         ),
                         (
                             "terminate".to_string(),
                             JsonSchema::boolean(Some(
-                                "True stops the running exec cell; false or omitted waits for output."
+                                "Stop cell instead of waiting. Notebook cancellation terminates the kernel"
                                     .to_string(),
                             )),
                         ),
                         (
                             "yield_time_ms".to_string(),
                             JsonSchema::number(Some(
-                                "Wait before yielding more output. Defaults to 10000 ms."
+                                "Wait ms, default 10000"
                                     .to_string(),
                             )),
                         ),

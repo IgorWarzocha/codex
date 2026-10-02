@@ -1,6 +1,8 @@
 mod delegate;
 mod execute_handler;
 pub(crate) mod execute_spec;
+#[cfg(test)]
+mod model_output_tests;
 pub(crate) mod notebook;
 pub(crate) mod notebook_handler;
 mod notebook_spec;
@@ -22,7 +24,9 @@ use codex_code_mode::CodeModeSessionProvider;
 use codex_code_mode::CodeModeToolKind;
 use codex_code_mode::RuntimeResponse;
 use codex_protocol::ThreadId;
+use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::ResponseInputItem;
 use futures::future::join_all;
 use serde_json::Value as JsonValue;
 use tokio::sync::OnceCell;
@@ -50,6 +54,7 @@ use codex_utils_audio::estimate_audio_token_count;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::formatted_truncate_text_content_items_with_policy;
 use codex_utils_output_truncation::truncate_function_output_items_with_policy;
+use codex_utils_output_truncation::with_serialization_allowance;
 
 use delegate::CodeModeCellDelegate;
 use delegate::CodeModeDispatchBroker;
@@ -172,6 +177,7 @@ impl CodeModeService {
         let delegate = Arc::new(CodeModeCellDelegate {
             broker: Arc::clone(&self.dispatch_broker),
             step_context,
+            outer_call_id: request.tool_call_id.clone(),
         });
         self.session()
             .await?
@@ -426,6 +432,7 @@ fn submit_nested_tool(
     tool_runtime: ToolCallRuntime,
     invocation: CodeModeNestedToolCall,
     call_id: String,
+    outer_call_id: String,
     cancellation_token: CancellationToken,
 ) -> Result<
     impl std::future::Future<Output = Result<JsonValue, FunctionCallError>> + Send + 'static,
@@ -473,11 +480,14 @@ fn submit_nested_tool(
     };
 
     let call = ToolCall {
-        tool_name,
+        tool_name: tool_name.clone(),
         call_id,
         payload,
         encrypted_function_args: None,
     };
+    let output_token_limit =
+        with_serialization_allowance(step_context.settings.model_info.truncation_policy.into())
+            .token_budget();
     session
         .services
         .analytics_events_client
@@ -494,10 +504,67 @@ fn submit_nested_tool(
             cell_id: cell_id.to_string(),
             runtime_tool_call_id,
         },
-        cancellation_token,
+        cancellation_token.clone(),
         Arc::default(),
     );
-    Ok(async move { Ok(result.await?.code_mode_result()) })
+    Ok(async move {
+        let result = result.await?;
+        if let Some(mut output) = result.code_mode_model_output() {
+            if cancellation_token.is_cancelled() {
+                return Err(FunctionCallError::RespondToModel(
+                    "code mode model-only output relay cancelled".to_string(),
+                ));
+            }
+            let qualified_name = match &tool_name.namespace {
+                Some(namespace) if !tool_name.is_default_namespace() => {
+                    format!("{namespace}.{}", tool_name.name)
+                }
+                _ => tool_name.name.clone(),
+            };
+            let mut items = vec![FunctionCallOutputContentItem::InputText {
+                text: format!(
+                    "Nested tool {qualified_name}, call_id {}: model-only output",
+                    result.call_id
+                ),
+            }];
+            match output.body {
+                FunctionCallOutputBody::Text(text) => {
+                    items.push(FunctionCallOutputContentItem::InputText { text })
+                }
+                FunctionCallOutputBody::ContentItems(content) => items.extend(content),
+            }
+            let encrypted = items
+                .iter()
+                .any(|item| matches!(item, FunctionCallOutputContentItem::EncryptedContent { .. }));
+            output.body = FunctionCallOutputBody::ContentItems(items);
+            // Responses accepts encrypted content only in function outputs.
+            // Legacy plaintext results and attachments keep exec's normal kind.
+            let item = if encrypted {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: outer_call_id,
+                    output,
+                }
+            } else {
+                ResponseInputItem::CustomToolCallOutput {
+                    call_id: outer_call_id,
+                    name: Some(PUBLIC_TOOL_NAME.to_string()),
+                    output,
+                }
+            };
+            delegate::inject_output(
+                &session,
+                &cell_id,
+                item.into(),
+                result
+                    .result
+                    .fallback_token_limit_override()
+                    .unwrap_or(output_token_limit),
+            )
+            .await
+            .map_err(FunctionCallError::RespondToModel)?;
+        }
+        Ok(result.code_mode_result())
+    })
 }
 
 fn build_nested_tool_payload(

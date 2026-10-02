@@ -295,7 +295,7 @@ async fn prompt_tools_are_consistent_across_requests(
             assert!(developer_text.contains(&mode_instructions));
         } else {
             assert!(!developer_text.contains("update_plan"));
-            assert!(developer_text.contains("Plan Mode (Conversational)"));
+            assert!(developer_text.contains("Collaboration Mode: Plan"));
         }
         if let Some(instructions) = &config.developer_instructions {
             assert!(
@@ -312,7 +312,7 @@ async fn prompt_tools_are_consistent_across_requests(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> anyhow::Result<()> {
+async fn default_instructions_are_literal_and_stable_across_requests() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     use pretty_assertions::assert_eq;
 
@@ -363,9 +363,9 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
     let instructions0 = body0["instructions"]
         .as_str()
         .expect("instructions should be a string");
-    assert!(
-        instructions0.contains("You are"),
-        "expected non-empty instructions"
+    assert_eq!(
+        instructions0,
+        codex_models_manager::model_info::BASE_INSTRUCTIONS
     );
 
     let body1 = req2.single_request().body_json();

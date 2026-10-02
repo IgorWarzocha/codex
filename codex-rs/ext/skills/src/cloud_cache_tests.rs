@@ -1,6 +1,8 @@
 //! Regression tests for cloud cache generation isolation and late completion.
 
 use super::*;
+use crate::catalog::SkillAuthority;
+use crate::catalog::SkillPackageId;
 use crate::catalog::SkillResourceId;
 use crate::catalog::SkillSearchResult;
 use crate::provider::SkillProvider;

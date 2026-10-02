@@ -228,10 +228,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                         .as_str()
                         .expect("spawn description");
                     assert!(actual_description.contains(description));
-                    assert!(
-                        !actual_description
-                            .contains("Spawns an agent to work on the specified task.")
-                    );
+                    assert!(!actual_description.contains("Spawn an agent for the task."));
                     assert!(
                         actual_description
                             .strip_suffix(declaration)
@@ -253,11 +250,19 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 }
                 if matches!(exposure, Exposure::CodeMode) {
                     let description = expected_tool["description"].as_str().expect("description");
+                    let (description, schemas) = description
+                        .split_once("\n\nInput schema: ")
+                        .expect("discoverable input schema");
+                    let output_schema = schemas
+                        .split_once("\n\nOutput schema: ")
+                        .map(|(_, schema)| format!("\n\nOutput schema: {schema}"))
+                        .unwrap_or_default();
                     let (prefix, signature) =
                         description.rsplit_once("(args: ").expect("arguments");
                     let (_, result) = signature.split_once("): Promise").expect("result type");
                     expected_tool["description"] = json!(format!(
-                        "{prefix}(args: {{\n  // Catalog limit.\n  catalog_limit: number;\n  // Catalog message.\n  message?: string;\n}}): Promise{result}"
+                        "{prefix}(args: {{\n  // Catalog limit.\n  catalog_limit: number;\n  // Catalog message.\n  message?: string;\n}}): Promise{result}\n\nInput schema: {}{output_schema}",
+                        expected_tool["parameters"]
                     ));
                 }
             }

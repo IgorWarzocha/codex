@@ -484,8 +484,8 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
         unreachable!("exec_command has a function schema");
     };
     spec.description = spec.description.replacen(
-        "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
-        "Runs a command to completion and returns its output. The process is terminated on timeout or cancellation and cannot be resumed.",
+        "Run a shell command. Returns output and a session ID while running.",
+        "Run a command to completion. Timeout or cancellation terminates it; it cannot be resumed.",
         1,
     );
     let properties = spec.parameters.properties.get_or_insert_default();
@@ -493,9 +493,7 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
     properties.remove("yield_time_ms");
     properties.insert(
         "timeout_ms".to_string(),
-        JsonSchema::number(Some(
-            "Maximum command runtime. Defaults to 10000 ms.".to_string(),
-        )),
+        JsonSchema::number(Some("Runtime limit, default 10000 ms".to_string())),
     );
     spec.output_schema = spec.output_schema.map(|schema| {
         let mut schema = schema.into_value();

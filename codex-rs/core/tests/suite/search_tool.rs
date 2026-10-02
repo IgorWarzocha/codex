@@ -81,7 +81,7 @@ use super::rmcp_client::remote_aware_environment_id;
 use super::rmcp_client::remote_aware_stdio_server_bin;
 
 const SEARCH_TOOL_DESCRIPTION_SNIPPETS: [&str; 2] = [
-    "You have access to tools from the following sources",
+    "Enabled sources:",
     "- Calendar: Plan events and manage your calendar.",
 ];
 const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
@@ -189,8 +189,8 @@ async fn search_tool_enabled_by_default_adds_tool_search() -> Result<()> {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query for deferred tools."},
-                    "limit": {"type": "number", "description": "Maximum number of tools to return. Defaults to 8."},
+                    "query": {"type": "string", "description": "Deferred-tool search query"},
+                    "limit": {"type": "number", "description": "Result limit, default 8"},
                 },
                 "required": ["query"],
                 "additionalProperties": false,
@@ -896,7 +896,7 @@ async fn tool_search_returns_deferred_v1_multi_agent_tools() -> Result<()> {
     assert!(
         !first_request_body
             .to_string()
-            .contains("### When to delegate vs. do the subtask yourself"),
+            .contains("Keep immediate blockers local."),
         "deferred v1 multi-agent guidance should stay out of initial developer context"
     );
 
@@ -927,10 +927,10 @@ async fn tool_search_returns_deferred_v1_multi_agent_tools() -> Result<()> {
         .and_then(Value::as_str)
         .expect("spawn_agent description should be present");
     assert!(description.contains(
-        "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work."
+        "Spawn only when the user or applicable AGENTS.md/skill instructions explicitly request sub-agents, delegation, or parallel agent work."
     ));
-    assert!(description.contains("### Designing delegated subtasks"));
-    assert!(description.contains("### When to delegate vs. do the subtask yourself"));
+    assert!(description.contains("Avoid duplicate work and overlapping write scopes."));
+    assert!(description.contains("Keep immediate blockers local."));
 
     Ok(())
 }

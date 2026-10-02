@@ -1,6 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::sync::Arc;
 
 use codex_analytics::AnalyticsEventsClient;
@@ -10,32 +7,22 @@ use codex_analytics::SkillInvocationLocation;
 use codex_analytics::build_track_events_context;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionMetrics;
-use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
-use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::SelectedPluginSnapshot;
 use codex_extension_api::ThreadOriginator;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
-use codex_extension_api::ToolName;
-use codex_extension_api::ToolOutput;
-use codex_extension_api::ToolSpec;
-use codex_extension_api::parse_tool_input_schema;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_mcp::McpResourceClient;
 use codex_otel::SessionTelemetry;
 use codex_otel::SkillInvocationEvent;
 use codex_otel::SkillInvocationType;
 use codex_otel::sanitize_metric_tag_value;
-use codex_tools::ResponsesApiNamespace;
-use codex_tools::ResponsesApiNamespaceTool;
-use codex_tools::default_namespace_description;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use tokio::sync::OnceCell;
 
+use crate::HostSkillsSnapshot;
 use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalog;
 use crate::catalog::SkillCatalogEntry;
@@ -48,13 +35,12 @@ use crate::state::SkillsThreadState;
 use crate::telemetry::ActiveSkillTurnMetrics;
 use crate::telemetry::SkillTurnMetrics;
 
+mod command;
 mod list;
 mod read;
-mod schema;
+mod selection;
 
-const SKILLS_NAMESPACE: &str = "skills";
-const MAX_HANDLE_BYTES: usize = 2_048;
-const MAX_SKILL_RESPONSE_BYTES: usize = 512 * 1024;
+pub(crate) const SKILLS_GUIDANCE: &str = "Skills: List once at session start; read always-applicable and task-relevant skills before work";
 
 pub(crate) fn skill_tools(
     providers: SkillProviders,
@@ -62,14 +48,12 @@ pub(crate) fn skill_tools(
     thread_store: &ExtensionData,
     executor_query: Option<SkillListQuery>,
     selected_plugins: Option<Arc<SelectedPluginSnapshot>>,
+    host_snapshot: Option<Arc<HostSkillsSnapshot>>,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let Some(thread_state) = thread_store.get::<SkillsThreadState>() else {
         return Vec::new();
     };
     let cloud_available = providers.has_cloud_provider() && thread_state.cloud_skill_enabled();
-    if !cloud_available && executor_query.is_none() {
-        return Vec::new();
-    }
     let mcp_resources = session_store
         .get::<SkillsSessionState>()
         .and_then(|state| state.mcp_resources.clone());
@@ -82,14 +66,10 @@ pub(crate) fn skill_tools(
         cloud_available,
         executor_query,
         selected_plugins,
+        host_snapshot,
         executor_catalog: Arc::new(OnceCell::new()),
     };
-    vec![
-        Arc::new(list::ListTool {
-            context: context.clone(),
-        }),
-        Arc::new(read::ReadTool { context }),
-    ]
+    vec![Arc::new(command::SkillsTool { context })]
 }
 
 #[derive(Clone)]
@@ -194,13 +174,22 @@ impl SkillAnalytics {
             ),
             vec![SkillInvocation {
                 skill_name: skill.name.clone(),
-                location: SkillInvocationLocation::Resource {
-                    id: skill.main_prompt.as_str().to_string(),
-                    skill_id: skill.canonical_skill_id.clone(),
-                    scope: skill.analytics_scope,
+                location: if skill.authority.kind == SkillSourceKind::Host {
+                    SkillInvocationLocation::Host {
+                        path: std::path::PathBuf::from(skill.main_prompt.as_str()),
+                        scope: skill
+                            .prompt_scope()
+                            .unwrap_or(codex_protocol::protocol::SkillScope::User),
+                    }
+                } else {
+                    SkillInvocationLocation::Resource {
+                        id: skill.main_prompt.as_str().to_string(),
+                        skill_id: skill.canonical_skill_id.clone(),
+                        scope: skill.analytics_scope,
+                    }
                 },
                 plugin_id: skill.plugin_id.clone(),
-                remote_plugin_id: None,
+                remote_plugin_id: skill.remote_plugin_id.clone(),
                 invocation_type,
             }],
         );
@@ -217,6 +206,7 @@ struct SkillToolContext {
     executor_query: Option<SkillListQuery>,
     selected_plugins: Option<Arc<SelectedPluginSnapshot>>,
     executor_catalog: Arc<OnceCell<SkillCatalog>>,
+    host_snapshot: Option<Arc<HostSkillsSnapshot>>,
 }
 
 impl SkillToolContext {
@@ -243,6 +233,21 @@ impl SkillToolContext {
                 }
                 catalog
             }
+            SkillToolAuthoritySelector::Host => {
+                self.providers
+                    .list_for_turn(SkillListQuery {
+                        turn_id: turn_id.to_string(),
+                        executor_roots: Vec::new(),
+                        resolved_executor_roots: Vec::new(),
+                        host_snapshot: self.host_snapshot.clone(),
+                        include_host_skills: self.host_snapshot.is_some(),
+                        include_bundled_skills: self.thread_state.config().bundled_skills_enabled,
+                        include_cloud_skills: false,
+                        mcp_resources: None,
+                        executor_capability_discovery: None,
+                    })
+                    .await
+            }
         }
     }
 }
@@ -252,15 +257,7 @@ impl SkillToolContext {
 enum SkillToolAuthoritySelector {
     Cloud,
     Executor,
-}
-
-impl SkillToolAuthoritySelector {
-    fn matches(self, authority: &SkillAuthority) -> bool {
-        match self {
-            Self::Cloud => authority.kind == SkillSourceKind::Cloud,
-            Self::Executor => authority.kind == SkillSourceKind::Executor,
-        }
-    }
+    Host,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
@@ -268,16 +265,10 @@ impl SkillToolAuthoritySelector {
 pub(crate) enum SkillToolAuthority {
     Cloud,
     Executor { id: String },
+    Host,
 }
 
 impl SkillToolAuthority {
-    fn selector(&self) -> SkillToolAuthoritySelector {
-        match self {
-            Self::Cloud => SkillToolAuthoritySelector::Cloud,
-            Self::Executor { .. } => SkillToolAuthoritySelector::Executor,
-        }
-    }
-
     pub(crate) fn from_authority(authority: &SkillAuthority) -> Option<Self> {
         match &authority.kind {
             SkillSourceKind::Cloud if authority.id == CODEX_APPS_MCP_SERVER_NAME => {
@@ -286,102 +277,8 @@ impl SkillToolAuthority {
             SkillSourceKind::Executor => Some(Self::Executor {
                 id: authority.id.clone(),
             }),
-            SkillSourceKind::Host | SkillSourceKind::Cloud | SkillSourceKind::Custom(_) => None,
+            SkillSourceKind::Host => Some(Self::Host),
+            SkillSourceKind::Cloud | SkillSourceKind::Custom(_) => None,
         }
     }
-}
-
-fn skill_tool_name(name: &str) -> ToolName {
-    ToolName::namespaced(SKILLS_NAMESPACE, name)
-}
-
-fn skill_function_tool<I: JsonSchema, O: JsonSchema>(name: &str, description: &str) -> ToolSpec {
-    let tool = ResponsesApiTool {
-        name: name.to_string(),
-        description: description.to_string(),
-        strict: false,
-        defer_loading: None,
-        parameters: parse_tool_input_schema(&schema::input_schema_for::<I>())
-            .unwrap_or_else(|err| panic!("generated input schema for {name} should parse: {err}")),
-        output_schema: Some(schema::output_schema_for::<O>().into()),
-    };
-
-    ToolSpec::Namespace(ResponsesApiNamespace {
-        name: SKILLS_NAMESPACE.to_string(),
-        description: default_namespace_description(SKILLS_NAMESPACE),
-        tools: vec![ResponsesApiNamespaceTool::Function(tool)],
-    })
-}
-
-fn parse_args<T: for<'de> Deserialize<'de>>(call: &ToolCall<'_>) -> Result<T, FunctionCallError> {
-    let arguments = call.function_arguments()?;
-    let value = if arguments.trim().is_empty() {
-        Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str(arguments)
-            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?
-    };
-    serde_json::from_value(value).map_err(|err| FunctionCallError::RespondToModel(err.to_string()))
-}
-
-fn validate_handle(name: &str, value: &str, max_bytes: usize) -> Result<(), FunctionCallError> {
-    if is_bounded_handle(value, max_bytes) {
-        return Ok(());
-    }
-
-    Err(FunctionCallError::RespondToModel(format!(
-        "{name} must be non-empty, contain no control characters, and be at most {max_bytes} bytes"
-    )))
-}
-
-fn is_bounded_handle(value: &str, max_bytes: usize) -> bool {
-    !value.is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
-}
-
-fn pagination_cursor(value: &(impl Hash + ?Sized), offset: usize) -> String {
-    format!("{:016x}:{offset}", value_fingerprint(value))
-}
-
-fn parse_pagination_cursor(
-    cursor: Option<&str>,
-    value: &(impl Hash + ?Sized),
-    tool: &str,
-) -> Result<usize, FunctionCallError> {
-    let Some(cursor) = cursor else {
-        return Ok(0);
-    };
-    let invalid = || FunctionCallError::RespondToModel(format!("{tool} cursor is invalid"));
-    let (fingerprint, offset) = cursor.split_once(':').ok_or_else(invalid)?;
-    if u64::from_str_radix(fingerprint, 16).ok() != Some(value_fingerprint(value)) {
-        return Err(FunctionCallError::RespondToModel(format!(
-            "{tool} cursor is stale; restart from the first page"
-        )));
-    }
-    offset.parse::<usize>().map_err(|_| invalid())
-}
-
-fn value_fingerprint(value: &(impl Hash + ?Sized)) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn serialized_len(value: &impl Serialize) -> Result<usize, FunctionCallError> {
-    serde_json::to_vec(value)
-        .map(|value| value.len())
-        .map_err(|err| FunctionCallError::Fatal(err.to_string()))
-}
-
-fn skill_json_output<T: Serialize>(
-    value: &T,
-    authority: SkillToolAuthoritySelector,
-) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-    let value = serde_json::to_value(value).map_err(|err| {
-        FunctionCallError::Fatal(format!("failed to serialize tool output: {err}"))
-    })?;
-    let output = JsonToolOutput::new(value);
-    Ok(match authority {
-        SkillToolAuthoritySelector::Cloud => Box::new(output.with_external_context()),
-        SkillToolAuthoritySelector::Executor => Box::new(output),
-    })
 }

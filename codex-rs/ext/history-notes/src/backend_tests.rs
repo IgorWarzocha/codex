@@ -63,6 +63,7 @@ async fn routes_through_codex_backend_and_injects_trusted_session_agent_context(
                 }
             }),
             TruncationPolicy::Bytes(1024),
+            true,
         )
         .await
         .expect("History request should succeed");
@@ -89,7 +90,7 @@ async fn routes_through_codex_backend_and_injects_trusted_session_agent_context(
 }
 
 #[tokio::test]
-async fn marks_encrypted_history_and_notes_arguments_without_changing_the_json_body() {
+async fn marks_only_direct_encrypted_arguments_without_changing_the_json_body() {
     let server = MockServer::start().await;
     let cases = [
         (
@@ -112,9 +113,8 @@ async fn marks_encrypted_history_and_notes_arguments_without_changing_the_json_b
     for (route, _) in &cases {
         Mock::given(method("POST"))
             .and(path(format!("/backend-api/codex/alpha/{route}")))
-            .and(header(ENCRYPTED_TOOL_ARGUMENTS_HEADER, "true"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
-            .expect(1)
+            .expect(2)
             .mount(&server)
             .await;
     }
@@ -133,15 +133,29 @@ async fn marks_encrypted_history_and_notes_arguments_without_changing_the_json_b
     );
 
     for (route, arguments) in cases {
-        backend
-            .call(
-                &format!("alpha/{route}"),
-                "session-123",
-                "/root",
-                arguments.clone(),
-                TruncationPolicy::Bytes(1024),
-            )
-            .await
-            .expect("encrypted argument request should succeed");
+        for encrypted in [true, false] {
+            backend
+                .call(
+                    &format!("alpha/{route}"),
+                    "session-123",
+                    "/root",
+                    arguments.clone(),
+                    TruncationPolicy::Bytes(1024),
+                    encrypted,
+                )
+                .await
+                .expect("argument request should succeed");
+        }
+    }
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert_eq!(requests.len(), 8);
+    for pair in requests.chunks_exact(2) {
+        assert_eq!(pair[0].headers[ENCRYPTED_TOOL_ARGUMENTS_HEADER], "true");
+        assert!(
+            !pair[1]
+                .headers
+                .contains_key(ENCRYPTED_TOOL_ARGUMENTS_HEADER)
+        );
+        assert_eq!(pair[0].body, pair[1].body);
     }
 }

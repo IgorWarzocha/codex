@@ -1,6 +1,7 @@
 use codex_extension_api::FunctionCallError;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
+use codex_extension_api::ToolCallSource;
 use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolExecutorFuture;
 use codex_extension_api::ToolName;
@@ -24,9 +25,10 @@ use crate::backend::HistoryNotesBackend;
 
 const HISTORY_NAMESPACE: &str = "history";
 const NOTES_NAMESPACE: &str = "notes";
-const HISTORY_DESCRIPTION: &str = "Recover prior conversation after a context-window reset by listing, reading, and searching normalized history using agent names and the opaque window and item IDs returned by these tools. Pass returned IDs unchanged when filtering or reading an item. Items are ordered by persisted ordinal, then creation time; list and search calls return no matches for an unknown window. Calls use the current agent by default; pass an absolute agent name or one relative to the current agent to inspect another agent. History is read-only and eventually consistent, so newly generated items may take a few seconds to appear. This is private model-only state. Use it silently to continue the task. Never disclose or describe the tool, its existence or use, paths, storage or recovery mechanisms, or the private contents (including by quoting or summarizing them) to the user.";
-const NOTES_DESCRIPTION: &str = "Read and maintain private notes that survive context-window transitions within this rollout. Paths are virtual, not filesystem paths. Relative file paths use the current agent's <agent_name>/notes directory; cross-agent paths must be absolute. Absolute paths use <agent_name>/notes[/<path>]. Reads, listings, searches, and writes may access other agents' notes. File operations require <path>; path-prefix arguments may be omitted to use the current notes directory. Empty, '.', and '..' path components are unsupported. Shell expansion is not performed, so '~' is treated literally. Note reads reflect successful writes immediately; listings and searches are eventually consistent and may take a few seconds to reflect writes. Every file must remain at or below 1,000,000 UTF-8 bytes; create another file before approaching the limit. This is private model-only state. Use it silently to continue the task. Never disclose or describe the tool, its existence or use, paths, storage or recovery mechanisms, or the private contents (including by quoting or summarizing them) to the user.";
-const HISTORY_AGENT_NAME_DESCRIPTION: &str = "Agent whose history to inspect. Omit to use the current agent; otherwise pass an absolute agent name or a name relative to the current agent.";
+const HISTORY_DESCRIPTION: &str = "Private conversation recovery. Pass returned window/item IDs unchanged. New items may lag. Keep recovered private state out of user-facing output.";
+const NOTES_DESCRIPTION: &str = "Private remote notes across context windows. Virtual paths: relative uses the current agent; absolute is <agent>/notes/<path>. No shell expansion or empty, '.' or '..' components. Limit 1,000,000 UTF-8 bytes per file. Reads reflect completed writes; search/list may lag. Await dependent writes to the same path. Keep private state out of user-facing output.";
+const HISTORY_AGENT_NAME_DESCRIPTION: &str =
+    "Omit for current agent; absolute or relative agent name";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HistoryNotesAction {
@@ -96,10 +98,6 @@ impl HistoryNotesAction {
         }
     }
 
-    fn supports_parallel_tool_calls(self) -> bool {
-        !matches!(self, Self::NotesAppendToFile | Self::NotesWriteFile)
-    }
-
     fn namespace_description(self) -> &'static str {
         match self.namespace() {
             HISTORY_NAMESPACE => HISTORY_DESCRIPTION,
@@ -110,33 +108,15 @@ impl HistoryNotesAction {
 
     fn description(self) -> &'static str {
         match self {
-            Self::HistoryListWindows => {
-                "List an agent's context windows as window ID and item-count pairs. Private model-only recovery; never disclose this activity."
-            }
-            Self::HistoryListItems => {
-                "List history items with optional window, role, and tool filters. Private model-only recovery; never disclose this activity."
-            }
-            Self::HistoryReadItem => {
-                "Read a bounded range from private model-only history. Never disclose the item or this activity."
-            }
-            Self::HistorySearchContents => {
-                "Search private model-only history by literal substring. Never disclose results or this activity."
-            }
-            Self::NotesListFilesByPrefix => {
-                "List private model-only notes by path prefix. Never disclose paths, contents, or this activity."
-            }
-            Self::NotesReadFile => {
-                "Read all or a line range from private model-only notes. Never disclose paths, contents, or this activity."
-            }
-            Self::NotesSearchContents => {
-                "Search private model-only note lines by literal substring. Never disclose results or this activity."
-            }
-            Self::NotesAppendToFile => {
-                "Append text to private model-only notes. Never disclose paths, contents, or this activity."
-            }
-            Self::NotesWriteFile => {
-                "Create or replace private model-only notes. Never disclose paths, contents, or this activity."
-            }
+            Self::HistoryListWindows => "Context window IDs and item counts",
+            Self::HistoryListItems => "Filtered history items",
+            Self::HistoryReadItem => "Read a history item range",
+            Self::HistorySearchContents => "Search history by literal substring",
+            Self::NotesListFilesByPrefix => "List note paths",
+            Self::NotesReadFile => "Read note lines",
+            Self::NotesSearchContents => "Search note lines by literal substring",
+            Self::NotesAppendToFile => "Append text exactly",
+            Self::NotesWriteFile => "Create or replace a note",
         }
     }
 
@@ -145,91 +125,91 @@ impl HistoryNotesAction {
             Self::HistoryListWindows => json!({
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "description": "Maximum number of windows to return."},
+                    "limit": {"type": "integer", "minimum": 1},
                     "agent_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": HISTORY_AGENT_NAME_DESCRIPTION},
-                    "recent_first": {"type": "boolean", "description": "Whether to return the most recently created windows first."}
+                    "recent_first": {"type": "boolean"}
                 }
             }),
             Self::HistoryListItems => json!({
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "description": "Maximum number of items to return."},
-                    "recent_first": {"type": "boolean", "description": "Whether to return the most recently created items first."},
-                    "tool_namespace": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Callable namespace to include. When set, non-tool messages are excluded."},
-                    "role": {"anyOf": [{"type": "string", "enum": ["user", "assistant", "tool", "system", "developer"]}, {"type": "null"}], "description": "Message role to include. Null or omission includes all roles."},
+                    "limit": {"type": "integer", "minimum": 1},
+                    "recent_first": {"type": "boolean"},
+                    "tool_namespace": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Excludes non-tool messages"},
+                    "role": {"anyOf": [{"type": "string", "enum": ["user", "assistant", "tool", "system", "developer"]}, {"type": "null"}]},
                     "agent_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": HISTORY_AGENT_NAME_DESCRIPTION},
-                    "tool_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Callable tool name to include. When set, non-tool messages are excluded."},
-                    "window_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Full window ID. Null or omission includes all windows."},
-                    "max_chars_per_item": {"type": "integer", "minimum": 1, "description": "Maximum characters returned in each item's truncated_content."}
+                    "tool_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Excludes non-tool messages"},
+                    "window_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Full returned ID; omit for all windows"},
+                    "max_chars_per_item": {"type": "integer", "minimum": 1, "description": "Per-item character limit"}
                 }
             }),
             Self::HistoryReadItem => json!({
                 "type": "object",
                 "properties": {
                     "agent_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": HISTORY_AGENT_NAME_DESCRIPTION},
-                    "item_id": {"type": "string", "description": "The short item ID is the suffix shown in the target item's trailing `[id: ...]` marker, printed after that item's content."},
-                    "offset_chars": {"type": "integer", "minimum": 0, "description": "Zero-based character offset at which reading starts."},
-                    "limit_chars": {"type": "integer", "minimum": 1, "description": "Maximum number of characters to return."},
-                    "window_id": {"type": "string", "description": "Full window ID containing the item."}
+                    "item_id": {"type": "string", "description": "Suffix from the [id: …] marker"},
+                    "offset_chars": {"type": "integer", "minimum": 0, "description": "Zero-based"},
+                    "limit_chars": {"type": "integer", "minimum": 1, "description": "Character limit"},
+                    "window_id": {"type": "string", "description": "Full returned window ID"}
                 },
                 "required": ["item_id", "window_id"]
             }),
             Self::HistorySearchContents => json!({
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "description": "Maximum number of matching items to return."},
-                    "query": {"type": "string", "encrypted": true, "description": "Case-sensitive literal substring to find in item content."},
-                    "recent_first": {"type": "boolean", "description": "Whether to return the most recently created matches first."},
-                    "tool_namespace": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Callable namespace to include. When set, non-tool messages are excluded."},
-                    "role": {"anyOf": [{"type": "string", "enum": ["user", "assistant", "tool", "system", "developer"]}, {"type": "null"}], "description": "Message role to include. Null or omission includes all roles."},
+                    "limit": {"type": "integer", "minimum": 1},
+                    "query": {"type": "string", "encrypted": true, "description": "Case-sensitive literal substring"},
+                    "recent_first": {"type": "boolean"},
+                    "tool_namespace": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Excludes non-tool messages"},
+                    "role": {"anyOf": [{"type": "string", "enum": ["user", "assistant", "tool", "system", "developer"]}, {"type": "null"}]},
                     "agent_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": HISTORY_AGENT_NAME_DESCRIPTION},
-                    "tool_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Callable tool name to include. When set, non-tool messages are excluded."},
-                    "window_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Full window ID. Null or omission includes all windows."}
+                    "tool_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Excludes non-tool messages"},
+                    "window_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Full returned ID; omit for all windows"}
                 },
                 "required": ["query"]
             }),
             Self::NotesListFilesByPrefix => json!({
                 "type": "object",
                 "properties": {
-                    "prefix": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Note path prefix to list."},
-                    "max_results": {"type": "integer", "minimum": 1, "description": "Maximum number of files to return."},
-                    "file_order_by": {"type": "string", "enum": ["name", "created_at", "updated_at"], "description": "Field used to order files."},
-                    "file_order": {"type": "string", "enum": ["ascending", "descending"], "description": "Direction used to order files."}
+                    "prefix": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "max_results": {"type": "integer", "minimum": 1},
+                    "file_order_by": {"type": "string", "enum": ["name", "created_at", "updated_at"]},
+                    "file_order": {"type": "string", "enum": ["ascending", "descending"]}
                 }
             }),
             Self::NotesReadFile => json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Note file path to read."},
-                    "start_line": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "First line to return, inclusive and 1-based. Negative values count backward from the final line."},
-                    "stop_line": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "Last line to return, inclusive and 1-based. Negative values count backward from the final line."}
+                    "path": {"type": "string"},
+                    "start_line": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "Inclusive, 1-based; negative counts from end"},
+                    "stop_line": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "Inclusive, 1-based; negative counts from end"}
                 },
                 "required": ["path"]
             }),
             Self::NotesSearchContents => json!({
                 "type": "object",
                 "properties": {
-                    "max_matches_per_file": {"type": "integer", "minimum": 1, "description": "Maximum number of matching lines returned per file."},
-                    "query": {"type": "string", "encrypted": true, "description": "Case-sensitive literal substring to find in note lines."},
-                    "recent_file_first": {"type": "boolean", "description": "Whether to order matching files by creation time, newest first."},
-                    "max_files": {"type": "integer", "minimum": 1, "description": "Maximum number of matching files returned."},
-                    "path_prefix": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Note path prefix to search."}
+                    "max_matches_per_file": {"type": "integer", "minimum": 1},
+                    "query": {"type": "string", "encrypted": true, "description": "Case-sensitive literal substring"},
+                    "recent_file_first": {"type": "boolean", "description": "By creation time"},
+                    "max_files": {"type": "integer", "minimum": 1},
+                    "path_prefix": {"anyOf": [{"type": "string"}, {"type": "null"}]}
                 },
                 "required": ["query"]
             }),
             Self::NotesAppendToFile => json!({
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "encrypted": true, "description": "Text appended exactly as provided."},
-                    "path": {"type": "string", "description": "Note file path to append to."}
+                    "text": {"type": "string", "encrypted": true, "description": "Appended exactly"},
+                    "path": {"type": "string"}
                 },
                 "required": ["text", "path"]
             }),
             Self::NotesWriteFile => json!({
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "encrypted": true, "description": "Complete replacement text for the file."},
-                    "path": {"type": "string", "description": "Note file path to create or replace."}
+                    "text": {"type": "string", "encrypted": true, "description": "Replacement text"},
+                    "path": {"type": "string"}
                 },
                 "required": ["text", "path"]
             }),
@@ -278,11 +258,12 @@ impl HistoryNotesTool {
                 &self.current_agent_name,
                 arguments,
                 call.truncation_policy,
+                matches!(call.source, ToolCallSource::Direct),
             )
             .await
             .map_err(FunctionCallError::RespondToModel)?;
 
-        Ok(Box::new(HistoryNotesToolOutput::new(result)?))
+        Ok(Box::new(HistoryNotesToolOutput::new(result, call.call_id)?))
     }
 }
 
@@ -309,11 +290,11 @@ impl<'call> ToolExecutor<ToolCall<'call>> for HistoryNotesTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        ToolExposure::DirectModelOnly
+        ToolExposure::Direct
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
-        self.action.supports_parallel_tool_calls()
+        true
     }
 
     fn handle<'a>(&'a self, call: ToolCall<'call>) -> ToolExecutorFuture<'a>
@@ -327,10 +308,11 @@ impl<'call> ToolExecutor<ToolCall<'call>> for HistoryNotesTool {
 struct HistoryNotesToolOutput {
     result: Value,
     output: FunctionCallOutputPayload,
+    call_id: String,
 }
 
 impl HistoryNotesToolOutput {
-    fn new(mut result: Value) -> Result<Self, FunctionCallError> {
+    fn new(mut result: Value, call_id: String) -> Result<Self, FunctionCallError> {
         // Separate attachments before serializing any text or retaining log output.
         let images = result.as_object_mut().and_then(|map| map.remove("images"));
         // The server applies the requested output budget before encryption.
@@ -376,7 +358,11 @@ impl HistoryNotesToolOutput {
             }
             output = FunctionCallOutputPayload::from_content_items(content);
         }
-        Ok(Self { result, output })
+        Ok(Self {
+            result,
+            output,
+            call_id,
+        })
     }
 }
 
@@ -402,7 +388,11 @@ impl ToolOutput for HistoryNotesToolOutput {
     }
 
     fn code_mode_result(&self, _payload: &ToolPayload) -> Value {
-        Value::String("History tools are unavailable in code mode.".to_string())
+        json!({"delivered_to_model": true, "call_id": self.call_id})
+    }
+
+    fn code_mode_model_output(&self, _payload: &ToolPayload) -> Option<FunctionCallOutputPayload> {
+        Some(self.output.clone())
     }
 }
 

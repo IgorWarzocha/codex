@@ -19,6 +19,19 @@ pub fn render_json_schema_to_typescript(schema: &JsonValue) -> String {
     render_json_schema_to_typescript_with_budget(schema, DEFAULT_INPUT_SCHEMA_MAX_BYTES)
 }
 
+/// Standing signatures expose argument names, not nested schema manuals.
+/// Full declarations remain in the runtime's on-demand tool descriptions.
+pub(crate) fn render_compact_input_type(schema: &JsonValue) -> String {
+    let mut renderer = JsonSchemaTypeRenderer::new(schema, DEFAULT_INPUT_SCHEMA_MAX_BYTES);
+    renderer.compact = true;
+    let rendered = renderer.render(schema);
+    if rendered.len() > DEFAULT_INPUT_SCHEMA_MAX_BYTES {
+        "unknown".to_string()
+    } else {
+        rendered
+    }
+}
+
 pub(crate) fn render_json_schema_to_typescript_with_budget(
     schema: &JsonValue,
     max_bytes: usize,
@@ -33,6 +46,8 @@ pub(crate) fn render_json_schema_to_typescript_with_budget(
 
 struct JsonSchemaTypeRenderer<'a> {
     root: &'a JsonValue,
+    compact: bool,
+    object_depth: usize,
     nested_schema_resource_depth: usize,
     active_local_ref_expansions: BTreeMap<String, usize>,
     remaining_local_ref_expansions: usize,
@@ -44,6 +59,8 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
     fn new(root: &'a JsonValue, max_bytes: usize) -> Self {
         Self {
             root,
+            compact: false,
+            object_depth: 0,
             nested_schema_resource_depth: 0,
             active_local_ref_expansions: BTreeMap::new(),
             remaining_local_ref_expansions: MAX_TOTAL_LOCAL_REF_EXPANSIONS,
@@ -323,6 +340,16 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
     }
 
     fn render_object(&mut self, map: &serde_json::Map<String, JsonValue>) -> String {
+        if self.compact && self.object_depth > 0 {
+            return "object".to_string();
+        }
+        self.object_depth += 1;
+        let rendered = self.render_object_body(map);
+        self.object_depth -= 1;
+        rendered
+    }
+
+    fn render_object_body(&mut self, map: &serde_json::Map<String, JsonValue>) -> String {
         let required = map
             .get("required")
             .and_then(JsonValue::as_array)
@@ -341,9 +368,10 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
 
         let mut sorted_properties = properties.iter().collect::<Vec<_>>();
         sorted_properties.sort_unstable_by_key(|(name_a, _)| *name_a);
-        if sorted_properties
-            .iter()
-            .any(|(_, value)| has_property_description(value))
+        if !self.compact
+            && sorted_properties
+                .iter()
+                .any(|(_, value)| has_property_description(value))
         {
             let mut lines = Vec::new();
             if !self.push_render_line(&mut lines, "{".to_string()) {

@@ -15,27 +15,19 @@ pub(crate) fn create_request_plugin_install_tool(
             BTreeMap::from([
                 (
                     "tool_type".to_string(),
-                    JsonSchema::string(Some(
-                        "Type of discoverable tool to suggest. Use \"connector\" or \"plugin\"."
-                            .to_string(),
-                    )),
+                    JsonSchema::string(Some("connector or plugin".to_string())),
                 ),
                 (
                     "action_type".to_string(),
-                    JsonSchema::string(Some(
-                        "Suggested action for the tool. Use \"install\".".to_string(),
-                    )),
+                    JsonSchema::string(Some("install".to_string())),
                 ),
                 (
                     "tool_id".to_string(),
-                    JsonSchema::string(Some("Connector or plugin id to suggest.".to_string())),
+                    JsonSchema::string(Some("Returned candidate ID".to_string())),
                 ),
                 (
                     "suggest_reason".to_string(),
-                    JsonSchema::string(Some(
-                        "Concise one-line user-facing reason why this plugin or connector can help with the current request."
-                            .to_string(),
-                    )),
+                    JsonSchema::string(Some("One-line user-facing reason".to_string())),
                 ),
             ]),
             vec![
@@ -45,7 +37,7 @@ pub(crate) fn create_request_plugin_install_tool(
                 "suggest_reason".to_string(),
             ],
             format!(
-                "# Request plugin/connector install\n\nUse this tool only after `{LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME}` returns a plugin or connector that exactly matches the user's explicit request.\n\nDo not use it for adjacent capabilities, broad recommendations, or tools that merely seem useful. Pass the returned `tool_type` through directly, and pass the returned `id` as `tool_id`.\n\nIMPORTANT: DO NOT call this tool in parallel with other tools."
+                "Request installation only for an exact match to the user's explicit request returned by `{LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME}`. Pass its tool_type and id as tool_type and tool_id. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools."
             ),
         ),
         ToolSuggestPresentation::RecommendationContext => (
@@ -53,20 +45,17 @@ pub(crate) fn create_request_plugin_install_tool(
                 (
                     "plugin_id".to_string(),
                     JsonSchema::string(Some(
-                        "The parenthesized plugin ID from the `<recommended_plugins>` list."
+                        "Parenthesized ID from <recommended_plugins>"
                             .to_string(),
                     )),
                 ),
                 (
                     "suggest_reason".to_string(),
-                    JsonSchema::string(Some(
-                        "Concise one-line user-facing reason why this plugin can help with the current request."
-                            .to_string(),
-                    )),
+                    JsonSchema::string(Some("One-line user-facing reason".to_string())),
                 ),
             ]),
             vec!["plugin_id".to_string(), "suggest_reason".to_string()],
-            "# Suggest a recommended plugin installation\n\nUse this tool only when all of the following are true:\n- The user explicitly asks to use a specific plugin that is not already available in the current context or active `tools` list.\n- Tool search has already been exhausted and did not find or make the requested tool callable.\n- The plugin is listed in `<recommended_plugins>`.\n\nDo not use it for adjacent capabilities, broad recommendations, or plugins that merely seem useful. Briefly explain why the plugin can help with the current request in `suggest_reason`.\n\nIMPORTANT: DO NOT call this tool in parallel with other tools.".to_string(),
+            "Suggest installation only for a specific unavailable plugin the user explicitly requested, after exhausting tool search, and only from <recommended_plugins>. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools.".to_string(),
         ),
     };
 
@@ -89,12 +78,7 @@ mod tests {
 
     #[test]
     fn create_request_plugin_install_tool_uses_expected_legacy_wire_shape() {
-        let expected_description = concat!(
-            "# Request plugin/connector install\n\n",
-            "Use this tool only after `list_available_plugins_to_install` returns a plugin or connector that exactly matches the user's explicit request.\n\n",
-            "Do not use it for adjacent capabilities, broad recommendations, or tools that merely seem useful. Pass the returned `tool_type` through directly, and pass the returned `id` as `tool_id`.\n\n",
-            "IMPORTANT: DO NOT call this tool in parallel with other tools.",
-        );
+        let expected_description = "Request installation only for an exact match to the user's explicit request returned by `list_available_plugins_to_install`. Pass its tool_type and id as tool_type and tool_id. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools.";
 
         assert_eq!(
             create_request_plugin_install_tool(ToolSuggestPresentation::ListTool),
@@ -103,41 +87,33 @@ mod tests {
                 description: expected_description.to_string(),
                 strict: false,
                 defer_loading: None,
-                parameters: JsonSchema::object(BTreeMap::from([
+                parameters: JsonSchema::object(
+                    BTreeMap::from([
                         (
                             "action_type".to_string(),
-                            JsonSchema::string(Some(
-                                    "Suggested action for the tool. Use \"install\"."
-                                        .to_string(),
-                                ),),
+                            JsonSchema::string(Some("install".to_string(),),),
                         ),
                         (
                             "suggest_reason".to_string(),
-                            JsonSchema::string(Some(
-                                    "Concise one-line user-facing reason why this plugin or connector can help with the current request."
-                                        .to_string(),
-                                ),),
+                            JsonSchema::string(Some("One-line user-facing reason".to_string(),),),
                         ),
                         (
                             "tool_id".to_string(),
-                            JsonSchema::string(Some(
-                                    "Connector or plugin id to suggest."
-                                        .to_string(),
-                                ),),
+                            JsonSchema::string(Some("Returned candidate ID".to_string(),),),
                         ),
                         (
                             "tool_type".to_string(),
-                            JsonSchema::string(Some(
-                                    "Type of discoverable tool to suggest. Use \"connector\" or \"plugin\"."
-                                        .to_string(),
-                                ),),
+                            JsonSchema::string(Some("connector or plugin".to_string(),),),
                         ),
-                    ]), Some(vec![
+                    ]),
+                    Some(vec![
                         "tool_type".to_string(),
                         "action_type".to_string(),
                         "tool_id".to_string(),
                         "suggest_reason".to_string(),
-                    ]), Some(false.into())),
+                    ]),
+                    Some(false.into())
+                ),
                 output_schema: None,
             })
         );
@@ -145,15 +121,7 @@ mod tests {
 
     #[test]
     fn recommendation_context_uses_simplified_plugin_wire_shape() {
-        let expected_description = concat!(
-            "# Suggest a recommended plugin installation\n\n",
-            "Use this tool only when all of the following are true:\n",
-            "- The user explicitly asks to use a specific plugin that is not already available in the current context or active `tools` list.\n",
-            "- Tool search has already been exhausted and did not find or make the requested tool callable.\n",
-            "- The plugin is listed in `<recommended_plugins>`.\n\n",
-            "Do not use it for adjacent capabilities, broad recommendations, or plugins that merely seem useful. Briefly explain why the plugin can help with the current request in `suggest_reason`.\n\n",
-            "IMPORTANT: DO NOT call this tool in parallel with other tools.",
-        );
+        let expected_description = "Suggest installation only for a specific unavailable plugin the user explicitly requested, after exhausting tool search, and only from <recommended_plugins>. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools.";
 
         assert_eq!(
             create_request_plugin_install_tool(ToolSuggestPresentation::RecommendationContext),
@@ -167,16 +135,12 @@ mod tests {
                         (
                             "plugin_id".to_string(),
                             JsonSchema::string(Some(
-                                "The parenthesized plugin ID from the `<recommended_plugins>` list."
-                                    .to_string(),
+                                "Parenthesized ID from <recommended_plugins>".to_string(),
                             )),
                         ),
                         (
                             "suggest_reason".to_string(),
-                            JsonSchema::string(Some(
-                                "Concise one-line user-facing reason why this plugin can help with the current request."
-                                    .to_string(),
-                            )),
+                            JsonSchema::string(Some("One-line user-facing reason".to_string())),
                         ),
                     ]),
                     Some(vec!["plugin_id".to_string(), "suggest_reason".to_string()]),

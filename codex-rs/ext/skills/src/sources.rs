@@ -146,11 +146,6 @@ impl SkillProviders {
             .await
     }
 
-    pub(crate) async fn list_host_for_turn(&self, query: SkillListQuery) -> SkillCatalog {
-        self.list_matching(&query, |source| source.kind == SkillSourceKind::Host)
-            .await
-    }
-
     async fn list_matching(
         &self,
         query: &SkillListQuery,

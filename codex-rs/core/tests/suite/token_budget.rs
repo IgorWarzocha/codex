@@ -452,7 +452,7 @@ async fn token_budget_history_notes_can_be_enabled_without_experimental_context(
         )?;
         assert_eq!(
             turn_metadata["history_ingest_requested"].as_bool(),
-            use_history_notes.then_some(true)
+            Some(true)
         );
     }
     Ok(())

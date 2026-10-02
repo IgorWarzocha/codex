@@ -4304,7 +4304,7 @@
           "type": "integer"
         },
         "use_history_notes_extension": {
-          "description": "Whether to expose the built-in history and notes extension.",
+          "description": "Legacy compatibility field. Remote history and notes are always enabled with Codex backend authentication.",
           "type": "boolean"
         }
       },

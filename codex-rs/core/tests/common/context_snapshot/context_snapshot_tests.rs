@@ -322,15 +322,15 @@ fn portable_tool_schema_keeps_non_platform_changes_visible() {
     let mut unix = json!({
         "type": "function",
         "name": "exec_command",
-        "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+        "description": "Run a shell command. Returns output and a session ID while running.",
         "parameters": { "properties": {
-            "cmd": { "description": "Shell command to execute." },
-            "yield_time_ms": { "description": "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms." }
+            "cmd": { "description": "Shell command" },
+            "yield_time_ms": { "description": "Wait before yielding, default 10000 ms, range 250-30000 ms" }
         } }
     });
     let mut windows = unix.clone();
     windows["parameters"]["properties"]["yield_time_ms"]["description"] = json!(
-        "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
+        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately"
     );
     assert_eq!(portable_tool_schema(&unix), portable_tool_schema(&windows));
 
@@ -346,34 +346,80 @@ fn portable_tool_schema_keeps_non_platform_changes_visible() {
 }
 
 #[test]
-fn portable_tool_schema_normalizes_embedded_code_mode_shell_guidance() {
-    let base = "Runs a command in a PTY, returning output or a session ID for ongoing interaction.";
+fn portable_tool_schema_normalizes_native_shell_guidance() {
+    let base = "Run a shell command. Returns output and a session ID while running.";
     let windows_guidance = r#"Windows safety rules:
 - Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.
 - Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
 - When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control."#;
     let description = |shell: String, wait: &str| {
-        format!("### `exec_command`\n{shell}\n\nexec tool declaration:\n```ts\n  // {wait}\n```")
+        json!({ "type": "function", "name": "exec_command", "description": shell,
+            "parameters": { "properties": { "yield_time_ms": { "description": wait } } }
+        })
     };
-    let nested = |description| {
-        json!({ "type": "namespace", "name": "functions", "tools": [
-            { "type": "custom", "name": "exec", "description": description }
-        ] })
-    };
+    let nested = |tool| json!({ "type": "namespace", "name": "functions", "tools": [tool] });
     let unix = nested(description(
         base.to_string(),
-        "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms.",
+        "Wait before yielding, default 10000 ms, range 250-30000 ms",
     ));
     let windows = nested(description(
         format!("{base}\n\n{windows_guidance}"),
-        "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms.",
+        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately",
     ));
     assert_eq!(portable_tool_schema(&unix), portable_tool_schema(&windows));
 
     let changed = nested(description(
         format!("{base}\n\n{windows_guidance}\nA new restriction."),
-        "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms.",
+        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately",
     ));
+    assert_ne!(portable_tool_schema(&unix), portable_tool_schema(&changed));
+}
+
+#[test]
+fn portable_tool_schema_preserves_compact_inventory_signatures() {
+    let description = |platform_help: &str, command_type: &str| {
+        codex_code_mode::build_exec_tool_description(
+            &[codex_code_mode::ToolDefinition {
+                name: "exec_command".to_string(),
+                tool_name: codex_tools::ToolName::plain("exec_command"),
+                description: platform_help.to_string(),
+                kind: codex_code_mode::CodeModeToolKind::Function,
+                input_schema: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "cmd": {"type": command_type},
+                        "yield_time_ms": {"type": "number", "description": platform_help}
+                    },
+                    "required": ["cmd"],
+                    "additionalProperties": false
+                })),
+                input_schema_max_bytes: None,
+                output_schema: None,
+            }],
+            &[],
+            &std::collections::BTreeMap::new(),
+            30000,
+            true,
+            codex_code_mode::ImageDetailVisibility::Visible,
+            None,
+        )
+    };
+    let tool = |description| {
+        json!({
+            "type": "custom", "name": "exec", "description": description
+        })
+    };
+    let unix = tool(description("Unix wait guidance", "string"));
+    let windows = tool(description("Windows safety and wait guidance", "string"));
+    assert_eq!(unix, windows);
+    assert!(
+        unix["description"]
+            .as_str()
+            .unwrap()
+            .contains("- tools.exec_command(args: { cmd: string; yield_time_ms?: number; })")
+    );
+    assert_eq!(portable_tool_schema(&unix), unix);
+    let changed = tool(description("Unix wait guidance", "number"));
     assert_ne!(portable_tool_schema(&unix), portable_tool_schema(&changed));
 }
 

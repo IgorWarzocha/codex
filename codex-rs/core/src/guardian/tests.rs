@@ -2354,8 +2354,8 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         .expect("guardian code-mode exec description");
     let mut guardian_nested_tool_names = guardian_exec_description
         .lines()
-        .filter_map(|line| line.strip_prefix("### `"))
-        .filter_map(|line| line.strip_suffix('`'))
+        .filter_map(|line| line.strip_prefix("- tools."))
+        .filter_map(|line| line.split_once("(args: ").map(|(name, _)| name))
         .collect::<Vec<_>>();
     guardian_nested_tool_names.sort_unstable();
     assert_eq!(

@@ -1918,6 +1918,11 @@ impl Config {
             })
     }
 
+    /// Remote history and notes are available independently of context-budget settings.
+    pub fn uses_native_history_notes(&self, auth_manager: &codex_login::AuthManager) -> bool {
+        self.model_provider.is_openai() && auth_manager.current_auth_uses_codex_backend()
+    }
+
     pub async fn rebuild_with_session_layers(
         session_layers: &ConfigLayerStack,
         cwd: PathBuf,

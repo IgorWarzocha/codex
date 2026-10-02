@@ -7,7 +7,7 @@ Scenario: New context window tool installs fresh full context before the next fo
 ## Window 1
 -- request 1 (turn; Final Follow-Up Request) --
 00:message/developer[2]:
-    [01] <SKILLS_INSTRUCTIONS>
+    [01] Skills: List once at session start; read always-applicable and task-relevant skills before work
     [02] <PERMISSIONS_INSTRUCTIONS>
 01:message/developer:
     <context_window>

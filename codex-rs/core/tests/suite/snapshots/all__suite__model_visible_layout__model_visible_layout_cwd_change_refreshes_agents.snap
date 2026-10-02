@@ -7,7 +7,7 @@ Scenario: Second turn changes cwd to a directory with different AGENTS.md and re
 ## Window 1
 -- request 1 (turn; First Request (agents_one)) --
 00:message/developer[2]:
-    [01] <SKILLS_INSTRUCTIONS>
+    [01] Skills: List once at session start; read always-applicable and task-relevant skills before work
     [02] <PERMISSIONS_INSTRUCTIONS>
 01:message/user[2]:
     [01] <AGENTS_MD>

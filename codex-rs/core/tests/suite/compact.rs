@@ -622,13 +622,24 @@ async fn summarize_context_three_requests_and_instructions(
     if custom_instructions {
         assert_eq!(instr1, CUSTOM_INSTRUCTIONS);
     } else {
-        assert_eq!(instr1.contains("update_plan"), enable_plan);
+        assert_eq!(instr1, codex_models_manager::model_info::BASE_INSTRUCTIONS);
     }
     assert_eq!(
         instr1, instr2,
         "manual compact should keep the standard developer instructions"
     );
     assert_eq!(requests[2].instructions_text(), instr1);
+    for request in [&requests[0], &requests[2]] {
+        assert_eq!(
+            request.body_json()["tools"]
+                .as_array()
+                .expect("normal request tools")
+                .iter()
+                .any(|tool| tool["name"] == "update_plan"),
+            enable_plan,
+            "compaction must preserve the configured plan tool independently of baseline prose"
+        );
+    }
 
     // The summarization request should include the injected user input marker.
     let body2_str = body2.to_string();

@@ -376,7 +376,7 @@ impl FeatureConfig for ContextManagementConfigToml {
 pub struct TokenBudgetConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Whether to expose the built-in history and notes extension.
+    /// Legacy compatibility field. Remote history and notes are always enabled with Codex backend authentication.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub use_history_notes_extension: Option<bool>,
     /// Number of tokens remaining before auto-compaction when the wrap-up reminder is emitted.

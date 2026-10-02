@@ -110,13 +110,20 @@ fn augment_tool_spec_for_code_mode_augments_function_tools() {
         })),
         ToolSpec::Function(ResponsesApiTool {
             name: "lookup_order".to_string(),
-            description: r#"Look up an order
+            description: format!(
+                r#"Look up an order
 
 exec tool declaration:
 ```ts
-declare const tools: { lookup_order(args: { order_id: string; }): Promise<{ ok: boolean; }>; };
-```"#
-                .to_string(),
+declare const tools: {{ lookup_order(args: {{ order_id: string; }}): Promise<{{ ok: boolean; }}>; }};
+```
+
+Input schema: {}
+
+Output schema: {}"#,
+                json!({"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"], "additionalProperties": false}),
+                json!({"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}),
+            ),
             strict: false,
             defer_loading: Some(true),
             parameters: JsonSchema::object(

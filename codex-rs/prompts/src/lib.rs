@@ -20,6 +20,7 @@ pub use model_messages::ResolvedCollaborationModeMessages;
 pub use model_messages::ResolvedMessage;
 pub use model_messages::ResolvedModelMessages;
 pub use model_messages::ResolvedMultiAgentMessages;
+pub use model_messages::apply_default_catalog_workflow;
 pub use multi_agent_instructions::MultiAgentRoleInstructions;
 pub use permissions_instructions::ApprovalPromptContext;
 pub use permissions_instructions::PermissionsInstructions;

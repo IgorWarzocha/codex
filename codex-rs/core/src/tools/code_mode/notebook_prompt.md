@@ -1,14 +1,8 @@
-Run JavaScript or TypeScript in a persistent Deno notebook. Send raw source, not JSON or Markdown fences.
-
-- Bindings and imports survive cells and context rollover. Checkpoints restore retained state by value, never by replaying cells. New threads inherit durable project state, not another thread's private live bindings.
-- Retained functions restore from source. Keep helpers self-contained or use retained globals. Closures and live handles are not durable.
-- Deno APIs, Web APIs and imports are available. Code runs with full machine access. Never treat this runtime as a sandbox.
-- Await all async work. Deno timers and direct I/O are not cell-scoped; do not leave them running across cells. Only one cell may run at a time. Use `wait` after a yielded cell before starting another.
-- Cancellation terminates the kernel. Use the top-level `notebook` tool to inspect or recover retained state.
-- Optional first line: `// @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}`. Default yield timeout: {{ default_exec_yield_time_ms }} ms.
-- `tools` contains the enabled nested tools. Example: `text(await tools.exec_command({cmd: "pwd"}))`. Tool names use normalized JavaScript identifiers. `ALL_TOOLS` contains their names and descriptions.
-- `text(value)` emits text. `image(value)` emits an image. `generatedImage(value)` emits an image-generation result. Bare expression values are not a substitute for explicit output.
-- `store(key, value)` and `load(key)` retain serializable values within this kernel.
-- Inside exec, `tools.notebook` supports status without query, list, and diagnostics. All other notebook actions use the top-level tool after exec returns.
-- `await notify(value)` sends an immediate notification. `await yield_control()` yields output while execution continues.
-- `exit()` ends the cell successfully. `audio()` is not supported.
+Run JavaScript/TypeScript in a persistent Deno notebook. Source only, no JSON or fences. Deno, Web APIs and imports have full machine access, not a sandbox.
+Bindings/imports survive cells and context rollover. Checkpoints restore values without replay; functions restore from source, not closures or live handles. New threads inherit durable project state, not private live bindings.
+Await async work. Timers and direct I/O can outlive cells. Only one cell runs at a time: wait on yielded cells before another exec. Cancellation terminates the kernel; recover with the top-level notebook tool.
+Optional // @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}; defaults {{ default_exec_yield_time_ms }} ms/10000 tokens.
+Call await tools.<normalized_name>(args). Full help: tools.<name>.description, tools.<name>.usage (input schema), ALL_TOOLS (full definitions including output schemas).
+Model-only tool results bypass JS; calls return delivery receipts.
+text(value), image(value), generatedImage(value) emit output; bare values are discarded. store(key,value)/load(key) retain serializable values in this kernel. await notify(value) emits immediately; await yield_control() yields while work continues; exit() finishes successfully. No audio().
+Inside exec, tools.notebook supports status without query, list, diagnostics. Other notebook actions use the top-level tool after exec returns.

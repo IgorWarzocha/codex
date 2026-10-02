@@ -61,6 +61,12 @@ pub trait ToolOutput: Send {
         response_input_to_code_mode_result(self.to_response_item("", payload))
     }
 
+    /// Native model-only content to relay outside the JavaScript runtime.
+    /// Code Mode must deliver this payload before returning `code_mode_result`.
+    fn code_mode_model_output(&self, _payload: &ToolPayload) -> Option<FunctionCallOutputPayload> {
+        None
+    }
+
     /// Borrows original host-only metadata for recording, not for model output or logging.
     fn tool_result_metadata(&self) -> Option<&JsonValue> {
         None
@@ -109,6 +115,10 @@ where
 
     fn code_mode_result(&self, payload: &ToolPayload) -> JsonValue {
         (**self).code_mode_result(payload)
+    }
+
+    fn code_mode_model_output(&self, payload: &ToolPayload) -> Option<FunctionCallOutputPayload> {
+        (**self).code_mode_model_output(payload)
     }
 
     fn tool_result_metadata(&self) -> Option<&JsonValue> {

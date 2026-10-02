@@ -28,27 +28,23 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     include_windows_shell_guidance: bool,
 ) -> ToolSpec {
     let yield_time_ms_description = if cfg!(windows) {
-        "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
+        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately"
     } else {
-        "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+        "Wait before yielding, default 10000 ms, range 250-30000 ms"
     };
     let mut properties = BTreeMap::from([
         (
             "cmd".to_string(),
-            JsonSchema::string(Some("Shell command to execute.".to_string())),
+            JsonSchema::string(Some("Shell command".to_string())),
         ),
         (
             "workdir".to_string(),
-            JsonSchema::string(Some(
-                "Working directory for the command. Defaults to the turn cwd."
-                    .to_string(),
-            )),
+            JsonSchema::string(Some("Cwd, defaults to turn cwd".to_string())),
         ),
         (
             "tty".to_string(),
             JsonSchema::boolean(Some(
-                "True allocates a PTY for the command; false or omitted uses plain pipes."
-                    .to_string(),
+                "Allocate a PTY for stdin interaction; otherwise use pipes".to_string(),
             )),
         ),
         (
@@ -58,24 +54,21 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         (
             "max_output_tokens".to_string(),
             JsonSchema::number(Some(
-                "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy.".to_string(),
+                "Output tokens, default 10000, subject to policy caps".to_string(),
             )),
         ),
     ]);
     if include_shell_parameter {
         properties.insert(
             "shell".to_string(),
-            JsonSchema::string(Some(
-                "Shell binary to launch. Defaults to the user's default shell.".to_string(),
-            )),
+            JsonSchema::string(Some("Shell binary, defaults to user's shell".to_string())),
         );
     }
     if options.allow_login_shell {
         properties.insert(
             "login".to_string(),
             JsonSchema::boolean(Some(
-                "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
-                    .to_string(),
+                "Enable -l/-i shell semantics, default true".to_string(),
             )),
         );
     }
@@ -83,8 +76,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         properties.insert(
             "environment_id".to_string(),
             JsonSchema::string(Some(
-                "Environment id from <environment_context>. Omit to use the primary environment."
-                    .to_string(),
+                "ID from <environment_context>, defaults to primary environment".to_string(),
             )),
         );
     }
@@ -96,12 +88,11 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         name: "exec_command".to_string(),
         description: if include_windows_shell_guidance {
             format!(
-                "Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n{}",
+                "Run a shell command. Returns output and a session ID while running.\n\n{}",
                 windows_shell_guidance()
             )
         } else {
-            "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
-                .to_string()
+            "Run a shell command. Returns output and a session ID while running.".to_string()
         },
         strict: false,
         defer_loading: None,
@@ -118,35 +109,31 @@ pub fn create_write_stdin_tool() -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "session_id".to_string(),
-            JsonSchema::number(Some(
-                "Identifier of the running unified exec session.".to_string(),
-            )),
+            JsonSchema::number(Some("Session ID from exec_command".to_string())),
         ),
         (
             "chars".to_string(),
             JsonSchema::string(Some(
-                "Bytes to write to stdin. Defaults to empty, which polls without writing.".to_string(),
+                "Stdin bytes, only for tty=true sessions. Empty or omitted polls".to_string(),
             )),
         ),
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
+                "Wait before yielding. Writes default to 250 ms, cap 30000 ms. Empty polls wait 5000-300000 ms by default".to_string(),
             )),
         ),
         (
             "max_output_tokens".to_string(),
             JsonSchema::number(Some(
-                "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy.".to_string(),
+                "Output tokens, default 10000, subject to policy caps".to_string(),
             )),
         ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "write_stdin".to_string(),
-        description:
-            "Writes characters to an existing unified exec session and returns recent output."
-                .to_string(),
+        description: "Write stdin or poll a running command for output".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(
@@ -162,15 +149,12 @@ pub fn create_request_permissions_tool(description: String) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "reason".to_string(),
-            JsonSchema::string(Some(
-                "Optional short explanation for why additional permissions are needed.".to_string(),
-            )),
+            JsonSchema::string(Some("Why additional permissions are needed".to_string())),
         ),
         (
             "environment_id".to_string(),
             JsonSchema::string(Some(
-                "Environment id from <environment_context>. Omit to use the primary environment."
-                    .to_string(),
+                "ID from <environment_context>, defaults to primary environment".to_string(),
             )),
         ),
         ("permissions".to_string(), permission_profile_schema()),
@@ -191,7 +175,7 @@ pub fn create_request_permissions_tool(description: String) -> ToolSpec {
 }
 
 pub fn request_permissions_tool_description() -> String {
-    "Request additional filesystem or network permissions from the user and wait for the client to grant a subset of the requested permission profile. Use environment_id to target a specific attached environment; omit it to use the primary environment. Relative filesystem paths resolve against the selected environment cwd. Granted permissions apply automatically to later shell-like commands in the current turn, or for the rest of the session if the client approves them at session scope."
+    "Request filesystem or network permissions and wait for the client to grant a subset. Relative paths resolve against the selected environment cwd. Grants apply automatically to later shell-like commands this turn, or this session if approved at session scope."
         .to_string()
 }
 
@@ -201,27 +185,27 @@ fn unified_exec_output_schema() -> Value {
         "properties": {
             "chunk_id": {
                 "type": "string",
-                "description": "Chunk identifier included when the response reports one."
+                "description": "Output chunk ID"
             },
             "wall_time_seconds": {
                 "type": "number",
-                "description": "Elapsed wall time spent waiting for output in seconds."
+                "description": "Seconds spent waiting for output"
             },
             "exit_code": {
                 "type": "number",
-                "description": "Process exit code when the command finished during this call."
+                "description": "Exit code if finished"
             },
             "session_id": {
                 "type": "number",
-                "description": "Session identifier to pass to write_stdin when the process is still running."
+                "description": "Pass to write_stdin while running"
             },
             "original_token_count": {
                 "type": "number",
-                "description": "Approximate token count before output truncation."
+                "description": "Approximate tokens before truncation"
             },
             "output": {
                 "type": "string",
-                "description": "Command output text, possibly truncated."
+                "description": "Output, possibly truncated"
             }
         },
         "required": ["wall_time_seconds", "output"],
@@ -238,9 +222,9 @@ fn create_approval_parameters(
     }
     sandbox_permission_values.push(json!("require_escalated"));
     let sandbox_permissions_description = if exec_permission_approvals_enabled {
-        "Per-command sandbox override. Defaults to `use_default`; use `with_additional_permissions` with `additional_permissions`, or `require_escalated` for unsandboxed execution."
+        "Default use_default. with_additional_permissions requires additional_permissions; require_escalated runs unsandboxed"
     } else {
-        "Per-command sandbox override. Defaults to `use_default`; use `require_escalated` for unsandboxed execution."
+        "Default use_default. require_escalated runs unsandboxed"
     };
 
     let mut properties = BTreeMap::from([
@@ -254,22 +238,22 @@ fn create_approval_parameters(
         (
             "justification".to_string(),
             JsonSchema::string(Some(
-                "User-facing approval question for `require_escalated`; omit otherwise.".to_string(),
+                "Approval question for require_escalated only".to_string(),
             )),
         ),
         (
             "prefix_rule".to_string(),
-            JsonSchema::array(JsonSchema::string(/*description*/ None), Some(
-                    r#"Reusable approval prefix for `cmd`, only with `sandbox_permissions: "require_escalated"`; for example ["git", "pull"]."#.to_string(),
-                )),
+            JsonSchema::array(
+                JsonSchema::string(/*description*/ None),
+                Some(r#"Reusable cmd approval prefix, only with require_escalated"#.to_string()),
+            ),
         ),
     ]);
 
     if exec_permission_approvals_enabled {
         let mut additional_permissions = permission_profile_schema();
         additional_permissions.description = Some(
-            "Sandboxed filesystem or network access for this command; only with `sandbox_permissions: \"with_additional_permissions\"`."
-                .to_string(),
+            "Sandboxed access for this command, only with with_additional_permissions".to_string(),
         );
         properties.insert("additional_permissions".to_string(), additional_permissions);
     }
@@ -286,7 +270,7 @@ fn permission_profile_schema() -> JsonSchema {
         /*required*/ None,
         Some(false.into()),
     );
-    schema.description = Some("Filesystem or network access request.".to_string());
+    schema.description = Some("Requested access".to_string());
     schema
 }
 
@@ -294,14 +278,12 @@ fn network_permissions_schema() -> JsonSchema {
     let mut schema = JsonSchema::object(
         BTreeMap::from([(
             "enabled".to_string(),
-            JsonSchema::boolean(Some(
-                "True requests network access; false or omitted requests none.".to_string(),
-            )),
+            JsonSchema::boolean(Some("Request network access, default false".to_string())),
         )]),
         /*required*/ None,
         Some(false.into()),
     );
-    schema.description = Some("Network access request.".to_string());
+    schema.description = Some("Requested network access".to_string());
     schema
 }
 
@@ -312,27 +294,21 @@ fn file_system_permissions_schema() -> JsonSchema {
                 "read".to_string(),
                 JsonSchema::array(
                     JsonSchema::string(/*description*/ None),
-                    Some(
-                        "Absolute paths to grant read access; omit when none are needed."
-                            .to_string(),
-                    ),
+                    Some("Absolute paths for read access".to_string()),
                 ),
             ),
             (
                 "write".to_string(),
                 JsonSchema::array(
                     JsonSchema::string(/*description*/ None),
-                    Some(
-                        "Absolute paths to grant write access; omit when none are needed."
-                            .to_string(),
-                    ),
+                    Some("Absolute paths for write access".to_string()),
                 ),
             ),
         ]),
         /*required*/ None,
         Some(false.into()),
     );
-    schema.description = Some("Filesystem access request.".to_string());
+    schema.description = Some("Requested filesystem access".to_string());
     schema
 }
 

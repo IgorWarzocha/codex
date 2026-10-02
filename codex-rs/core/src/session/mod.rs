@@ -3772,6 +3772,7 @@ impl Session {
                 extension_data.insert(messages.clone());
             }
             extension_data.insert(selected_capability_roots.clone());
+            extension_data.insert(turn_context.skills_snapshot().as_ref().clone());
             if let Some(discovery) = &executor_capability_discovery {
                 extension_data.insert(discovery.as_ref().clone());
             }
@@ -4300,9 +4301,7 @@ impl Session {
             // native request must not fall back to the bridge.
             if !turn_context
                 .config
-                .token_budget
-                .as_ref()
-                .is_some_and(|config| config.use_history_notes_extension)
+                .uses_native_history_notes(&self.services.auth_manager)
                 && let Some(mcp_result) = self
                     .services
                     .mcp_runtime

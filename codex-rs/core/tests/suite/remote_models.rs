@@ -492,18 +492,18 @@ async fn remote_models_long_model_slug_is_sent_with_supported_reasoning(
         .collect::<Vec<_>>();
     if effort != ReasoningEffort::Persistent || catalog_instructions == Some("") {
         assert!(persistent_instructions.is_empty());
-    } else if let Some(instructions) = catalog_instructions {
+    } else {
+        // This endpoint belongs to the default manager, including nonempty remote prose.
+        let instructions = codex_prompts::ResolvedModelMessages::bundled()
+            .persistent_instructions()
+            .trim()
+            .replace("{{ approval_request_channel }}", "");
         assert_eq!(
             persistent_instructions,
             vec![format!(
                 "<persistent_mode>\n{instructions}\n</persistent_mode>"
             )]
         );
-    } else {
-        assert_eq!(persistent_instructions.len(), 1);
-        assert!(persistent_instructions[0].starts_with(
-            "<persistent_mode>\n## Proactivity\n\nAfter you've completed the user task and delivered the final answer,"
-        ));
     }
 
     Ok(())

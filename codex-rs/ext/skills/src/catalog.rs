@@ -65,6 +65,8 @@ impl SkillPackageId {
             .strip_prefix(self.0.trim_end_matches('/'))?
             .strip_prefix('/')?;
         (!relative.is_empty()
+            && !relative.contains('\\')
+            && !relative.chars().any(char::is_control)
             && relative
                 .split('/')
                 .all(|segment| !matches!(segment, "" | "." | "..")))
@@ -158,6 +160,12 @@ impl SkillResourceId {
             .as_ref()
             .and_then(|resource| resource.contents.as_deref())
     }
+
+    pub(crate) fn environment_package_root(&self) -> Option<&PathUri> {
+        self.environment_path
+            .as_ref()
+            .map(|resource| &resource.package_root)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -180,6 +188,7 @@ pub struct SkillCatalogEntry {
     pub display_path: Option<String>,
     pub canonical_skill_id: Option<String>,
     pub plugin_id: Option<String>,
+    pub remote_plugin_id: Option<String>,
     pub analytics_scope: Option<SkillScope>,
     alias_root: Option<String>,
     alias_root_order: Option<usize>,
@@ -207,6 +216,7 @@ impl SkillCatalogEntry {
             display_path: None,
             canonical_skill_id: None,
             plugin_id: None,
+            remote_plugin_id: None,
             analytics_scope: None,
             alias_root: None,
             alias_root_order: None,
@@ -270,10 +280,6 @@ impl SkillCatalogEntry {
 
     pub(crate) fn alias_root(&self) -> Option<&str> {
         self.alias_root.as_deref()
-    }
-
-    pub(crate) fn alias_root_order(&self) -> Option<usize> {
-        self.alias_root_order
     }
 
     pub(crate) fn prompt_scope(&self) -> Option<SkillScope> {

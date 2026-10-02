@@ -4,7 +4,6 @@ use super::CodeModeToolKind;
 use super::DEFERRED_NESTED_TOOLS_GUIDANCE;
 use super::ImageDetailVisibility;
 use super::LEGACY_IMAGE_HELPER_DESCRIPTION;
-use super::MCP_TYPESCRIPT_PREAMBLE;
 use super::ToolDefinition;
 use super::UNIFIED_IMAGE_HELPER_DESCRIPTION;
 use super::build_exec_tool_description;
@@ -107,7 +106,7 @@ fn exec_override_preserves_runtime_sections() {
             }
         })),
     }];
-    let declaration = "### `alpha`\nFirst tool\n\nexec tool declaration:\n```ts\ndeclare const tools: { alpha(args: unknown): Promise<unknown>; };\n```";
+    let declaration = "Tools available in exec (nested object details and results: inspect tool help in ALL_TOOLS):\n- tools.alpha(args: unknown)";
     for (code_mode_only, guidance, preamble, expected) in [
         (true, Some(""), Some(""), declaration.to_string()),
         (
@@ -116,12 +115,7 @@ fn exec_override_preserves_runtime_sections() {
             Some(""),
             format!("{DEFERRED_NESTED_TOOLS_GUIDANCE}\n\n{declaration}"),
         ),
-        (
-            true,
-            Some(""),
-            None,
-            format!("Shared MCP Types:\n```ts\n{MCP_TYPESCRIPT_PREAMBLE}\n```\n\n{declaration}"),
-        ),
+        (true, Some(""), None, declaration.to_string()),
         (
             true,
             Some("  {{ image_helper }}\n"),

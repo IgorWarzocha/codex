@@ -21,13 +21,11 @@ pub(crate) fn create_tool_search_tool(
     let properties = BTreeMap::from([
         (
             "query".to_string(),
-            JsonSchema::string(Some("Search query for deferred tools.".to_string())),
+            JsonSchema::string(Some("Deferred-tool search query".to_string())),
         ),
         (
             "limit".to_string(),
-            JsonSchema::number(Some(format!(
-                "Maximum number of tools to return. Defaults to {default_limit}."
-            ))),
+            JsonSchema::number(Some(format!("Result limit, default {default_limit}"))),
         ),
     ]);
 
@@ -83,15 +81,13 @@ pub(crate) fn create_tool_search_tool(
                 }
                 rendered
             };
-            format!(
-                "\n\nYou have access to tools from the following sources:\n{source_descriptions}\n"
-            )
+            format!("\n\nEnabled sources:\n{source_descriptions}\n")
         }
         ToolSearchSourceListing::Omit => "\n\n".to_string(),
     };
 
     let description = format!(
-        "# Tool discovery\n\nSearches over deferred tool metadata with BM25 and exposes matching tools for the next model call.{source_section}Some of the tools may not have been provided to you upfront, and you should use this tool (`{TOOL_SEARCH_TOOL_NAME}`) to search for the required tools. For MCP tool discovery, always use `{TOOL_SEARCH_TOOL_NAME}` instead of `list_mcp_resources` or `list_mcp_resource_templates`."
+        "Search deferred tool metadata with BM25. Matches become callable on the next model call.{source_section}For MCP tool discovery, use `{TOOL_SEARCH_TOOL_NAME}`, not list_mcp_resources or list_mcp_resource_templates."
     );
 
     ToolSpec::ToolSearch {
@@ -138,18 +134,18 @@ mod tests {
             ),
             ToolSpec::ToolSearch {
                 execution: "client".to_string(),
-                description: "# Tool discovery\n\nSearches over deferred tool metadata with BM25 and exposes matching tools for the next model call.\n\nYou have access to tools from the following sources:\n- Google Drive: Use Google Drive as the single entrypoint for Drive, Docs, Sheets, and Slides work.\n- docs\nSome of the tools may not have been provided to you upfront, and you should use this tool (`tool_search`) to search for the required tools. For MCP tool discovery, always use `tool_search` instead of `list_mcp_resources` or `list_mcp_resource_templates`.".to_string(),
+                description: "Search deferred tool metadata with BM25. Matches become callable on the next model call.\n\nEnabled sources:\n- Google Drive: Use Google Drive as the single entrypoint for Drive, Docs, Sheets, and Slides work.\n- docs\nFor MCP tool discovery, use `tool_search`, not list_mcp_resources or list_mcp_resource_templates.".to_string(),
                 parameters: JsonSchema::object(BTreeMap::from([
                         (
                             "limit".to_string(),
                             JsonSchema::number(Some(
-                                    "Maximum number of tools to return. Defaults to 8."
+                                    "Result limit, default 8"
                                         .to_string(),
                                 ),),
                         ),
                         (
                             "query".to_string(),
-                            JsonSchema::string(Some("Search query for deferred tools.".to_string()),),
+                            JsonSchema::string(Some("Deferred-tool search query".to_string()),),
                         ),
                     ]), Some(vec!["query".to_string()]), Some(false.into())),
             }
@@ -169,9 +165,9 @@ mod tests {
             panic!("expected tool search spec");
         };
 
-        assert!(!description.contains("You have access to tools from the following sources"));
+        assert!(!description.contains("Enabled sources:"));
         assert!(!description.contains("Google Drive"));
-        assert!(description.contains("use this tool (`tool_search`) to search"));
+        assert!(description.contains("For MCP tool discovery, use `tool_search`"));
     }
 
     #[test]
@@ -192,10 +188,10 @@ mod tests {
         };
 
         let (_, source_section) = description
-            .split_once("You have access to tools from the following sources:\n")
+            .split_once("Enabled sources:\n")
             .expect("tool search should retain its source introduction");
         let (source_descriptions, _) = source_section
-            .split_once("\nSome of the tools may not have been provided to you upfront")
+            .split_once("\nFor MCP tool discovery")
             .expect("tool search should retain its discovery instructions");
         assert!(source_descriptions.len() <= MAX_TOOL_SEARCH_SOURCE_DESCRIPTION_BYTES);
         assert!(source_descriptions.starts_with("- source-00: 🦀"));
@@ -216,6 +212,10 @@ mod tests {
             .map(|index| format!("source-{index:02}"))
             .collect::<Vec<_>>();
         assert_eq!(advertised_names, expected_names);
-        assert!(description.contains("always use `tool_search`"));
+        assert!(
+            description.contains(
+                "use `tool_search`, not list_mcp_resources or list_mcp_resource_templates"
+            )
+        );
     }
 }

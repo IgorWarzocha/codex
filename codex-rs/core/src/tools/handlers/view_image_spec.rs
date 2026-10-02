@@ -16,16 +16,14 @@ pub struct ViewImageToolOptions {
 pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
     let mut properties = BTreeMap::from([(
         "path".to_string(),
-        JsonSchema::string(Some("Local filesystem path to an image file.".to_string())),
+        JsonSchema::string(Some("Local image path".to_string())),
     )]);
     if options.can_request_original_image_detail && !options.unified_image_budget {
         properties.insert(
             "detail".to_string(),
             JsonSchema::string_enum(
                 vec![json!("high"), json!("original")],
-                Some(
-                    "Image detail level. Defaults to `high`; use `original` to preserve exact resolution.".to_string(),
-                ),
+                Some("Default high; original preserves exact resolution".to_string()),
             ),
         );
     }
@@ -33,19 +31,21 @@ pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
         properties.insert(
             "environment_id".to_string(),
             JsonSchema::string(Some(
-                "Environment id from <environment_context>. Omit to use the primary environment."
-                    .to_string(),
+                "ID from <environment_context>, defaults to primary environment".to_string(),
             )),
         );
     }
 
     ToolSpec::Function(ResponsesApiTool {
         name: VIEW_IMAGE_TOOL_NAME.to_string(),
-        description: "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk."
-            .to_string(),
+        description: "Inspect a local image".to_string(),
         strict: false,
         defer_loading: None,
-        parameters: JsonSchema::object(properties, Some(vec!["path".to_string()]), Some(false.into())),
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec!["path".to_string()]),
+            Some(false.into()),
+        ),
         output_schema: Some(view_image_output_schema(options).into()),
     })
 }
@@ -56,7 +56,7 @@ fn view_image_output_schema(options: ViewImageToolOptions) -> Value {
         "properties": {
             "image_url": {
                 "type": "string",
-                "description": "Data URL for the loaded image."
+                "description": "Image data URL"
             }
         },
         "required": ["image_url"],
@@ -66,7 +66,7 @@ fn view_image_output_schema(options: ViewImageToolOptions) -> Value {
         schema["properties"]["detail"] = json!({
             "type": "string",
             "enum": ["high", "original"],
-            "description": "Image detail hint returned by view_image. Returns `high` for default resized behavior or `original` when original resolution is preserved."
+            "description": "high is resized; original preserves resolution"
         });
         schema["required"] = json!(["image_url", "detail"]);
     }

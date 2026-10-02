@@ -25,10 +25,7 @@ fn default_mode_instructions_follow_user_input_tool_availability() {
         .as_ref()
         .expect("default instructions should be set");
 
-    assert!(default_instructions.contains(
-        "Use the `request_user_input` tool only when it is listed in the available tools"
-    ));
-    assert!(
-        default_instructions.contains("Ask the user directly with one concise plain-text question")
-    );
+    assert!(default_instructions.contains("Use `request_user_input` only if available"));
+    assert!(default_instructions.contains("ask one concise plain-text question instead"));
+    assert!(default_instructions.contains("Never use it for permission or approval requests."));
 }

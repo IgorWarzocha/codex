@@ -76,7 +76,17 @@ fn plain_tools_join_an_existing_functions_group_only_with_a_prefix() {
     let rendered = render(&tools, &namespaces);
     assert_eq!(rendered.matches("## functions").count(), 1);
     assert!(rendered.contains("## functions\nCatalog guidance.\n\nOriginal namespace guidance."));
-    assert!(rendered.find("## functions").unwrap() < rendered.find("### `plain`").unwrap());
+    assert!(
+        rendered.find("## functions").unwrap()
+            < rendered.find("- tools.plain(args: unknown)").unwrap()
+    );
+    assert_eq!(rendered.matches("- tools.plain(args: unknown)").count(), 1);
+    assert_eq!(
+        rendered
+            .matches("- tools.namespaced(args: unknown)")
+            .count(),
+        1
+    );
 }
 
 #[test]

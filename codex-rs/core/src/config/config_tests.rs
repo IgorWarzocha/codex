@@ -12203,7 +12203,7 @@ max_concurrent_threads_per_session = 17
     .expect("multi-agent v2 config should parse");
 
     let config = resolve_multi_agent_v2_config(&config_toml);
-    let concurrency_guidance = "There are 17 available concurrency slots, meaning that up to 17 agents can be active at once, including you.";
+    let concurrency_guidance = "At most 17 agents may be active, including you.";
     let messages = ResolvedModelMessages::bundled().multi_agent();
     assert!(config.wait_agent_enabled);
     for wait_agent_enabled in [true, false] {
@@ -12305,7 +12305,7 @@ fn multi_agent_v2_exposes_model_overrides_by_default() {
             .strip_prefix(hint_without_model_overrides.as_str())
             .expect("model-override guidance should extend the base usage hint");
         for required_fragment in [
-            "Full-history forks",
+            "inherits the parent's model and effort",
             "`fork_turns`",
             "`model`",
             "`reasoning_effort`",

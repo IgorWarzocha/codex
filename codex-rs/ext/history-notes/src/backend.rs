@@ -41,6 +41,7 @@ impl HistoryNotesBackend {
         current_agent_name: &str,
         mut arguments: Value,
         truncation_policy: TruncationPolicy,
+        encrypted_arguments: bool,
     ) -> Result<Value, String> {
         let Some(arguments_object) = arguments.as_object_mut() else {
             return Err("History tool arguments must be a JSON object".to_string());
@@ -73,13 +74,15 @@ impl HistoryNotesBackend {
                 )
             })?,
         );
-        if matches!(
-            path,
-            "alpha/history/v2/search_contents"
-                | "alpha/notes/v2/search_contents"
-                | "alpha/notes/v2/append_to_file"
-                | "alpha/notes/v2/write_file"
-        ) {
+        if encrypted_arguments
+            && matches!(
+                path,
+                "alpha/history/v2/search_contents"
+                    | "alpha/notes/v2/search_contents"
+                    | "alpha/notes/v2/append_to_file"
+                    | "alpha/notes/v2/write_file"
+            )
+        {
             request.headers.insert(
                 ENCRYPTED_TOOL_ARGUMENTS_HEADER,
                 HeaderValue::from_static("true"),

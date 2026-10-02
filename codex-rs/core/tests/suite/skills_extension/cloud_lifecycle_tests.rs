@@ -6,6 +6,7 @@ use codex_extension_api::ThreadStartInput;
 use codex_mcp::McpResourceClient;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 struct CloudTurnProvider {
     reply: Mutex<Result<Option<(&'static str, u32)>, ()>>,
@@ -254,18 +255,8 @@ async fn cloud_skills_reuse_cache_and_invalidate_on_connection_or_auth_change() 
             vec![
                 sse(vec![
                     ev_response_created("tools"),
-                    responses::ev_function_call_with_namespace(
-                        &list_id,
-                        "skills",
-                        "list",
-                        &json!({"authority":{"kind":"cloud"}}).to_string(),
-                    ),
-                    responses::ev_function_call_with_namespace(
-                        &read_id,
-                        "skills",
-                        "read",
-                        &json!({"package": package}).to_string(),
-                    ),
+                    responses::ev_custom_tool_call(&list_id, "skills", "list"),
+                    responses::ev_custom_tool_call(&read_id, "skills", &format!("read {package}")),
                     ev_completed("tools"),
                 ]),
                 sse(vec![ev_response_created("done"), ev_completed("done")]),
@@ -304,46 +295,30 @@ async fn cloud_skills_reuse_cache_and_invalidate_on_connection_or_auth_change() 
             previous_reads + expected_reads,
             "turn {turn}"
         );
-        let listed: Value = serde_json::from_str(
-            &requests[1]
-                .function_call_output_text(&list_id)
-                .expect("skills.list result"),
-        )?;
-        let read = requests[1]
-            .function_call_output_text(&read_id)
-            .expect("skills.read result");
+        let listed = skill_output(&requests[1], &list_id);
+        let read = skill_output(&requests[1], &read_id);
         if let Some((plugin, revision)) = expected_skill {
             last_available_skill = (plugin, revision);
             let description = format!("Cloud {plugin} revision {revision}");
             assert_eq!(
-                listed["skills"].as_array().expect("listed skills").len(),
-                1,
-                "turn {turn}"
-            );
-            assert_eq!(listed["skills"][0]["package"], package, "turn {turn}");
-            assert_eq!(
-                listed["skills"][0]["description"], description,
+                listed,
+                format!("- {plugin}:demo: {description}"),
                 "turn {turn}"
             );
             assert!(
-                requests[0]
+                !requests[0]
                     .message_input_texts("developer")
                     .join("\n")
                     .contains(&description),
                 "turn {turn}"
             );
-            let read: Value = serde_json::from_str(&read)?;
-            assert_eq!(
-                read["contents"],
-                format!("{plugin} instructions {revision}"),
+            assert!(
+                read.starts_with(&format!("{plugin} instructions {revision}")),
                 "turn {turn}"
             );
         } else {
-            assert_eq!(listed["skills"], json!([]), "turn {turn}");
-            assert!(
-                read.contains("skill package is not available"),
-                "turn {turn}: {read}"
-            );
+            assert_eq!(listed, "No skills available.", "turn {turn}");
+            assert!(read.contains("Unknown skill"), "turn {turn}: {read}");
         }
     }
     Ok(())

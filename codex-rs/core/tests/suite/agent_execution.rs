@@ -615,7 +615,11 @@ async fn v2_residency_reload_preserves_inherited_environment_and_tools(
             .expect("expected a model request for the original worker")
     };
     let reloaded_tools = worker_tools(&reloaded_worker_request);
-    assert!(reloaded_tools.to_string().contains("### `exec_command`"));
+    assert!(
+        reloaded_tools
+            .to_string()
+            .contains("tools.exec_command(args:")
+    );
 
     Ok(())
 }

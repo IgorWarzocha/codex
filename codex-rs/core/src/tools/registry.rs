@@ -218,6 +218,10 @@ impl AnyToolResult {
         } = self;
         result.code_mode_result(&payload)
     }
+
+    pub(crate) fn code_mode_model_output(&self) -> Option<FunctionCallOutputPayload> {
+        self.result.code_mode_model_output(&self.payload)
+    }
 }
 
 struct PostToolUseFeedbackOutput {
@@ -248,6 +252,10 @@ impl ToolOutput for PostToolUseFeedbackOutput {
 
     fn code_mode_result(&self, payload: &ToolPayload) -> Value {
         self.original.code_mode_result(payload)
+    }
+
+    fn code_mode_model_output(&self, payload: &ToolPayload) -> Option<FunctionCallOutputPayload> {
+        self.original.code_mode_model_output(payload)
     }
 
     fn tool_result_metadata(&self) -> Option<&Value> {

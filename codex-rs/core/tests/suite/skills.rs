@@ -387,24 +387,6 @@ async fn user_turn_selects_symlinked_skill_by_advertised_discovery_path() -> Res
     .await;
 
     let request = mock.single_request();
-    let developer_texts = request.message_input_texts("developer");
-    let discovery_root_display = discovery_root.to_string_lossy().replace('\\', "/");
-    let root_suffix = format!(" = `{discovery_root_display}`");
-    let discovery_root_alias = developer_texts
-        .iter()
-        .flat_map(|text| text.lines())
-        .find(|line| line.ends_with(&root_suffix))
-        .and_then(|line| line.strip_prefix("- `"))
-        .and_then(|line| line.split_once("` = ").map(|(alias, _)| alias))
-        .expect("skill catalog should alias the advertised discovery root");
-    let advertised_path = format!("(file: {discovery_root_alias}/linked-demo/SKILL.md)");
-    assert!(
-        developer_texts
-            .iter()
-            .any(|text| text.contains(&advertised_path)),
-        "expected symlink discovery path in the skill catalog, got {developer_texts:?}"
-    );
-
     let user_texts = request.message_input_texts("user");
     let canonical_identity = format!("<path>{canonical_path_display}</path>");
     assert!(

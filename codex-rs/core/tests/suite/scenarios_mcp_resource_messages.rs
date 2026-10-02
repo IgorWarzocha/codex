@@ -91,11 +91,15 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
     wait_for_mcp_server(&test.codex, "resources").await?;
     let mut events = vec![responses::ev_response_created("resources-response")];
     events.extend(if tool_mode == ToolMode::CodeModeOnly {
-        let script = calls
+        let mut script = calls
             .iter()
             .map(|(name, arguments)| format!("text(await tools.{name}({arguments}));"))
             .collect::<Vec<_>>()
             .join("\n");
+        let names = serde_json::to_string(&calls.iter().map(|(name, _)| name).collect::<Vec<_>>())?;
+        script.push_str(&format!(
+            "\ntext({names}.map(name => ALL_TOOLS.find(tool => tool.name === name)));"
+        ));
         vec![responses::ev_custom_tool_call(
             "resources-call",
             "exec",
@@ -118,13 +122,54 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
     let requests = mock.requests();
     assert_eq!(requests.len(), 2);
     let body = requests[0].body_json();
+    let runtime_metadata = if tool_mode == ToolMode::CodeModeOnly {
+        let output = super::super::code_mode::custom_tool_output_last_non_empty_text(
+            &requests[1],
+            "resources-call",
+        )
+        .expect("runtime resource tool metadata");
+        let metadata: Vec<serde_json::Value> = serde_json::from_str(&output)?;
+        assert_eq!(metadata.len(), calls.len());
+        Some(metadata)
+    } else {
+        None
+    };
     for (name, message) in &messages {
         if tool_mode == ToolMode::CodeModeOnly {
+            assert!(requests[0].body_contains_text(&format!("- tools.{name}(args: ")));
             assert!(
-                requests[0]
+                !requests[0]
                     .body_contains_text(message["description"].as_str().expect("description"))
             );
-            assert!(requests[0].body_contains_text(&format!("Catalog server for {name}.")));
+            assert!(!requests[0].body_contains_text(&format!("Catalog server for {name}.")));
+            let tool = runtime_metadata
+                .as_ref()
+                .expect("Code Mode metadata")
+                .iter()
+                .find(|tool| tool["name"] == *name)
+                .expect("resource tool in ALL_TOOLS");
+            let (description, help) = tool["description"]
+                .as_str()
+                .expect("runtime description")
+                .split_once("\n\nexec tool declaration:")
+                .expect("on-demand typed declaration");
+            assert_eq!(
+                description,
+                message["description"].as_str().expect("description")
+            );
+            assert!(help.contains(&format!("Catalog server for {name}.")));
+            let (_, schema_help) = help
+                .split_once("\n\nInput schema: ")
+                .expect("on-demand raw input schema");
+            let input_schema = schema_help
+                .split_once("\n\nOutput schema: ")
+                .map_or(schema_help, |(input, _)| input);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(input_schema)?,
+                serde_json::from_str::<serde_json::Value>(
+                    message["parameters"].as_str().expect("parameters")
+                )?
+            );
         } else {
             let tool = body["tools"]
                 .as_array()
@@ -152,7 +197,7 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
         insta::assert_snapshot!(
             "mcp_resource_messages",
             context_snapshot::format_request_history_snapshot(
-                "Catalog resource descriptions and parameter guidance accompany discovery and reading through Code Mode.",
+                "Code Mode keeps resource signatures compact and discovers catalog descriptions and parameter schemas through ALL_TOOLS before the next model request.",
                 &requests,
                 &ContextSnapshotOptions::default().include_request_settings(),
             )

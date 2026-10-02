@@ -28,6 +28,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 codex-config = { workspace = true }
+codex-features = { workspace = true }
 codex-model-provider-info = { workspace = true }
 core_test_support = { workspace = true }
 pretty_assertions = { workspace = true }

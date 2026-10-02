@@ -16,10 +16,10 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (4; hash=045ecf3b2d3b6af5):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=e9cdd499ac568220
-    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=6692d8f6c55be489
-    - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
+  tools (4; hash=6af88a1a7e8e0a65):
+    - custom/exec: Run fresh restricted JavaScript to compose tools. Source only, no JSON or fences. No console, imp...; hash=4c78e6d3300d6404
+    - function/wait: Resume or terminate a yielded exec cell. Returns new output or completion, closing finished cells...; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=223c109693f9afac
+    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=be451617efc003d1
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
@@ -43,13 +43,13 @@ Settings:
 06:custom_tool_call_output:Script completed
     Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["Functions context.\\n\\nView a local image file from the filesystem when visual inspecti...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=22aad8f340003b22]
+     | {"descriptions":["Functions context.\\n\\nInspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare ...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=c36c37eb29e109e4]
 
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "prefixes-cleared"
-  tools (4; hash=dec6fdcb7bf3fec7):
-    ~ custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=39e1eedcbc703718
+  tools (4; hash=e07130961944d349):
+    ~ custom/exec: Run fresh restricted JavaScript to compose tools. Source only, no JSON or fences. No console, imp...; hash=165fc7d809af4dae
 -- request 3 (turn) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
@@ -71,7 +71,7 @@ Settings: relative to window 1
 06:custom_tool_call_output:Script completed
     Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["Functions context.\\n\\nView a local image file from the filesystem when visual inspecti...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=22aad8f340003b22]
+     | {"descriptions":["Functions context.\\n\\nInspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare ...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=c36c37eb29e109e4]
 07:message/assistant:
     Done.
 08:message/developer:
@@ -89,4 +89,4 @@ Settings: relative to window 1
 11:custom_tool_call_output:Script completed
     Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["View a local image file from the filesystem when visual inspection is needed. Use this...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=6ecfde0f75e5f051]
+     | {"descriptions":["Inspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare const tools: { view_im...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=eabe526305891bdf]

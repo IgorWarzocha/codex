@@ -764,6 +764,7 @@ async fn default_manager_keeps_compact_baseline_and_catalog_capabilities() {
             expected.slug = slug;
             expected.used_fallback_model_metadata = false;
             let messages = expected.model_messages.get_or_insert_default();
+            codex_prompts::apply_default_catalog_workflow(messages);
             messages.instructions_template = Some(model_info::BASE_INSTRUCTIONS.to_string());
             messages.instructions_variables = None;
             assert_eq!(selected, expected);

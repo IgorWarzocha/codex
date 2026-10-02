@@ -37,14 +37,14 @@ fn request_user_input_tool_includes_questions_schema() {
                                 (
                                     "header".to_string(),
                                     JsonSchema::string(Some(
-                                        "Short header label shown in the UI (12 or fewer chars)."
+                                        "UI header, at most 12 characters"
                                             .to_string(),
                                     )),
                                 ),
                                 (
                                     "id".to_string(),
                                     JsonSchema::string(Some(
-                                        "Stable identifier for mapping answers (snake_case)."
+                                        "Stable snake_case answer key"
                                             .to_string(),
                                     )),
                                 ),
@@ -56,14 +56,14 @@ fn request_user_input_tool_includes_questions_schema() {
                                                 (
                                                     "description".to_string(),
                                                     JsonSchema::string(Some(
-                                                        "One short sentence explaining impact/tradeoff if selected."
+                                                        "One sentence describing the choice's impact"
                                                             .to_string(),
                                                     )),
                                                 ),
                                                 (
                                                     "label".to_string(),
                                                     JsonSchema::string(Some(
-                                                        "User-facing label (1-5 words)."
+                                                        "Label, 1-5 words"
                                                             .to_string(),
                                                     )),
                                                 ),
@@ -75,16 +75,14 @@ fn request_user_input_tool_includes_questions_schema() {
                                             Some(false.into()),
                                         ),
                                         Some(
-                                            "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically."
+                                            "2-3 mutually exclusive choices. Recommended first, label suffixed \"(Recommended)\". Omit Other; the client adds free text"
                                                 .to_string(),
                                         ),
                                     ),
                                 ),
                                 (
                                     "question".to_string(),
-                                    JsonSchema::string(Some(
-                                        "Single-sentence prompt shown to the user.".to_string(),
-                                    )),
+                                    JsonSchema::string(Some("Single-sentence question".to_string())),
                                 ),
                             ]),
                             Some(vec![
@@ -96,7 +94,7 @@ fn request_user_input_tool_includes_questions_schema() {
                             Some(false.into()),
                         ),
                         Some(
-                            "Questions to show the user. Prefer 1 and do not exceed 3".to_string(),
+                            "Prefer 1 question, at most 3".to_string(),
                         ),
                     ),
                 ),
@@ -177,14 +175,14 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
 fn request_user_input_tool_description_mentions_available_modes() {
     assert_eq!(
         request_user_input_tool_description(&default_available_modes()),
-        "Request user input for one to three short questions and wait for the response. This tool is only available in Plan mode.".to_string()
+        "Ask the user and wait for answers. Available only in Plan mode.".to_string()
     );
     assert_eq!(
         request_user_input_tool_description(&default_mode_enabled_available_modes()),
-        "Request user input for one to three short questions and wait for the response. This tool is only available in Default or Plan mode.".to_string()
+        "Ask the user and wait for answers. Available only in Default or Plan mode.".to_string()
     );
     assert_eq!(
         request_user_input_tool_description(&[ModeKind::Default]),
-        "Request user input for one to three short questions and wait for the response. This tool is only available in Default mode.".to_string()
+        "Ask the user and wait for answers. Available only in Default mode.".to_string()
     );
 }

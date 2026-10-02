@@ -44,13 +44,7 @@ struct HistoryNotesAgentIdentity {
 
 impl HistoryNotesExtension {
     fn update_config(&self, thread_store: &ExtensionData, config: &Config) {
-        if config
-            .token_budget
-            .as_ref()
-            .is_some_and(|token_budget| token_budget.use_history_notes_extension)
-            && config.model_provider.is_openai()
-            && self.auth_manager.current_auth_uses_codex_backend()
-        {
+        if config.uses_native_history_notes(&self.auth_manager) {
             thread_store.insert(HistoryNotesExtensionConfig {
                 backend: HistoryNotesBackend::new(
                     create_model_provider(
@@ -127,6 +121,7 @@ impl ContextContributor for HistoryNotesExtension {
                     &identity.agent_name,
                     json!({}),
                     TruncationPolicy::Bytes(MAX_THREAD_HINT_BYTES),
+                    false,
                 )
                 .await
             else {

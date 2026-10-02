@@ -7,7 +7,7 @@ Scenario: First post-resume turn where pre-turn override sets model to rollout m
 ## Window 1
 -- request 1 (turn; Last Request Before Resume) --
 00:message/developer[2]:
-    [01] <SKILLS_INSTRUCTIONS>
+    [01] Skills: List once at session start; read always-applicable and task-relevant skills before work
     [02] <PERMISSIONS_INSTRUCTIONS>
 01:message/user:
     <ENVIRONMENT_CONTEXT>

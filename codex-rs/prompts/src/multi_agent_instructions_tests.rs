@@ -11,7 +11,7 @@ fn role_segment_filters_base_and_appends_bundled_guidance() {
     let wait = DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT;
     let model_override = DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT;
     let expected_body = format!(
-        "Role.\n## Work\nContinue.\n{shared}\n{wait}\n\nThere are 2 available concurrency slots, meaning that up to 2 agents can be active at once, including you.\n\n{model_override}"
+        "Role.\n## Work\nContinue.\n{shared}\n{wait}\n\nAt most 2 agents may be active, including you.\n\n{model_override}"
     );
     for marked in [false, true] {
         let instructions = MultiAgentRoleInstructions::Composed {

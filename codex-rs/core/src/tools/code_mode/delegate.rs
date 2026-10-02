@@ -45,6 +45,7 @@ pub(super) struct CodeModeDispatchBroker {
 pub(super) struct CodeModeCellDelegate {
     pub(super) broker: Arc<CodeModeDispatchBroker>,
     pub(super) step_context: Arc<StepContext>,
+    pub(super) outer_call_id: String,
 }
 
 struct CellDispatchGate {
@@ -164,6 +165,7 @@ impl CodeModeDispatchBroker {
                     }
                     DispatchMessage::InvokeTool {
                         invocation,
+                        outer_call_id,
                         step_context,
                         mut dispatch_trace,
                         cancellation_token,
@@ -225,6 +227,7 @@ impl CodeModeDispatchBroker {
                                         invocation,
                                         step_context,
                                         dispatch_trace.call_id.clone(),
+                                        outer_call_id,
                                         cancellation_token.clone(),
                                     )
                                 })
@@ -342,6 +345,7 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                 .dispatch_tx
                 .send(DispatchMessage::InvokeTool {
                     invocation,
+                    outer_call_id: self.outer_call_id.clone(),
                     step_context: Arc::downgrade(&self.step_context),
                     dispatch_trace,
                     cancellation_token: cancellation_token.clone(),
@@ -408,6 +412,7 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
 enum DispatchMessage {
     InvokeTool {
         invocation: CodeModeNestedToolCall,
+        outer_call_id: String,
         // The delegate owns the step while the callback is live; stale queued work must not.
         step_context: Weak<StepContext>,
         dispatch_trace: Box<NestedToolDispatchTrace>,
@@ -447,6 +452,7 @@ impl CoreTurnHost {
         invocation: CodeModeNestedToolCall,
         step_context: Arc<StepContext>,
         call_id: String,
+        outer_call_id: String,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<JsonValue, String>> + Send + 'static {
         let invocation = submit_nested_tool(
@@ -455,6 +461,7 @@ impl CoreTurnHost {
             self.tool_runtime.clone(),
             invocation,
             call_id,
+            outer_call_id,
             cancellation_token,
         )
         .map_err(|error| error.to_string());
@@ -471,25 +478,40 @@ impl CoreTurnHost {
         if text.trim().is_empty() {
             return Ok(());
         }
-        self.session
-            .inject_if_running(vec![ResponseItemEnvelope {
-                item: ResponseItem::CustomToolCallOutput {
-                    id: None,
-                    call_id,
-                    name: Some(PUBLIC_TOOL_NAME.to_string()),
-                    output: FunctionCallOutputPayload::from_text(text),
-                    internal_chat_message_metadata_passthrough: None,
-                },
-                metadata: Some(CodexHarnessMetadata {
-                    history_truncation_token_limit: Some(output_token_limit),
-                    ..Default::default()
-                }),
-            }])
-            .await
-            .map_err(|_| {
-                format!("failed to inject exec notify message for cell {cell_id}: no active turn")
-            })
+        inject_output(
+            &self.session,
+            &cell_id,
+            ResponseItem::CustomToolCallOutput {
+                id: None,
+                call_id,
+                name: Some(PUBLIC_TOOL_NAME.to_string()),
+                output: FunctionCallOutputPayload::from_text(text),
+                internal_chat_message_metadata_passthrough: None,
+            },
+            output_token_limit,
+        )
+        .await
     }
+}
+
+/// Both notifications and model-only nested results use the original exec call.
+/// Queue insertion is atomic with the active-turn check, and failures reach JS.
+pub(super) async fn inject_output(
+    session: &Session,
+    cell_id: &CellId,
+    item: ResponseItem,
+    output_token_limit: usize,
+) -> Result<(), String> {
+    session
+        .inject_if_running(vec![ResponseItemEnvelope {
+            item,
+            metadata: Some(CodexHarnessMetadata {
+                history_truncation_token_limit: Some(output_token_limit),
+                ..Default::default()
+            }),
+        }])
+        .await
+        .map_err(|_| format!("failed to inject exec output for cell {cell_id}: no active turn"))
 }
 
 #[cfg(test)]

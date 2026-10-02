@@ -271,7 +271,7 @@ pub(super) async fn model_catalog_refresh_requests(
         "expected visible model summary in model catalog: {catalog:?}"
     );
     assert_eq!(
-        description.contains("Pick model overrides from the latest <model_catalog> listing."),
+        description.contains("Choose overrides from the latest <model_catalog>"),
         model_catalog_in_context
     );
     assert_eq!(
@@ -282,21 +282,19 @@ pub(super) async fn model_catalog_refresh_requests(
         description.contains("- `visible-model`: Fast and capable"),
         !model_catalog_in_context
     );
-    let expected_inherited_model_guidance = if multi_agent_version == MultiAgentVersion::V2
-        && model_catalog_in_context
-    {
-        "Spawned agents inherit your current model by default. Do not set the `model` field unless the user explicitly asks for a different model."
-    } else {
-        "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed."
-    };
+    let expected_inherited_model_guidance =
+        if multi_agent_version == MultiAgentVersion::V2 && model_catalog_in_context {
+            "Inherit your model. Override only at the user's explicit request."
+        } else {
+            "Inherit your model by default. Override only when explicitly needed."
+        };
     assert!(
         description.contains(expected_inherited_model_guidance),
         "expected inherited-model guidance in spawn_agent description: {description:?}"
     );
     assert_eq!(
-        description.contains(
-            "Do not set the `model` field unless the user explicitly asks for a different model."
-        ),
+        description.contains("Override only at the user's explicit request.")
+            || description.contains("Model overrides require the user's explicit request."),
         multi_agent_version == MultiAgentVersion::V1 || model_catalog_in_context,
         "expected model override usage guidance in spawn_agent description: {description:?}"
     );
@@ -315,16 +313,16 @@ pub(super) async fn model_catalog_refresh_requests(
     if multi_agent_version == MultiAgentVersion::V1 {
         assert!(
         description.contains(
-            "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work."
+            "Spawn only when the user or applicable AGENTS.md/skill instructions explicitly request sub-agents, delegation, or parallel agent work."
         ),
         "expected explicit authorization rule in spawn_agent description: {description:?}"
     );
         assert!(
-        description.contains(
-            "Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn."
-        ) && description.contains("### When to delegate vs. do the subtask yourself"),
-        "expected delegation decision guidance in spawn_agent description: {description:?}"
-    );
+            description
+                .contains("Requests for depth, research, or thoroughness are not authorization.")
+                && description.contains("Keep immediate blockers local."),
+            "expected delegation decision guidance in spawn_agent description: {description:?}"
+        );
         assert!(
             !description.contains("A mini model can solve many tasks faster than the main model."),
             "spawn_agent description should not encourage choosing a smaller model by default: {description:?}"
@@ -494,7 +492,7 @@ async fn multi_agent_v2_wait_guidance_uses_overridable_developer_instructions(
         wait_agent_tool
             .pointer("/parameters/properties/timeout_ms/description")
             .and_then(Value::as_str),
-        Some("Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000.")
+        Some("Wait ms, default 30000, min 10000, max 3600000")
     );
 
     Ok(())
@@ -671,7 +669,7 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
                 wait_agent_tool
                     .pointer("/parameters/properties/timeout_ms/description")
                     .and_then(Value::as_str),
-                Some("Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000.")
+                Some("Wait ms, default 30000, min 10000, max 3600000")
             );
         }
     }

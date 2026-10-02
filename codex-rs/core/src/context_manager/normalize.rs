@@ -154,6 +154,7 @@ fn synthetic_output_id(prefix: &str, item_id: Option<&str>) -> Option<ResponseIt
 
 pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
     let mut function_call_ids = HashSet::new();
+    let mut exec_call_ids = HashSet::new();
     let mut tool_search_call_ids = HashSet::new();
     let mut custom_tool_call_ids = HashSet::new();
     for envelope in items.iter() {
@@ -173,6 +174,9 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
             }
             ResponseItem::CustomToolCall { call_id, .. } => {
                 custom_tool_call_ids.insert(call_id.as_str());
+                if let Some(call_id) = exec_call_id(&envelope.item) {
+                    exec_call_ids.insert(call_id);
+                }
             }
             _ => {}
         }
@@ -183,8 +187,11 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
         match &envelope.item {
             ResponseItem::FunctionCallOutput {
                 call_id: Some(call_id),
+                output,
                 ..
-            } if !function_call_ids.contains(call_id.as_str()) => {
+            } if !function_call_ids.contains(call_id.as_str())
+                && !(exec_call_ids.contains(call_id.as_str()) && has_encrypted_content(output)) =>
+            {
                 error_or_panic(format!(
                     "Orphan function call output for call id: {call_id}"
                 ));
@@ -225,6 +232,37 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
 }
 
 pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItemEnvelope>, item: &ResponseItem) {
+    // Exec can have several notify outputs and encrypted nested result relays.
+    // Evict the whole group when its call or any paired output is trimmed.
+    let removed_exec_id = exec_call_id(item).or_else(|| {
+        let call_id = match item {
+            ResponseItem::CustomToolCallOutput { call_id, .. } => call_id.as_str(),
+            ResponseItem::FunctionCallOutput {
+                call_id: Some(call_id),
+                output,
+                ..
+            } if has_encrypted_content(output) => call_id.as_str(),
+            _ => return None,
+        };
+        items
+            .iter()
+            .any(|envelope| exec_call_id(&envelope.item) == Some(call_id))
+            .then_some(call_id)
+    });
+    if let Some(call_id) = removed_exec_id {
+        items.retain(|envelope| match &envelope.item {
+            ResponseItem::CustomToolCallOutput {
+                call_id: existing, ..
+            } => existing != call_id,
+            ResponseItem::FunctionCallOutput {
+                call_id: Some(existing),
+                output,
+                ..
+            } if has_encrypted_content(output) => existing != call_id,
+            other => exec_call_id(other) != Some(call_id),
+        });
+        return;
+    }
     match item {
         ResponseItem::FunctionCall { call_id, .. } => {
             remove_first_matching(items, |i| {
@@ -314,6 +352,35 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItemEnvelope>, it
         }
         _ => {}
     }
+}
+
+/// Responses accepts encrypted function outputs alongside the custom exec
+/// receipt under the same call ID. This does not permit arbitrary cross-kind pairs.
+fn exec_call_id(item: &ResponseItem) -> Option<&str> {
+    match item {
+        ResponseItem::CustomToolCall {
+            name,
+            namespace,
+            call_id,
+            ..
+        } if name == codex_code_mode::PUBLIC_TOOL_NAME
+            && matches!(
+                namespace.as_deref(),
+                None | Some("") | Some(codex_protocol::DEFAULT_FUNCTION_NAMESPACE)
+            ) =>
+        {
+            Some(call_id)
+        }
+        _ => None,
+    }
+}
+
+fn has_encrypted_content(output: &FunctionCallOutputPayload) -> bool {
+    output.content_items().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| matches!(item, FunctionCallOutputContentItem::EncryptedContent { .. }))
+    })
 }
 
 fn remove_first_matching<F>(items: &mut Vec<ResponseItemEnvelope>, predicate: F)

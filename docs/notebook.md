@@ -57,6 +57,12 @@ Startup context and notebook status list exact-version npm imports found in succ
 
 State lives under `$CODEX_HOME/notebook`, outside the working tree. These private files contain code and serialized values, not encrypted data. Project state is shared by directories within the same Git repository. Session checkpoints remain thread-private. `--ephemeral` keeps checkpoints in memory and disables disk profiles and journals.
 
+## Remote notes and history
+
+Codex backend authentication enables remote notes and history independently of token-budget settings. Agents can call them through `exec`, including independent calls in `Promise.all`. Await dependent writes to the same note path.
+
+These are not local files or notebook bindings. Encrypted results are delivered directly to the model. JavaScript receives `{ delivered_to_model: true, call_id }`, not decrypted contents. The call ID matches the model's result, so parallel receipts can be associated with their requests. API-key and other-provider sessions do not expose this backend capability.
+
 ## Boundaries
 
 This is a native Codex implementation of the Pi Notebook workflow, not a Pi extension host. Pi custom extensions and ChatGPT desktop plugin packaging are not included. Native notebook code has full host access even though nested Codex tools retain their own approval checks.

@@ -26,8 +26,8 @@ use serde_json::Value;
 use serde_json::json;
 use test_case::test_case;
 
-const NO_SPAWN_TEXT: &str = "Any earlier instruction enabling proactive multi-agent delegation no longer applies. Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.";
-const PROACTIVE_TEXT: &str = "Proactive multi-agent delegation is active.";
+const NO_SPAWN_TEXT: &str = "This replaces earlier proactive-delegation guidance. Spawn agents only when the user or applicable AGENTS.md or skill instructions explicitly request delegation.";
+const PROACTIVE_TEXT: &str = "Proactive delegation replaces earlier explicit-request-only guidance until a later developer mode message changes it. Delegate parallel work when it saves time or improves quality. User requests override this hint.";
 const CUSTOM_MODE_HINT_TEXT: &str = "Use the configured delegation policy.";
 const CATALOG_MODE_HINT_TEXT: &str = "Use the model catalog delegation policy.";
 const CATALOG_EXPLICIT_TEXT: &str = "Use explicit delegation from the model catalog.";

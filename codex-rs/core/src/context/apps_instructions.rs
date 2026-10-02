@@ -27,7 +27,7 @@ impl ContextualUserFragment for AppsInstructions {
 
     fn body(&self) -> String {
         format!(
-            "\n## Apps (Connectors)\nApps (Connectors) can be explicitly triggered in user messages in the format `[$app-name](app://{{connector_id}})`. Apps can also be implicitly triggered as long as the context suggests usage of available apps.\nAn app is equivalent to a set of MCP tools within the `{CODEX_APPS_MCP_SERVER_NAME}` MCP.\nAn installed app's MCP tools are either provided to you already, or can be lazy-loaded through the `tool_search` tool. If `tool_search` is available, the apps that are searchable by `tools_search` will be listed by it.\nDo not additionally call list_mcp_resources or list_mcp_resource_templates for apps.\n"
+            "\nApps use `{CODEX_APPS_MCP_SERVER_NAME}` tools. A user can select an app with `[$app-name](app://{{connector_id}})`. Otherwise use relevant available apps. Discover unloaded tools with `tool_search` when available. Do not call `list_mcp_resources` or `list_mcp_resource_templates` for apps.\n"
         )
     }
 }
