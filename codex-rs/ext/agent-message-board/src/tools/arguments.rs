@@ -2,8 +2,61 @@
 
 use crate::ThreadSort;
 use serde::Deserialize;
+use serde::Deserializer;
+use serde::de;
+use serde_json::Value;
+use std::fmt;
 use std::num::NonZeroU32;
 use uuid::Uuid;
+
+pub(super) struct Call {
+    pub(super) action: String,
+    pub(super) args: Value,
+}
+
+impl<'de> Deserialize<'de> for Call {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct CallVisitor;
+
+        impl<'de> de::Visitor<'de> for CallVisitor {
+            type Value = Call;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("an agent_board argument object")
+            }
+
+            fn visit_map<M: de::MapAccess<'de>>(self, mut map: M) -> Result<Call, M::Error> {
+                let mut fields = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry::<String, Value>()? {
+                    // Extracting through Value alone would silently overwrite duplicate
+                    // fields that the action's original deserializer rejected.
+                    if fields.insert(key.clone(), value).is_some() {
+                        return Err(de::Error::custom(format!("duplicate field `{key}`")));
+                    }
+                }
+                let action = match fields.remove("action") {
+                    Some(Value::String(action)) => action,
+                    Some(_) => {
+                        return Err(de::Error::custom("agent_board action must be a string"));
+                    }
+                    None => return Err(de::Error::custom("agent_board requires action")),
+                };
+                Ok(Call {
+                    action,
+                    args: Value::Object(fields),
+                })
+            }
+        }
+
+        deserializer.deserialize_map(CallVisitor)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Help {
+    pub(super) topic: Option<String>,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

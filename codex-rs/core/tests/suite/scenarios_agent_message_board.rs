@@ -1,6 +1,7 @@
 //! Exercises board tools through the runtime, including resume and active-only notices.
 
 use anyhow::Context;
+use codex_agent_message_board_extension::AGENT_BOARD_TOOL_NAME;
 use codex_agent_message_board_extension::PostMetadata;
 use codex_core::TurnInputRequest;
 use codex_features::Feature;
@@ -32,6 +33,9 @@ use tokio::sync::oneshot;
 #[path = "scenarios_agent_message_board_remote.rs"]
 mod remote;
 
+#[path = "scenarios_agent_message_board_help.rs"]
+mod help;
+
 enum BoardClock {
     Available,
     Unavailable,
@@ -59,7 +63,13 @@ impl codex_core::TimeProvider for BoardClock {
     }
 }
 
-fn tool(call: &str, name: &str, arguments: Value) -> String {
+fn tool(call: &str, name: &str, mut arguments: Value) -> String {
+    let name = if matches!(name, "spawn_agent" | "wait_agent") {
+        name
+    } else {
+        arguments["action"] = json!(name);
+        AGENT_BOARD_TOOL_NAME
+    };
     sse(vec![
         ev_function_call_with_namespace(call, "collaboration", name, &arguments.to_string()),
         ev_completed(call),
@@ -75,6 +85,8 @@ fn done() -> String {
 
 fn configure(config: &mut codex_core::config::Config) {
     super::configure_scenario_catalog(config);
+    // These notification scenarios deliberately hold turns open with wait_agent.
+    config.multi_agent_v2.wait_agent_enabled = true;
     config
         .features
         .enable(Feature::AgentMessageBoard)
@@ -120,7 +132,7 @@ async fn board_requires_persistent_v2_runtime(
         responses::namespace_child_tool(
             &mock.single_request().body_json(),
             "collaboration",
-            "post"
+            AGENT_BOARD_TOOL_NAME
         )
         .is_none()
     );
@@ -164,8 +176,12 @@ async fn board_post_and_reads_reach_model_context_without_self_notices(
     let requests = mock.requests();
     assert_eq!(requests.len(), 3);
     assert!(
-        responses::namespace_child_tool(&requests[0].body_json(), "collaboration", "post")
-            .is_some()
+        responses::namespace_child_tool(
+            &requests[0].body_json(),
+            "collaboration",
+            AGENT_BOARD_TOOL_NAME
+        )
+        .is_some()
     );
     let output = requests[1]
         .function_call_output_text("post-decision")
@@ -837,7 +853,7 @@ async fn board_unsubscribe_survives_post_and_resume_until_resubscribed(
             "wait_agent",
             "interrupt_agent",
             "list_agents",
-            "post",
+            AGENT_BOARD_TOOL_NAME,
         ] {
             assert!(
                 responses::namespace_child_tool(&request, "collaboration", name).is_some(),

@@ -505,11 +505,11 @@ pub(crate) fn finalize_tool_router(
         && turn_context.config.multi_agent_v2.disable_direct_message
         && !turn_context.session_source.is_internal()
     {
-        let post_tool = ToolName::new(
+        let board_tool = ToolName::new(
             turn_context.config.multi_agent_v2.tool_namespace.clone(),
-            "post",
+            codex_agent_message_board_extension::AGENT_BOARD_TOOL_NAME,
         );
-        if !router.exposes_tool(&post_tool) {
+        if !router.exposes_tool(&board_tool) {
             return Err(CodexErrorDetails::InvalidRequest(
                 "disable_direct_message requires an available agent message board in this session"
                     .to_owned(),

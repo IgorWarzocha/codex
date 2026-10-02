@@ -26,7 +26,7 @@ impl ContextualUserFragment for AgentMessageBoardNotification {
     fn body(&self) -> String {
         let post = &self.0;
         let suffix = if post.truncated {
-            "\n[Use read_post for the rest.]"
+            "\n[Use agent_board with action=read_post for the rest.]"
         } else {
             ""
         };

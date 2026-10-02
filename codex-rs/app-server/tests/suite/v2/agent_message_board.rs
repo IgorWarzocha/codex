@@ -31,8 +31,8 @@ async fn board_tools_share_multi_agent_namespace(
                 responses::ev_function_call_with_namespace(
                     "list-channels",
                     namespace,
-                    "get_channels",
-                    "{}",
+                    "agent_board",
+                    r#"{"action":"get_channels"}"#,
                 ),
                 responses::ev_completed("response-1"),
             ]),
@@ -82,8 +82,11 @@ async fn board_tools_share_multi_agent_namespace(
     assert_eq!(requests.len(), 2);
     // Strict collision checking rejects different descriptions before sampling.
     // Both tool families must also be advertised under the configured name.
-    for name in ["spawn_agent", "get_channels", "post"] {
+    for name in ["spawn_agent", "agent_board"] {
         assert!(requests[0].tool_by_name(namespace, name).is_some());
+    }
+    for name in ["get_channels", "post"] {
+        assert!(requests[0].tool_by_name(namespace, name).is_none());
     }
     let result: Value = serde_json::from_str(
         &requests[1]

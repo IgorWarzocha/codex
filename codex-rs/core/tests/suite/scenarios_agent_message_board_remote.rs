@@ -138,8 +138,8 @@ async fn remote_board_uses_the_existing_tools_and_session_identity() -> anyhow::
                 responses::ev_function_call_with_namespace(
                     "remote-post",
                     "collaboration",
-                    "post",
-                    &json!({"new_channel_name":"design", "text":"A remote decision."}).to_string(),
+                    codex_agent_message_board_extension::AGENT_BOARD_TOOL_NAME,
+                    &json!({"action":"post", "new_channel_name":"design", "text":"A remote decision."}).to_string(),
                 ),
                 responses::ev_function_call_with_namespace(
                     "await-notification",

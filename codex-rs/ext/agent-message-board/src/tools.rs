@@ -3,6 +3,9 @@
 mod arguments;
 mod spec;
 
+#[cfg(test)]
+mod tests;
+
 use crate::AgentMessageBoard;
 use crate::ChannelQuery;
 use crate::CreateChannelRequest;
@@ -32,13 +35,17 @@ use codex_tools::ToolSpec;
 use futures::future::BoxFuture;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
 // Includes JSON escaping and metadata; applies equally to direct and Code Mode calls.
 const MAX_RESPONSE_BYTES: usize = 8_000;
 
-/// Creates tools without registering or enabling the extension.
+/// Public function name, independent of the host's configured namespace.
+pub const AGENT_BOARD_TOOL_NAME: &str = "agent_board";
+
+/// Creates one facade without registering or enabling the extension.
 /// The caller and its path must come from the host's authoritative tree metadata.
 /// Namespace metadata must match the host's other multi-agent tools.
 pub fn message_board_tools(
@@ -66,56 +73,50 @@ pub(crate) fn message_board_tools_with_descriptions(
     namespace_description: &str,
     tool_messages: Option<&MultiAgentToolMessages>,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
-    spec::NAMES
-        .into_iter()
-        .map(|name| {
-            let tool_message = tool_messages.and_then(|tools| tools.by_name(name));
-            if tool_message.is_some_and(|tool| tool.parameters.is_some()) {
+    let mut descriptions = BTreeMap::new();
+    for action in spec::ACTIONS {
+        if let Some(message) = tool_messages.and_then(|tools| tools.by_name(action)) {
+            if message.parameters.is_some() {
                 tracing::warn!(
-                    tool = name,
-                    "Channel tool parameters cannot be overridden; using bundled parameters"
+                    action,
+                    "Board action parameters cannot be overridden; using bundled parameters"
                 );
             }
-            Arc::new(BoardTool {
-                board: board.clone(),
-                caller,
-                caller_path: caller_path.clone(),
-                name,
-                namespace: namespace.map(str::to_owned),
-                namespace_description: namespace_description.to_owned(),
-                description: tool_message.and_then(|tool| tool.description.clone()),
-            }) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>
-        })
-        .collect()
+            if let Some(description) = &message.description {
+                descriptions.insert(action, description.clone());
+            }
+        }
+    }
+    vec![Arc::new(BoardTool {
+        board,
+        caller,
+        caller_path,
+        namespace: namespace.map(str::to_owned),
+        namespace_description: namespace_description.to_owned(),
+        descriptions,
+    })]
 }
 
 struct BoardTool {
     board: Arc<dyn AgentMessageBoard>,
     caller: ThreadId,
     caller_path: AgentPath,
-    name: &'static str,
     namespace: Option<String>,
     namespace_description: String,
-    description: Option<String>,
+    descriptions: BTreeMap<&'static str, String>,
 }
 
 impl<'call> ToolExecutor<ToolCall<'call>> for BoardTool {
     fn tool_name(&self) -> ToolName {
-        ToolName::new(self.namespace.clone(), self.name)
+        ToolName::new(self.namespace.clone(), AGENT_BOARD_TOOL_NAME)
     }
     fn spec(&self) -> ToolSpec {
-        spec::tool(
-            self.name,
-            self.namespace.as_deref(),
-            &self.namespace_description,
-            self.description.as_deref(),
-        )
+        spec::tool(self.namespace.as_deref(), &self.namespace_description)
     }
     fn supports_parallel_tool_calls(&self) -> bool {
-        matches!(
-            self.name,
-            "get_channels" | "list_threads" | "search_posts" | "read_thread" | "read_post"
-        )
+        // The host schedules at tool granularity, not by action. A facade that
+        // includes mutations must serialize even its reads until that changes.
+        false
     }
 
     fn handle<'a>(&'a self, call: ToolCall<'call>) -> ToolExecutorFuture<'a>
@@ -149,6 +150,7 @@ impl BoardTool {
         call: &ToolCall<'_>,
         budget: usize,
     ) -> Result<Value, FunctionCallError> {
+        let arguments::Call { action, args } = serde_json::from_str(raw).map_err(model_error)?;
         let board = &self.board;
         let caller = self.caller;
         let page_limit = |limit: Option<NonZeroU32>| limit.map_or(20, NonZeroU32::get).min(50);
@@ -165,12 +167,27 @@ impl BoardTool {
                 SortDirection::OldestFirst
             }
         };
-        match self.name {
+        match action.as_str() {
+            "help" => {
+                let arguments::Help { topic } =
+                    serde_json::from_value(args).map_err(model_error)?;
+                match topic {
+                    None => Ok(serde_json::json!({
+                        "actions":spec::ACTIONS,
+                        "usage":"action=help, topic=<action> returns that action's arguments",
+                    })),
+                    Some(topic) => spec::action_help(
+                        &topic,
+                        self.descriptions.get(topic.as_str()).map(String::as_str),
+                    )
+                    .ok_or_else(|| model_error(format!("Unknown agent_board help topic {topic:?}; use action=help for the action index"))),
+                }
+            }
             "create_channel" => {
                 let arguments::CreateChannel {
                     channel_name,
                     subscribe,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 self.check_mutation_budget(budget, /*target_path_bytes*/ 0)?;
                 encode(
                     board
@@ -194,7 +211,7 @@ impl BoardTool {
                     recent_first,
                     limit,
                     cursor,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 let limit = page_limit(limit);
                 bounded_read(budget, limit, |scale| {
                     board.list_channels(
@@ -216,7 +233,7 @@ impl BoardTool {
                     limit,
                     cursor,
                     max_chars_per_post,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 let limit = page_limit(limit);
                 let max_chars_per_post = preview_limit(max_chars_per_post);
                 bounded_read(budget, limit.max(max_chars_per_post), |scale| {
@@ -242,7 +259,7 @@ impl BoardTool {
                     limit,
                     cursor,
                     max_chars_per_post,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 let author = author
                     .map(|path| self.caller_path.resolve(&path))
                     .transpose()
@@ -270,7 +287,7 @@ impl BoardTool {
                     limit,
                     cursor,
                     max_chars_per_post,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 let limit = page_limit(limit);
                 let max_chars_per_post = preview_limit(max_chars_per_post);
                 bounded_read(budget, limit.max(max_chars_per_post), |scale| {
@@ -290,7 +307,7 @@ impl BoardTool {
                     message_id,
                     offset_chars,
                     limit_chars,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 let limit_chars = limit_chars.map_or(20_000, NonZeroU32::get).min(20_000);
                 bounded_read(budget, limit_chars, |scale| {
                     board.read_post(
@@ -309,7 +326,7 @@ impl BoardTool {
                     channel_name,
                     thread_id,
                     target_agent,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 self.check_mutation_budget(budget, target_agent.as_ref().map_or(0, String::len))?;
                 let target = match (channel_name, thread_id) {
                     (Some(channel), None) => SubscriptionTarget::Channel(channel),
@@ -330,7 +347,7 @@ impl BoardTool {
                                     .map(|path| self.caller_path.resolve(&path))
                                     .transpose()
                                     .map_err(model_error)?,
-                                change: if self.name == "subscribe" {
+                                change: if action == "subscribe" {
                                     SubscriptionChange::Subscribe
                                 } else {
                                     SubscriptionChange::Unsubscribe
@@ -347,7 +364,7 @@ impl BoardTool {
                     new_channel_name,
                     thread_id,
                     agents_to_notify,
-                } = serde_json::from_str(raw).map_err(model_error)?;
+                } = serde_json::from_value(args).map_err(model_error)?;
                 self.check_mutation_budget(budget, /*target_path_bytes*/ 0)?;
                 let destination = match (channel_name, new_channel_name, thread_id) {
                     (Some(channel), None, None) => PostDestination::Channel(channel),
@@ -385,7 +402,9 @@ impl BoardTool {
                         .await,
                 )
             }
-            _ => unreachable!("only registered message-board tools can be called"),
+            _ => Err(model_error(format!(
+                "Unknown agent_board action {action:?}; use action=help for the action index"
+            ))),
         }
     }
 

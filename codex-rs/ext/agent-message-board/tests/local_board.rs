@@ -933,11 +933,14 @@ async fn check_queries_page_discussions_and_search_unicode(backend: Backend) {
     );
 }
 
-fn board_tool_call(name: &str, args: serde_json::Value) -> codex_tools::ToolCall<'static> {
+fn board_tool_call(action: &str, mut args: serde_json::Value) -> codex_tools::ToolCall<'static> {
+    args.as_object_mut()
+        .unwrap()
+        .insert("action".into(), action.into());
     codex_tools::ToolCall {
         turn_id: "turn-1".into(),
-        call_id: name.into(),
-        tool_name: codex_tools::ToolName::namespaced("collaboration", name),
+        call_id: action.into(),
+        tool_name: codex_tools::ToolName::namespaced("collaboration", AGENT_BOARD_TOOL_NAME),
         model: "test".into(),
         codex_turn_metadata: None,
         truncation_policy: codex_utils_output_truncation::TruncationPolicy::Bytes(20_000),
@@ -961,7 +964,6 @@ async fn tools_cover_channel_discussions_subscriptions_and_escaped_previews() {
 async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_previews(
     backend: Backend,
 ) {
-    use codex_tools::ToolName;
     use serde_json::json;
     let dir = tempfile::tempdir().unwrap();
     let sqlite = SqliteConfig::new_for_testing(dir.path().to_path_buf().try_into().unwrap());
@@ -984,13 +986,9 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
         Some("collaboration"),
         "Shared tools",
     );
-    let tool = |name: &str| {
-        tools
-            .iter()
-            .find(|tool| tool.tool_name() == ToolName::namespaced("collaboration", name))
-            .unwrap()
-    };
-    let created = tool("create_channel")
+    assert_eq!(tools.len(), 1);
+    let tool = &tools[0];
+    let created = tool
         .handle(board_tool_call(
             "create_channel",
             json!({"channel_name":"Workflow"}),
@@ -998,7 +996,7 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
         .await
         .unwrap();
     let created: ChannelSummary = serde_json::from_str(&created.log_output()).unwrap();
-    let channels = tool("get_channels")
+    let channels = tool
         .handle(board_tool_call("get_channels", json!({"query":"WORK"})))
         .await
         .unwrap();
@@ -1011,7 +1009,7 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
         }
     );
     for (name, enabled) in [("subscribe", true), ("unsubscribe", false)] {
-        let result = tool(name)
+        let result = tool
             .handle(board_tool_call(
                 name,
                 json!({"channel_name":"Workflow","target_agent":"worker"}),
@@ -1038,7 +1036,7 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
             json!({"channel_name":"Workflow","text":"\u{1}".repeat(2000)}),
         );
         call.call_id = format!("root-{index}");
-        let posted = tool("post").handle(call).await.unwrap();
+        let posted = tool.handle(call).await.unwrap();
         let post: PostMetadata = serde_json::from_str(&posted.log_output()).unwrap();
         expected_roots.push(post.thread_id.to_string());
         let mut call = board_tool_call(
@@ -1046,7 +1044,7 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
             json!({"thread_id":post.thread_id,"text":"\u{1}".repeat(2000)}),
         );
         call.call_id = format!("reply-{index}");
-        let replied = tool("post").handle(call).await.unwrap();
+        let replied = tool.handle(call).await.unwrap();
         let reply: PostMetadata = serde_json::from_str(&replied.log_output()).unwrap();
         last = Some((post, reply));
     }
@@ -1054,15 +1052,14 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
     assert_eq!(*host.notifications.lock().unwrap(), Vec::new());
     let (last, last_reply) = last.unwrap();
     assert!(
-        tool("subscribe")
-            .handle(board_tool_call(
-                "subscribe",
-                json!({"channel_name":"Workflow","thread_id":last.thread_id})
-            ))
-            .await
-            .is_err()
+        tool.handle(board_tool_call(
+            "subscribe",
+            json!({"channel_name":"Workflow","thread_id":last.thread_id})
+        ))
+        .await
+        .is_err()
     );
-    let subscribed = tool("subscribe")
+    let subscribed = tool
         .handle(board_tool_call(
             "subscribe",
             json!({"thread_id":last.thread_id,"target_agent":"worker"}),
@@ -1084,10 +1081,7 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
         ("list_threads", json!({"channel_name":"Workflow"})),
         ("read_thread", json!({"thread_id":last.thread_id})),
     ] {
-        let output = tool(name)
-            .handle(board_tool_call(name, args))
-            .await
-            .unwrap();
+        let output = tool.handle(board_tool_call(name, args)).await.unwrap();
         assert!(output.log_output().len() <= 8000);
         let value: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
         if name == "list_threads" {
@@ -1116,7 +1110,7 @@ async fn check_tools_cover_channel_discussions_subscriptions_and_escaped_preview
                 let Some(cursor) = page["next_cursor"].as_str() else {
                     break;
                 };
-                let output = tool(name)
+                let output = tool
                     .handle(board_tool_call(
                         name,
                         json!({"channel_name":"Workflow", "cursor":cursor}),
@@ -1153,7 +1147,6 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
     backend: Backend,
 ) {
     use codex_tools::ToolCallSource;
-    use codex_tools::ToolName;
     use codex_utils_output_truncation::TruncationPolicy;
     use serde_json::json;
 
@@ -1179,12 +1172,146 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
         "Shared tools",
     );
     let call = board_tool_call;
-    let tool = |name: &str| {
-        tools
-            .iter()
-            .find(|tool| tool.tool_name() == ToolName::namespaced("collaboration", name))
-            .unwrap()
+    assert_eq!(tools.len(), 1);
+    let tool = &tools[0];
+    assert_eq!(
+        tool.tool_name(),
+        codex_tools::ToolName::namespaced("collaboration", AGENT_BOARD_TOOL_NAME)
+    );
+    assert!(!tool.supports_parallel_tool_calls());
+    let standing = serde_json::to_value(tool.spec()).unwrap();
+    assert_eq!(standing["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        standing["tools"][0]["parameters"],
+        json!({
+            "type":"object", "properties":{"action":{"type":"string"}},
+            "required":["action"], "additionalProperties":true,
+        })
+    );
+    let index = tool.handle(call("help", json!({}))).await.unwrap();
+    let index: serde_json::Value = serde_json::from_str(&index.log_output()).unwrap();
+    assert_eq!(
+        index["actions"],
+        json!([
+            "create_channel",
+            "get_channels",
+            "list_threads",
+            "search_posts",
+            "read_thread",
+            "read_post",
+            "subscribe",
+            "unsubscribe",
+            "post",
+            "help",
+        ])
+    );
+    assert!(index.get("parameters").is_none());
+    for action in index["actions"].as_array().unwrap() {
+        let output = tool
+            .handle(call("help", json!({"topic":action})))
+            .await
+            .unwrap();
+        assert!(output.contains_external_context());
+        assert!(output.log_output().len() <= 8000);
+        let help: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
+        assert_eq!(help["action"], *action);
+        assert_eq!(help["parameters"]["properties"]["action"]["const"], *action);
+        assert_eq!(help["parameters"]["additionalProperties"], false);
+        assert!(
+            help["parameters"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("action"))
+        );
+        assert!(help.get("actions").is_none());
+        if action == "post" {
+            assert_eq!(help["parameters"]["required"], json!(["action", "text"]));
+            let fields = help["parameters"]["properties"].as_object().unwrap();
+            assert_eq!(
+                fields.keys().map(String::as_str).collect::<Vec<_>>(),
+                vec![
+                    "action",
+                    "agents_to_notify",
+                    "channel_name",
+                    "new_channel_name",
+                    "text",
+                    "thread_id",
+                ]
+            );
+        }
+    }
+    for (raw, expected_error) in [
+        ("{", "EOF"),
+        ("[]", "invalid type"),
+        ("null", "invalid type"),
+        (r#"{}"#, "requires action"),
+        (r#"{"action":null}"#, "action must be a string"),
+        (r#"{"action":1}"#, "action must be a string"),
+        (
+            r#"{"action":"help","action":"post","text":"bad","new_channel_name":"work"}"#,
+            "duplicate field `action`",
+        ),
+        (
+            r#"{"action":"post","text":"first","text":"second","new_channel_name":"work"}"#,
+            "duplicate field `text`",
+        ),
+        (
+            r#"{"action":"typo"}"#,
+            "Unknown agent_board action \"typo\"",
+        ),
+        (
+            r#"{"action":"help","topic":"typo"}"#,
+            "Unknown agent_board help topic \"typo\"",
+        ),
+        (r#"{"action":"help","topic":3}"#, "expected a string"),
+        (
+            r#"{"action":"help","text":"unused"}"#,
+            "unknown field `text`",
+        ),
+        (
+            r#"{"action":"post","text":"bad","new_channel_name":"work","topic":"post"}"#,
+            "unknown field `topic`",
+        ),
+        (
+            r#"{"action":"post","text":"bad","new_channel_name":"work","agents_to_notify":[1]}"#,
+            "expected a string",
+        ),
+        (r#"{"action":"read_post","message_id":"bad"}"#, "UUID"),
+        (r#"{"action":"subscribe","thread_id":"bad"}"#, "UUID"),
+        (
+            r#"{"action":"create_channel"}"#,
+            "missing field `channel_name`",
+        ),
+        (
+            r#"{"action":"list_threads","channel_name":"work","sort":"bad"}"#,
+            "unknown variant `bad`",
+        ),
+    ] {
+        let mut invalid = call("help", json!({}));
+        invalid.payload = codex_tools::ToolPayload::Function {
+            arguments: raw.into(),
+        };
+        let error = tool.handle(invalid).await.err().unwrap();
+        let codex_tools::FunctionCallError::RespondToModel(message) = error else {
+            panic!("validation error must be visible to the model");
+        };
+        assert!(message.contains(expected_error), "{raw}: {message}");
+    }
+    let mut oversized = call("help", json!({}));
+    oversized.payload = codex_tools::ToolPayload::Function {
+        arguments: " ".repeat(128 * 1024 + 1),
     };
+    assert_eq!(
+        tool.handle(oversized).await.err().unwrap(),
+        codex_tools::FunctionCallError::RespondToModel(
+            "message-board arguments exceed 128 KiB".into()
+        )
+    );
+    let mut limited_help = call("help", json!({"topic":"post"}));
+    limited_help.truncation_policy = TruncationPolicy::Bytes(1);
+    assert!(tool.handle(limited_help).await.is_err());
+    assert_eq!(host.agent_path_calls.load(Ordering::SeqCst), 0);
+    assert!(host.notifications.lock().unwrap().is_empty());
     for (name, args) in [
         (
             "post",
@@ -1194,26 +1321,23 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
     ] {
         let mut limited = call(name, args);
         limited.truncation_policy = TruncationPolicy::Bytes(1);
-        assert!(tool(name).handle(limited).await.is_err());
+        assert!(tool.handle(limited).await.is_err());
     }
     assert!(
-        tool("post")
-            .handle(call(
-                "post",
-                json!({"text":"invalid","channel_name":"a","new_channel_name":"b"})
-            ))
+        tool.handle(call(
+            "post",
+            json!({"text":"invalid","channel_name":"a","new_channel_name":"b"})
+        ))
+        .await
+        .is_err()
+    );
+    assert!(
+        tool.handle(call("get_channels", json!({"limit":0})))
             .await
             .is_err()
     );
     assert!(
-        tool("get_channels")
-            .handle(call("get_channels", json!({"limit":0})))
-            .await
-            .is_err()
-    );
-    assert!(
-        tool("get_channels")
-            .handle(call("get_channels", json!({"typo":true})))
+        tool.handle(call("get_channels", json!({"typo":true})))
             .await
             .is_err()
     );
@@ -1237,14 +1361,14 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
         "post",
         json!({"text":"🦀".repeat(8000),"new_channel_name":"work","agents_to_notify":["worker"]}),
     );
-    let result = tool("post").handle(post_call.clone()).await.unwrap();
+    let result = tool.handle(post_call.clone()).await.unwrap();
     let metadata: PostMetadata = serde_json::from_str(&result.log_output()).unwrap();
     assert_eq!(
-        tool("post").handle(post_call).await.unwrap().log_output(),
+        tool.handle(post_call).await.unwrap().log_output(),
         result.log_output()
     );
     assert_eq!(host.notifications.lock().unwrap().len(), 1);
-    let preview = tool("search_posts")
+    let preview = tool
         .handle(call("search_posts", json!({"query":"🦀"})))
         .await
         .unwrap();
@@ -1285,7 +1409,7 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
         let mut limited = call(name, args);
         limited.truncation_policy = TruncationPolicy::Bytes(1);
         host.agent_path_calls.store(0, Ordering::SeqCst);
-        let error = tool(name).handle(limited).await.err().unwrap();
+        let error = tool.handle(limited).await.err().unwrap();
         assert_eq!(
             error,
             codex_tools::FunctionCallError::RespondToModel(
@@ -1299,13 +1423,13 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
         );
     }
     let read_call = call("read_post", json!({"message_id":metadata.message_id}));
-    let result = tool("read_post").handle(read_call.clone()).await.unwrap();
+    let result = tool.handle(read_call.clone()).await.unwrap();
     assert!(result.contains_external_context());
     assert!(result.log_output().len() <= 8000);
     let first: PostContent = serde_json::from_str(&result.log_output()).unwrap();
     assert_eq!(first.text, "🦀".repeat(first.next_offset_chars));
     assert_eq!(first.n_chars, 8000);
-    let result = tool("read_post").handle(call("read_post", json!({"message_id":metadata.message_id,"offset_chars":first.next_offset_chars,"limit_chars":2}))).await.unwrap();
+    let result = tool.handle(call("read_post", json!({"message_id":metadata.message_id,"offset_chars":first.next_offset_chars,"limit_chars":2}))).await.unwrap();
     let second: PostContent = serde_json::from_str(&result.log_output()).unwrap();
     assert_eq!(second.text, "🦀🦀");
     assert_eq!(second.next_offset_chars, first.next_offset_chars + 2);
@@ -1318,20 +1442,16 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
         cell_id: "cell-1".into(),
         runtime_tool_call_id: "nested-1".into(),
     };
-    let first_nested = tool("post")
-        .handle(nested.clone())
-        .await
-        .unwrap()
-        .log_output();
+    let first_nested = tool.handle(nested.clone()).await.unwrap().log_output();
     nested.source = ToolCallSource::CodeMode {
         cell_id: "cell-1".into(),
         runtime_tool_call_id: "nested-2".into(),
     };
     assert_ne!(
-        tool("post").handle(nested).await.unwrap().log_output(),
+        tool.handle(nested).await.unwrap().log_output(),
         first_nested
     );
-    let result = tool("search_posts")
+    let result = tool
         .handle(call(
             "search_posts",
             json!({"query":"reply","author":"/root"}),
@@ -1347,13 +1467,5 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
         cell_id: "cell-1".into(),
         runtime_tool_call_id: "nested-3".into(),
     };
-    assert!(
-        tool("read_post")
-            .handle(nested_read)
-            .await
-            .unwrap()
-            .log_output()
-            .len()
-            <= 8000
-    );
+    assert!(tool.handle(nested_read).await.unwrap().log_output().len() <= 8000);
 }

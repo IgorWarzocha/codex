@@ -32,6 +32,7 @@ pub use host::NotificationDelivery;
 pub use in_memory::InMemoryAgentMessageBoard;
 pub use in_memory::InMemoryMessageBoards;
 pub use local::LocalAgentMessageBoard;
+pub use tools::AGENT_BOARD_TOOL_NAME;
 pub use tools::message_board_tools;
 pub use types::ChannelSummary;
 pub use types::Page;

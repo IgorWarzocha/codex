@@ -23,8 +23,8 @@ Scenario: An active agent posts a shared decision and fetches the text without a
 04:message/user:
     Record the decision on the board, notify me, and read it.
 -- request 2 (request) --
-05:function_call/collaboration.post:{"agents_to_notify":["/root"],"new_channel_name":"design","text":"A shared decision."}
+05:function_call/collaboration.agent_board:{"action":"post","agents_to_notify":["/root"],"new_channel_name":"design","text":"A shared decision."}
 06:function_call_output:{"author":"/root","channel_name":"design","created_at":"2026-09-18T12:00:00Z","message_id":"<UUID 1>","thread_id":"<UUID 1>"}
 -- request 3 (request) --
-07:function_call/collaboration.search_posts:{"channel_name":"design","query":"decision"}
+07:function_call/collaboration.agent_board:{"action":"search_posts","channel_name":"design","query":"decision"}
 08:function_call_output:{"has_more":false,"n_returned":1,"next_cursor":null,"results":[{"author":"/root","channel_name":"design"...ecision.","thread_id":"<UUID 1>","truncated":false}]} [hash=facdb1e4f66cc5b9]
