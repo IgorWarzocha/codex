@@ -1,0 +1,25 @@
+[package]
+name = "codex-notebook-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+jupyter-protocol = "2"
+jupyter-zmq-client = { version = "=1.0.1", features = ["tokio-runtime"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+codex-utils-pty.workspace = true
+
+[lib]
+doctest = false

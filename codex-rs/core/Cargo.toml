@@ -55,6 +55,7 @@ codex-hooks = { workspace = true }
 codex-http-client = { workspace = true }
 codex-install-context = { workspace = true }
 codex-network-proxy = { workspace = true }
+codex-notebook = { workspace = true }
 codex-otel = { workspace = true }
 codex-plugin = { workspace = true }
 codex-model-provider = { workspace = true }

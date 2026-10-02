@@ -577,6 +577,10 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "deno_program": {
+          "description": "Deno executable for the Notebook runtime. Defaults to `deno` on PATH.",
+          "type": "string"
+        },
         "direct_only_tool_namespaces": {
           "description": "Exact tool namespaces to expose only as direct model tools. These tools bypass deferral, remain top-level in code-mode-only sessions, and are omitted from the nested code-mode tool surface.",
           "items": {
@@ -597,6 +601,14 @@
         "experimental_show_cell_overhead": {
           "description": "Show handler duration, code-mode host duration, and harness overhead in each code-mode cell response. Experimental: this option and the response format may change or be removed.",
           "type": "boolean"
+        },
+        "runtime": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CodeModeRuntime"
+            }
+          ],
+          "description": "Notebook uses a persistent Deno kernel and requires unrestricted local execution."
         },
         "tool_input_schema_max_bytes": {
           "description": "Maximum UTF-8 bytes per rendered tool input type, with a 16,000-byte minimum and default. For ordinary MCP tools, this is also at least their server's explicitly configured input limit.",
@@ -619,6 +631,13 @@
         }
       },
       "type": "object"
+    },
+    "CodeModeRuntime": {
+      "enum": [
+        "v8",
+        "notebook"
+      ],
+      "type": "string"
     },
     "ComputerUseConfigToml": {
       "additionalProperties": false,

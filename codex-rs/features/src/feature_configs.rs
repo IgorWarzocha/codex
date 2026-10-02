@@ -38,6 +38,12 @@ pub struct ToolRegistryConfigToml {
 pub struct CodeModeConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    /// Notebook uses a persistent Deno kernel and requires unrestricted local execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<CodeModeRuntime>,
+    /// Deno executable for the Notebook runtime. Defaults to `deno` on PATH.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deno_program: Option<std::path::PathBuf>,
     /// Default yield timeout for code-mode exec calls, in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_exec_yield_time_ms: Option<u64>,
@@ -64,6 +70,14 @@ impl FeatureConfig for CodeModeConfigToml {
     fn enabled(&self) -> Option<bool> {
         self.enabled
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeModeRuntime {
+    #[default]
+    V8,
+    Notebook,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]

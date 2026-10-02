@@ -1174,6 +1174,8 @@ const DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS: u64 = 30_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeModeConfig {
+    pub runtime: codex_features::CodeModeRuntime,
+    pub deno_program: PathBuf,
     pub default_exec_yield_time_ms: u64,
     /// Show handler duration, code-mode host duration, and harness overhead
     /// in each code-mode cell response.
@@ -1189,6 +1191,8 @@ pub struct CodeModeConfig {
 impl Default for CodeModeConfig {
     fn default() -> Self {
         Self {
+            runtime: codex_features::CodeModeRuntime::V8,
+            deno_program: PathBuf::from("deno"),
             default_exec_yield_time_ms: DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS,
             experimental_show_cell_overhead: false,
             tool_input_schema_max_bytes: None,
@@ -2745,6 +2749,10 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
         });
 
     CodeModeConfig {
+        runtime: base.and_then(|config| config.runtime).unwrap_or_default(),
+        deno_program: base
+            .and_then(|config| config.deno_program.clone())
+            .unwrap_or_else(|| PathBuf::from("deno")),
         default_exec_yield_time_ms: base
             .and_then(|config| config.default_exec_yield_time_ms)
             .unwrap_or(DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS),
@@ -2762,7 +2770,9 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
             .and_then(|config| config.direct_only_tool_namespaces.as_ref())
             .cloned()
             .unwrap_or_default(),
-        disable_in_process_fallback: host
+        disable_in_process_fallback: base.is_some_and(|config| {
+            config.runtime == Some(codex_features::CodeModeRuntime::Notebook)
+        }) || host
             .and_then(|config| config.disable_in_process_fallback)
             .unwrap_or_default(),
     }

@@ -30,6 +30,8 @@ members = [
     "code-mode-host",
     "code-mode-protocol",
     "code-mode-runtime",
+    "notebook",
+    "notebook-kernel",
     "codex-home",
     "cloud-config",
     "cloud-tasks",
@@ -160,7 +162,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.0"
+version = "0.160.0-howaboua.1"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
@@ -169,6 +171,8 @@ edition = "2024"
 license = "Apache-2.0"
 
 [workspace.dependencies]
+codex-notebook = { path = "notebook" }
+codex-notebook-kernel = { path = "notebook-kernel" }
 # Internal
 codex-realtime-webrtc = { path = "realtime-webrtc" }
 app_test_support = { path = "app-server/tests/common" }

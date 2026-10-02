@@ -1,6 +1,7 @@
 mod delegate;
 mod execute_handler;
 pub(crate) mod execute_spec;
+pub(crate) mod notebook;
 mod output;
 mod response_adapter;
 mod telemetry;
@@ -25,7 +26,7 @@ use serde_json::Value as JsonValue;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::CodeModeConfig;
+use crate::config::Config;
 use crate::function_tool::FunctionCallError;
 use crate::original_image_detail::can_request_original_image_detail;
 use crate::original_image_detail::sanitize_original_image_detail as sanitize_image_detail_items;
@@ -72,6 +73,7 @@ pub(crate) struct ExecContext {
 }
 
 pub(crate) struct CodeModeService {
+    notebook_cwd: Option<codex_utils_absolute_path::AbsolutePathBuf>,
     session: OnceCell<Arc<dyn CodeModeSession>>,
     session_provider: Arc<dyn CodeModeSessionProvider>,
     availability: Result<(), String>,
@@ -85,17 +87,28 @@ impl CodeModeService {
     pub(crate) fn new(
         thread_id: ThreadId,
         session_provider: Arc<dyn CodeModeSessionProvider>,
-        config: &CodeModeConfig,
+        config: &Config,
         executed_tool_calls: ExecutedToolCalls,
     ) -> Self {
+        let notebook_cwd = (config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook)
+            .then(|| config.cwd.clone());
+        let session_provider = if notebook_cwd.is_some() {
+            Arc::new(codex_notebook::DenoNotebookSessionProvider::new(
+                config.code_mode.deno_program.clone(),
+                config.cwd.to_path_buf(),
+            )) as Arc<dyn CodeModeSessionProvider>
+        } else {
+            session_provider
+        };
         let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(thread_id, executed_tool_calls));
         let availability = session_provider.availability();
         Self {
+            notebook_cwd,
             session: OnceCell::new(),
             session_provider,
             availability,
             dispatch_broker,
-            default_exec_yield_time_ms: config.default_exec_yield_time_ms,
+            default_exec_yield_time_ms: config.code_mode.default_exec_yield_time_ms,
             shutdown_token: CancellationToken::new(),
             unavailable_warning_emitted: AtomicBool::new(false),
         }
@@ -115,9 +128,13 @@ impl CodeModeService {
             .unavailable_warning_emitted
             .swap(true, Ordering::Relaxed))
         .then(|| {
-            format!(
-                "Code Mode is unavailable because {error}. {behavior}; enable `features.code_mode_host` and install `codex-code-mode-host`."
-            )
+            if self.notebook_cwd.is_some() {
+                format!("Notebook is unavailable because {error}. Check features.code_mode.deno_program and restart the thread.")
+            } else {
+                format!(
+                    "Code Mode is unavailable because {error}. {behavior}; enable `features.code_mode_host` and install `codex-code-mode-host`."
+                )
+            }
         })
     }
 
@@ -130,6 +147,7 @@ impl CodeModeService {
         mut request: codex_code_mode::ExecuteRequest,
         step_context: Arc<StepContext>,
     ) -> Result<codex_code_mode::StartedCell, String> {
+        self.validate_notebook_access(&step_context).await?;
         request
             .yield_time_ms
             .get_or_insert(self.default_exec_yield_time_ms);
@@ -142,6 +160,21 @@ impl CodeModeService {
             .await?
             .execute(request, delegate, preempt)
             .await
+    }
+
+    pub(crate) async fn validate_notebook_access(&self, step: &StepContext) -> Result<(), String> {
+        let selected =
+            step.turn.config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook;
+        let result = match (&self.notebook_cwd, selected) {
+            (Some(cwd), true) => notebook::validate_access(step, cwd),
+            (None, false) => Ok(()),
+            _ => Err("Start a new thread to change the Code Mode runtime".to_string()),
+        };
+        if let Err(error) = result {
+            self.shutdown().await?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(crate) async fn wait(

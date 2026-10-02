@@ -124,6 +124,14 @@ impl CodeModeWaitHandler {
                 let started_at = std::time::Instant::now();
                 telemetry.cell_id = Some(args.cell_id.clone());
                 let cell_id = codex_code_mode::CellId::new(args.cell_id);
+                if !args.terminate {
+                    exec.session
+                        .services
+                        .code_mode_service
+                        .validate_notebook_access(&step_context)
+                        .await
+                        .map_err(FunctionCallError::RespondToModel)?;
+                }
                 let wait_response = if args.terminate {
                     exec.session
                         .services

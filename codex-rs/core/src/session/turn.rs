@@ -1635,6 +1635,11 @@ async fn run_sampling_request(
     input: Vec<ResponseItem>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
+    sess.services
+        .code_mode_service
+        .validate_notebook_access(&step_context)
+        .await
+        .map_err(CodexErr::InvalidRequest)?;
     let turn_context = Arc::clone(&step_context.turn);
     let preempt = step_context.preempt.clone().unwrap_or_default();
     let _input_watch = if let Some(preempt) = &step_context.preempt {
