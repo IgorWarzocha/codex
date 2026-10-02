@@ -305,6 +305,64 @@ function initialize() { globalThis.starts = (globalThis.starts ?? 0) + 1; }
 
 #[tokio::test]
 #[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
+async fn lexical_release_and_prune_report_concurrent_pin_retention() {
+    for action in ["release", "prune"] {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let a = provider(home.path(), project.path(), "release-a");
+        let a_session = a.create_session().await.unwrap();
+        execute(
+            &a_session,
+            "let shared = 1; let removable = 2;",
+            Arc::new(Echo::default()),
+        )
+        .await;
+        control(&a, json!({"action":"pin","names":["shared"]})).await;
+        control(&a, json!({"action":"unpin","names":["shared"]})).await;
+        let b = provider(home.path(), project.path(), "release-b");
+        let b_session = b.create_session().await.unwrap();
+        control(&b, json!({"action":"pin","names":["shared"]})).await;
+
+        let request = if action == "release" {
+            json!({"action":"release","names":["shared","removable"]})
+        } else {
+            json!({"action":"prune","query":"*"})
+        };
+        let result = control(&a, request).await;
+        assert_eq!(
+            result.details["released"],
+            json!(["removable"]),
+            "{result:?}"
+        );
+        assert_eq!(
+            result.details["failures"],
+            json!([{"name":"shared","reason":"concurrent project state retained this binding"}])
+        );
+        assert_eq!(result.details["checkpoint"]["conflicts"], json!(["shared"]));
+        assert_eq!(
+            execute(
+                &a_session,
+                "text(shared); text(typeof removable);",
+                Arc::new(Echo::default())
+            )
+            .await,
+            ["1", "undefined"]
+        );
+        let status = control(&a, json!({"action":"status"})).await;
+        assert!(
+            status.details["bindings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|binding| binding["name"] == "shared" && binding["pinned"] == true)
+        );
+        a_session.shutdown().await.unwrap();
+        b_session.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
 async fn failing_startup_hook_can_be_unpinned_without_starting_a_kernel() {
     let home = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();

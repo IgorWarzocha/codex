@@ -6,8 +6,8 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=6946c33810d3e0ff):
-        - namespace/functions; hash=6215d89680df0f76
+00:additional_tools/developer (3; hash=34ce0f65e9c8f673):
+        - namespace/functions; hash=5c9fff720725a2e8
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -107,14 +107,9 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 07:custom_tool_call/exec:// @exec: {"yield_time_ms": 60000}
     text(await tools.check_release({}));
 08:custom_tool_call_output:Script running with cell ID <CELL_ID>
-    Wall time <DURATION> seconds
-    Output:
 
 09:message/user:
     Please also highlight the customer impact.
 -- request 3 (turn) --
 10:function_call/functions.wait:{"cell_id":"<CELL_ID>","yield_time_ms":60000}
-11:function_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | Release ready
+11:function_call_output:Release ready

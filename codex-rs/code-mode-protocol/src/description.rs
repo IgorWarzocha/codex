@@ -14,7 +14,7 @@ use crate::json_schema_types::render_json_schema_to_typescript;
 use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
-const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "Additional tools are callable through tools. Find their help by filtering ALL_TOOLS by name and description.";
+const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "Additional tools are callable through tools";
 const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"image(dataUrl | { image_url, detail? } | ImageContent, detail?): emit image; detail is auto/low/high/original. Second detail overrides embedded detail, including MCP _meta["codex/imageDetail"]."#;
 const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str =
     "image(dataUrl | { image_url } | ImageContent): emit image";
@@ -33,7 +33,7 @@ Helpers:
 - exit(): finish successfully
 - setTimeout(callback, delayMs?), clearTimeout(id?): schedule/cancel timers
 Forward individual MCP content blocks to image/audio, not whole results."#;
-const WAIT_DESCRIPTION_TEMPLATE: &str = "Resume or terminate a yielded exec cell. Returns new output or completion, closing finished cells. If still running, wait again with the same cell_id.";
+const WAIT_DESCRIPTION_TEMPLATE: &str = "Resume or terminate a yielded exec cell";
 // Based off of https://modelcontextprotocol.io/specification/draft/schema#calltoolresult
 const MCP_TYPESCRIPT_PREAMBLE: &str = r#"type Role = "user" | "assistant";
 type MetaObject = Record<string, unknown>;
@@ -347,7 +347,10 @@ pub fn build_exec_tool_description(
             ));
         }
 
-        sections.push(format!("Tools available in exec (nested object details and results: inspect tool help in ALL_TOOLS):\n{}", nested_tool_sections.join("\n")));
+        sections.push(format!(
+            "Tools available in exec:\n{}",
+            nested_tool_sections.join("\n")
+        ));
     }
 
     sections.join("\n\n")

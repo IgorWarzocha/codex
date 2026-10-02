@@ -32,9 +32,9 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=fab5becadad1a839):
-    - custom/exec: Run fresh restricted JavaScript to compose tools. Source only, no JSON or fences. No console, imp...; hash=932eca9dec944af6
-    - function/wait: Resume or terminate a yielded exec cell. Returns new output or completion, closing finished cells...; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=223c109693f9afac
+  tools (7; hash=4fb6064ec9df87c2):
+    - custom/exec: Run fresh restricted JavaScript to compose tools. Source only, no JSON or fences. No console, imp...; hash=94f396fac9899ae0
+    - function/wait: Resume or terminate a yielded exec cell; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=ad29f2c1fa0aa8e9
     - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=be451617efc003d1
     - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=d6d74f33db330162
     - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
@@ -104,7 +104,4 @@ Settings:
     text(await tools.list_mcp_resource_templates({"server":"resources"}));
     text(await tools.read_mcp_resource({"server":"resources","uri":"memo://codex/example-note"}));
     text(["list_mcp_resources","list_mcp_resource_templates","read_mcp_resource"].map(name => ALL_TOOLS.find(tool => tool.name === name)));
-06:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | {"server":"resources","resources":[{"server":"resources","uri":"memo://codex/example-note","name":"examp...ed for integration tests.","mimeType":"text/plain"}]} [hash=75d187638a7af2d4] | {"server":"resources","resourceTemplates":[{"server":"resources","uriTemplate":"memo://codex/{slug}","na... resources used in tests.","mimeType":"text/plain"}]} [hash=b1c7082eb114fc9b] | {"server":"resources","uri":"memo://codex/example-note","contents":[{"uri":"memo://codex/example-note","...mple MCP resource served by the rmcp test server."}]} [hash=45385fc57640b555] | [{"name":"list_mcp_resources","description":"Catalog instructions for list_mcp_resources.\\n\\nexec tool d...quired\\":[\\"server\\",\\"uri\\"],\\"type\\":\\"object\\"}"}] [hash=cd21586a6f51813b]
+06:custom_tool_call_output:{"server":"resources","resources":[{"server":"resources","uri":"memo://codex/example-note","name":"examp...ed for integration tests.","mimeType":"text/plain"}]} [hash=75d187638a7af2d4] | {"server":"resources","resourceTemplates":[{"server":"resources","uriTemplate":"memo://codex/{slug}","na... resources used in tests.","mimeType":"text/plain"}]} [hash=b1c7082eb114fc9b] | {"server":"resources","uri":"memo://codex/example-note","contents":[{"uri":"memo://codex/example-note","...mple MCP resource served by the rmcp test server."}]} [hash=45385fc57640b555] | [{"name":"list_mcp_resources","description":"Catalog instructions for list_mcp_resources.\\n\\nexec tool d...quired\\":[\\"server\\",\\"uri\\"],\\"type\\":\\"object\\"}"}] [hash=cd21586a6f51813b]

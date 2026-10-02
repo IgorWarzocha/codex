@@ -343,11 +343,13 @@ fn format_diagnostics(
                     .iter()
                     .map(|s| {
                         format!(
-                            "{} cell {}:{}:{}",
+                            "{} cell {}:{}:{}-{}:{}",
                             s["cellId"].as_str().unwrap_or("?"),
                             s["cellIndex"].as_u64().unwrap_or(0) + 1,
                             s["line"],
-                            s["column"]
+                            s["column"],
+                            s["endLine"],
+                            s["endColumn"]
                         )
                     })
                     .collect::<Vec<_>>()
@@ -355,10 +357,14 @@ fn format_diagnostics(
             })
             .unwrap_or_default();
         let line = format!(
-            "\n- {} occurrences {} {}: {}; samples: {samples}",
+            "\n- {} occurrences {} {}{}: {}; samples: {samples}",
             group["count"],
             group["severity"].as_str().unwrap_or("unknown"),
             group["code"],
+            group["source"]
+                .as_str()
+                .map(|source| format!(" ({source})"))
+                .unwrap_or_default(),
             group["message"].as_str().unwrap_or("").replace('\n', " ")
         );
         included.push(group);

@@ -117,10 +117,10 @@ impl DenoNotebookSessionProvider {
                 }
                 None => json!({"profiles":[]}),
             };
-            return Ok(NotebookControlResult {
-                message: format!("Notebook profiles: {details}"),
+            return Ok(NotebookControlResult::with_details(
+                "Notebook profiles",
                 details,
-            });
+            ));
         }
         let session = self
             .session
@@ -158,10 +158,15 @@ impl DenoNotebookSessionProvider {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .is_some();
-                    (
-                        if failed { "invalidated" } else { "not_started" },
-                        Vec::new(),
-                    )
+                    let bindings = match self.identity.as_ref().filter(|_| !self.ephemeral) {
+                        Some(identity) => {
+                            Store::new(identity.codex_home.clone(), &self.cwd, &identity.thread_id)?
+                                .binding_names()
+                                .await?
+                        }
+                        None => Vec::new(),
+                    };
+                    (if failed { "invalidated" } else { "not_started" }, bindings)
                 }
             };
             return match self.identity.as_ref().filter(|_| !self.ephemeral) {
@@ -177,26 +182,44 @@ impl DenoNotebookSessionProvider {
                     .await
                 }
                 None => Ok(NotebookControlResult {
-                    message: "Notebook diagnostics unavailable without a durable journal"
-                        .to_string(),
+                    message: format!(
+                        "Notebook diagnostics unavailable without a durable journal. Runtime {health}"
+                    ),
                     details: json!({"runtimeHealth":health,"ephemeral":true}),
                 }),
             };
         }
-        if session.is_none()
-            && let Some(identity) = self.identity.as_ref().filter(|_| !self.ephemeral)
-        {
-            let mut store =
-                Store::new(identity.codex_home.clone(), &self.cwd, &identity.thread_id)?;
+        if session.is_none() {
+            let mut store = self
+                .identity
+                .as_ref()
+                .filter(|_| !self.ephemeral)
+                .map(|identity| {
+                    Store::new(identity.codex_home.clone(), &self.cwd, &identity.thread_id)
+                })
+                .transpose()?;
             match &request {
                 NotebookRequest::Unpin { names } => {
-                    return Ok(NotebookControlResult {
-                        message: "Notebook pins removed without starting kernel".to_string(),
-                        details: store.unpin(names).await?,
-                    });
+                    let details = match &mut store {
+                        Some(store) => store.unpin(names).await?,
+                        None => {
+                            if names.is_empty()
+                                || names.iter().any(|name| !crate::control::identifier(name))
+                            {
+                                return Err("unpin requires valid binding names".to_string());
+                            }
+                            json!({"unpinned":[],"missing":names})
+                        }
+                    };
+                    return Ok(NotebookControlResult::with_details(
+                        "Notebook unpin without starting kernel",
+                        details,
+                    ));
                 }
                 NotebookRequest::Reset => {
-                    store.reset_session().await?;
+                    if let Some(store) = &mut store {
+                        store.reset_session().await?;
+                    }
                     return Ok(NotebookControlResult { message: "Notebook private checkpoint reset. Project state and profiles preserved".to_string(), details: json!({"reset":true,"projectPreserved":true}) });
                 }
                 _ => {}

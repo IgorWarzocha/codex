@@ -11,6 +11,8 @@ use uuid::Uuid;
 use crate::control::NotebookControlResult;
 use crate::control::NotebookHook;
 use crate::control::NotebookRequest;
+use crate::control::format_details;
+use crate::control::identifier;
 use crate::control::matches;
 use crate::import_history;
 use crate::import_history::ImportHistory;
@@ -504,6 +506,21 @@ impl Lifecycle {
         &mut self,
         request: NotebookRequest,
     ) -> Result<NotebookControlResult, String> {
+        let label = match &request {
+            NotebookRequest::Status { .. } => "Notebook status",
+            NotebookRequest::Checkpoint => "Notebook checkpoint",
+            NotebookRequest::Restart => "Notebook restarted",
+            NotebookRequest::Reset => "Notebook private checkpoint reset",
+            NotebookRequest::Save { .. } => "Notebook profile saved",
+            NotebookRequest::Load { .. } => "Notebook profile loaded",
+            NotebookRequest::Pin { .. } => "Notebook bindings pinned",
+            NotebookRequest::Unpin { .. } => "Notebook bindings unpinned",
+            NotebookRequest::Release { .. } => "Notebook release",
+            NotebookRequest::Prune { .. } => "Notebook prune",
+            NotebookRequest::List { .. } | NotebookRequest::Diagnostics => {
+                return Err("read-only request was not routed by provider".to_string());
+            }
+        };
         let details = match request {
             NotebookRequest::Status { query } => {
                 self.refresh_status().await?;
@@ -598,10 +615,7 @@ impl Lifecycle {
                 return Err("read-only request was not routed by provider".to_string());
             }
         };
-        Ok(NotebookControlResult {
-            message: format!("Notebook management complete: {}", summary(&details)),
-            details,
-        })
+        Ok(NotebookControlResult::with_details(label, details))
     }
 
     fn pinned_names(&self) -> HashSet<String> {
@@ -773,9 +787,24 @@ impl Lifecycle {
             .is_some_and(|bindings| bindings.iter().any(|b| b["globalProperty"] == false));
         if lexical {
             self.checkpoint(&names).await?;
+            let checkpoint = self.checkpoint_details.clone();
             let disposal = self.dispose_all().await?;
             self.restore(false, None).await?;
-            Ok(json!({"released":names,"restartRequired":true,"disposal":disposal}))
+            // A concurrent project pin can defeat the checkpoint deletion. Report
+            // the restored inventory, not merely the requested exclusions.
+            let remaining = self.names().await?;
+            let failures: Vec<_> = names
+                .iter()
+                .filter(|name| remaining.contains(name))
+                .map(|name| json!({"name":name,"reason":"concurrent project state retained this binding"}))
+                .collect();
+            let released: Vec<_> = names
+                .into_iter()
+                .filter(|name| !remaining.contains(name))
+                .collect();
+            Ok(
+                json!({"released":released,"failures":failures,"restartRequired":true,"disposal":disposal,"checkpoint":checkpoint}),
+            )
         } else {
             let result = self.rpc("release", vec![json!(names)]).await?;
             self.checkpoint(&[]).await?;
@@ -796,13 +825,6 @@ impl Lifecycle {
     }
 }
 
-fn identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
-}
 fn pinned(entry: &Value) -> bool {
     entry["pinned"] == true
 }
@@ -816,15 +838,6 @@ fn recovery_error() -> String {
     "notebook kernel is unavailable. Use notebook restart or reset to recover in this thread"
         .to_string()
 }
-fn summary(details: &Value) -> String {
-    let value = details.to_string();
-    if value.len() <= 1024 {
-        value
-    } else {
-        "details available in structured result".to_string()
-    }
-}
-
 pub(crate) fn status_result(
     status: &Value,
     checkpoint: &Value,
@@ -874,46 +887,45 @@ pub(crate) fn status_result(
         .unwrap_or_else(|| import_history::notice(&[]));
     let profile_notice = status
         .get("defaultProfile")
-        .map(|profile| {
-            let skipped_names = profile["skipped"]
-                .as_array()
-                .map(|skipped| {
-                    skipped
-                        .iter()
-                        .filter_map(|entry| entry["name"].as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default();
-            format!(
-                "\nDefault profile {} initially seeded {} binding(s). Skipped {}{}",
-                profile["name"].as_str().unwrap_or_default(),
-                profile["loadedBindings"],
-                profile["skippedBindings"],
-                if skipped_names.is_empty() {
-                    String::new()
-                } else {
-                    format!(": {}", bound_text(&skipped_names, 1024))
-                },
-            )
-        })
+        .map(|profile| format!("\nDefault profile {}", format_details(profile, 2048)))
         .unwrap_or_default();
+    let inventory = if query.is_some() {
+        &details["matches"]
+    } else {
+        &details["bindings"]
+    };
+    let omitted = if query.is_some() {
+        &details["omittedMatches"]
+    } else {
+        &details["omittedBindings"]
+    };
     NotebookControlResult {
         message: format!(
-            "{}\nNotebook {} · {total} top-level binding(s){}{}{}{}",
+            "{}\nNotebook {} · {} completed cells · {total} top-level binding(s)\nMemory {}\nRetained {} binding(s) · {} serialized bytes · {} pinned\nCheckpoint {}{}{}{}\nBindings{}: {} · {} omitted",
             npm_notice,
             if active { "running (cached)" } else { "idle" },
-            query
-                .map(|_| format!("\n{}", details["matches"]))
-                .unwrap_or_default(),
+            status["userCells"].as_u64().unwrap_or(0),
+            format_details(&details["memory"], 1024),
+            status["retainedBindings"].as_u64().unwrap_or(0),
+            status["retainedBytes"].as_u64().unwrap_or(0),
+            details["pinnedBindings"],
+            format_details(checkpoint, 4096),
             persistence_error
                 .map(|e| format!("\nPersistence failed: {}", bound_text(e, 1024)))
                 .unwrap_or_default(),
             status["npmImportsError"]
                 .as_str()
-                .map(|e| format!("\nNotebook npm inventory was not updated: {e}"))
+                .map(|e| format!(
+                    "\nNotebook npm inventory was not updated: {}",
+                    bound_text(e, 1024)
+                ))
                 .unwrap_or_default(),
             profile_notice,
+            query
+                .map(|q| format!(" matching {}", json!(bound_text(q, 256))))
+                .unwrap_or_default(),
+            inventory,
+            omitted,
         ),
         details,
     }

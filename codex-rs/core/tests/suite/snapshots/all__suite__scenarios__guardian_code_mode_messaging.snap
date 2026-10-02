@@ -28,10 +28,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 06:function_call_output:{"task_name":"/root/worker"}
 -- request 3 (turn) --
 07:custom_tool_call/exec:text(await tools.mcp__codex_apps__user_message_send_message({"text":"Should I deploy the reviewed production change?"}));
-08:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | {"content":[{"text":"Message sent.","type":"text"}]}
+08:custom_tool_call_output:{"content":[{"text":"Message sent.","type":"text"}]}
 -- request 4 (turn) --
 09:message/user:
     Yes, deploy the reviewed change.
@@ -62,8 +59,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 3 (after request 6: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 7 (turn) --
-00:additional_tools/developer (1; hash=b2e0268bd8a06979):
-        - namespace/functions; hash=a696d2dfef1364d5
+00:additional_tools/developer (1; hash=8301a81d1eb659d5):
+        - namespace/functions; hash=44f117828fb2f34f
           - custom/exec
           - function/wait
 01:message/developer:
@@ -132,8 +129,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 4 (after request 7: input diverged at item 04, settings changed (prompt_cache_key))
 -- request 8 (turn) --
-00:additional_tools/developer (1; hash=b2e0268bd8a06979):
-        - namespace/functions; hash=a696d2dfef1364d5
+00:additional_tools/developer (1; hash=8301a81d1eb659d5):
+        - namespace/functions; hash=44f117828fb2f34f
           - custom/exec
           - function/wait
 01:message/developer:

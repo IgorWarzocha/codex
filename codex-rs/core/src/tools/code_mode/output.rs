@@ -1,5 +1,5 @@
-//! Code-mode response headers use the host measurement and completed handler timing.
-//! Content is already truncated; only the bounded header changes at completion.
+//! Successful output needs no wrapper. Empty results and continuation states retain
+//! acknowledgements; experimental timing uses the completed handler measurement.
 
 use std::time::Duration;
 
@@ -23,14 +23,24 @@ impl CodeModeToolOutput {
         wall_time: Duration,
         host_duration: Option<Duration>,
     ) -> Self {
-        // Use the host-only header when overhead is hidden or host timing is unavailable.
-        let wall_time_seconds = (wall_time.as_secs_f32() * 10.0).round() / 10.0;
-        output.body.insert(
-            /*index*/ 0,
-            FunctionCallOutputContentItem::InputText {
-                text: format!("{status}\nWall time {wall_time_seconds:.1} seconds\nOutput:\n"),
-            },
-        );
+        let has_content = output.body.iter().any(|item| match item {
+            FunctionCallOutputContentItem::InputText { text } => !text.is_empty(),
+            _ => true,
+        });
+        // The runtime formatter supplies this completion status. Yielded and terminated
+        // responses can also report success, but their state must remain visible.
+        if host_duration.is_some() || status != "Script completed" || !has_content {
+            let text = if host_duration.is_some() {
+                let wall_time_seconds = (wall_time.as_secs_f32() * 10.0).round() / 10.0;
+                format!("{status}\nWall time {wall_time_seconds:.1} seconds\nOutput:\n")
+            } else {
+                format!("{status}\n")
+            };
+            output.body.insert(
+                /*index*/ 0,
+                FunctionCallOutputContentItem::InputText { text },
+            );
+        }
         Self {
             output,
             status,

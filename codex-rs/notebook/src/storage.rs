@@ -144,6 +144,28 @@ impl Store {
         .await
     }
 
+    /// Only validated retained entries suppress historical missing-name diagnostics.
+    /// Baselines and skipped captures are not bindings, and no function is evaluated.
+    pub(crate) async fn binding_names(&self) -> Result<Vec<String>, String> {
+        self.run(|state| {
+            let _lock = files::lock(&state.paths.directory)?;
+            let project = read_project(&state.paths, state.budget)?;
+            let session = read_session(&state.paths, state.budget)?;
+            let names: BTreeSet<_> = project
+                .into_iter()
+                .flat_map(|project| project.snapshot.entries)
+                .chain(
+                    session
+                        .into_iter()
+                        .flat_map(|session| session.snapshot.entries),
+                )
+                .map(|entry| entry.name)
+                .collect();
+            Ok(names.into_iter().collect())
+        })
+        .await
+    }
+
     pub(crate) async fn checkpoint(
         &mut self,
         snapshot: &Value,

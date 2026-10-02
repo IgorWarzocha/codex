@@ -899,7 +899,7 @@ fn register_code_mode_executors(
                 }
                 deferred_exec_prompt_tool_specs.push(Arc::clone(&spec));
             }
-        } else {
+        } else if !notebook_control {
             exec_prompt_tool_specs.push(spec.as_ref().clone());
         }
         code_mode_nested_tool_specs.push((spec, cached_runtime));

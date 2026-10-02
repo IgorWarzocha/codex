@@ -77,9 +77,9 @@ This is a native Codex implementation of the Pi Notebook workflow, not a Pi exte
 
 On Unix, the controller owns the kernel's process group. On Windows, it assigns the suspended kernel to a non-breakaway Job Object before allowing it to run. Failure to establish ownership rejects startup. Kernel shutdown terminates owned descendants. The Windows path has not yet been exercised on a Windows machine.
 
-Retained functions do not preserve lexical closures. Recreate live connections and imported dependencies in a pinned startup function. A failed startup hook blocks execution until the hook is repaired or unpinned. Profile loading rejects name collisions instead of overwriting live bindings.
+Retained functions do not preserve lexical closures. Recreate live connections and imported dependencies in a pinned startup function. A failed startup hook blocks execution until the hook is repaired or unpinned. When the kernel has not started, unpin and reset operate on saved state without running startup hooks. Profile loading rejects name collisions instead of overwriting live bindings.
 
-Checkpoint and journal budgets follow the configured kernel heap: one eighth of the heap, clamped between 8 MiB and 256 MiB. The default 512 MiB heap gives a 64 MiB persistence budget. Values that cannot fit are reported as skipped. Releasing lexical bindings may require rebuilding the kernel from retained values, so runtime-only handles must be recreated.
+Checkpoint and journal budgets follow the kernel heap: one eighth of the heap, clamped between 8 MiB and 256 MiB. The default 512 MiB heap gives a 64 MiB persistence budget. Values that cannot fit are reported as skipped. Releasing lexical bindings may require rebuilding the kernel from retained values, so runtime-only handles must be recreated.
 
 ## Implementation
 

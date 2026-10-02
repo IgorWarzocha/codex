@@ -2606,6 +2606,32 @@ async fn notebook_lifecycle_stays_top_level_and_has_a_nested_read_surface() {
         notebook.code_mode_tool_names.get("notebook"),
         Some(&ToolName::plain("notebook"))
     );
+    let ToolSpec::Freeform(exec) = notebook.visible_spec("exec") else {
+        panic!("expected notebook exec tool");
+    };
+    assert!(
+        exec.description
+            .contains("tools.notebook({action}) supports status without query, list, diagnostics")
+    );
+    assert!(!exec.description.contains("- tools.notebook("));
+    let ToolSpec::Function(control) = notebook.visible_spec("notebook") else {
+        panic!("expected notebook control tool");
+    };
+    let schema = serde_json::to_value(&control.parameters).unwrap();
+    let variants = schema["anyOf"].as_array().unwrap();
+    for (action, boundary) in [
+        ("pin", "Promote bindings to durable project state"),
+        (
+            "reset",
+            "Clear private state, preserving durable project state and profiles",
+        ),
+    ] {
+        let variant = variants
+            .iter()
+            .find(|variant| variant["properties"]["action"]["enum"] == json!([action]))
+            .unwrap();
+        assert_eq!(variant["description"], boundary);
+    }
 }
 
 #[tokio::test]

@@ -162,7 +162,8 @@ async fn fresh_seed_is_private_captured_and_never_registers_profile_hooks() {
         .control(NotebookRequest::Status { query: None })
         .await
         .unwrap();
-    assert!(status.message.contains("Skipped 1: pending"));
+    assert!(status.message.contains("pending"));
+    assert!(status.message.contains("promise"));
     let store = disk.store(&disk.project, "fresh");
     assert_eq!(
         entries(&store.load_session().await.unwrap().unwrap()).len(),

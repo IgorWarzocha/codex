@@ -18,7 +18,7 @@ Pending output is capped at 4 MiB, with a visible truncation notice. The integra
 
 ## Globals
 
-- `tools.*` invokes the actual cell's `CodeModeSessionDelegate` over an authenticated localhost bridge. Tool functions expose `description` and supplied `input_schema` as `usage`. `ALL_TOOLS` lists normalized names, descriptions and schemas.
+- `tools.*` invokes the actual cell's `CodeModeSessionDelegate` over an authenticated localhost bridge. Native tool help and schemas live in `tools.<name>.description` and the descriptions in `ALL_TOOLS`.
 - `text(value)` appends text. `image(value, detail?)` accepts a `data:image` URL, an image item, or an MCP image block. `generatedImage({ image_url, output_hint? })` forwards an image and its optional hint.
 - `store(key, value)` saves a JSON-serializable value. `load(key)` returns a copy, or `undefined` for a missing key.
 - `await notify(value)` calls the real delegate notification hook. `await yield_control()` requests an immediate foreground yield while execution continues.

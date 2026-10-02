@@ -19,8 +19,8 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
 
 ## Window 2 (after request 2: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 3 (turn) --
-00:additional_tools/developer (1; hash=b2e0268bd8a06979):
-        - namespace/functions; hash=a696d2dfef1364d5
+00:additional_tools/developer (1; hash=8301a81d1eb659d5):
+        - namespace/functions; hash=44f117828fb2f34f
           - custom/exec
           - function/wait
 01:message/developer:
@@ -105,8 +105,8 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
 
 ## Window 4 (after request 4: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 5 (turn) --
-00:additional_tools/developer (1; hash=b2e0268bd8a06979):
-        - namespace/functions; hash=a696d2dfef1364d5
+00:additional_tools/developer (1; hash=8301a81d1eb659d5):
+        - namespace/functions; hash=44f117828fb2f34f
           - custom/exec
           - function/wait
 01:message/developer:

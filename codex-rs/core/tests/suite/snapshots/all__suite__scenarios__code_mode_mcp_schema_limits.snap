@@ -16,9 +16,9 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (4; hash=a71dfdc163eed0f0):
-    - custom/exec: Run fresh restricted JavaScript to compose tools. Source only, no JSON or fences. No console, imp...; hash=04b9ce56fca923df
-    - function/wait: Resume or terminate a yielded exec cell. Returns new output or completion, closing finished cells...; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=223c109693f9afac
+  tools (4; hash=dd30792fb62450ec):
+    - custom/exec: Run fresh restricted JavaScript to compose tools. Source only, no JSON or fences. No console, imp...; hash=2e77574d17c600c2
+    - function/wait: Resume or terminate a yielded exec cell; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=ad29f2c1fa0aa8e9
     - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=be451617efc003d1
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
@@ -39,7 +39,4 @@ Settings:
     const [sharedDeclaration, sharedSchema] = shared.split("\\n\\nInput schema: ");
     results.push([sharedDeclaration.includes("code_mode_description_marker"), sharedDeclaration.includes("te...redSchema.includes("code_mode_description_marker")]); [hash=cd158dada91d48e9]
     text(JSON.stringify(results));
-04:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | [[false,true,false],[true,true,true],[true,true,true]]
+04:custom_tool_call_output:[[false,true,false],[true,true,true],[true,true,true]]

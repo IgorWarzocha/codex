@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=55d5b46e4a2e8e6a):
-        - namespace/functions; hash=f57e2a9d09c7470b
+00:additional_tools/developer (3; hash=e1e7efd8390ca636):
+        - namespace/functions; hash=0eaa532112973009
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -103,16 +103,13 @@ Settings:
     Check whether the Notes plugin echo tool is available.
 -- request 2 (turn) --
 07:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
-08:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | []
+08:custom_tool_call_output:[]
 
 ## Window 2 (after request 2: input diverged at item 00)
 Settings: same as window 1
 -- request 3 (turn) --
-00:additional_tools/developer (3; hash=00000cc4f26f205f):
-        - namespace/functions; hash=c010b99a0c6f9b8c
+00:additional_tools/developer (3; hash=fe1c6429d195db44):
+        - namespace/functions; hash=0dbbd64196297601
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -197,10 +194,7 @@ Settings: same as window 1
 06:message/user:
     Check whether the Notes plugin echo tool is available.
 07:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
-08:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | []
+08:custom_tool_call_output:[]
 09:message/assistant:
     The Notes tool is not installed yet.
 10:message/user:
@@ -224,16 +218,10 @@ Settings: same as window 1
     Use these plugin-associated capabilities to help solve the task.
 -- request 4 (turn) --
 13:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
-14:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | ["mcp__notes__echo"]
+14:custom_tool_call_output:["mcp__notes__echo"]
 -- request 5 (turn) --
 15:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
-16:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | ECHOING: Mira owns the kickoff
+16:custom_tool_call_output:ECHOING: Mira owns the kickoff
 -- request 6 (turn) --
 17:message/assistant:
     The Notes plugin confirms Mira owns the kickoff.
@@ -241,7 +229,4 @@ Settings: same as window 1
     Use the Notes tool again to check that the kickoff is Friday.
 -- request 7 (turn) --
 19:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
-20:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | ECHOING: The kickoff is Friday
+20:custom_tool_call_output:ECHOING: The kickoff is Friday

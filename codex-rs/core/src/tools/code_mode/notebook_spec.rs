@@ -23,21 +23,26 @@ pub(super) fn create_notebook_tool() -> ToolSpec {
     );
     let variants = vec![
         action(&["status", "list"], vec![("query", query.clone())], &[]),
-        action(
-            &["checkpoint", "restart", "diagnostics", "reset"],
-            vec![],
-            &[],
-        ),
+        action(&["checkpoint", "restart", "diagnostics"], vec![], &[]),
+        JsonSchema {
+            description: Some(
+                "Clear private state, preserving durable project state and profiles".to_string(),
+            ),
+            ..action(&["reset"], vec![], &[])
+        },
         action(
             &["save", "load"],
             vec![("name", JsonSchema::string(None))],
             &["name"],
         ),
-        action(
-            &["pin"],
-            vec![("names", names.clone()), ("hook", hook)],
-            &["names"],
-        ),
+        JsonSchema {
+            description: Some("Promote bindings to durable project state".to_string()),
+            ..action(
+                &["pin"],
+                vec![("names", names.clone()), ("hook", hook)],
+                &["names"],
+            )
+        },
         action(&["unpin", "release"], vec![("names", names)], &["names"]),
         action(&["prune"], vec![("query", query)], &["query"]),
     ];

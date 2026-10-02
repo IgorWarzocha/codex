@@ -69,8 +69,57 @@ impl<'de> Deserialize<'de> for NotebookHook {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NotebookControlResult {
+    /// Complete bounded model-facing text. `details` is for structured consumers.
     pub message: String,
     pub details: Value,
+}
+
+impl NotebookControlResult {
+    pub(crate) fn with_details(label: &str, details: Value) -> Self {
+        Self {
+            message: format!("{label}\n{}", format_details(&details, 12 * 1024)),
+            details,
+        }
+    }
+}
+
+/// Bound each field independently so large inventories cannot hide failures,
+/// disposal results or continuation handles. Raw details stay unchanged.
+pub(crate) fn format_details(details: &Value, budget: usize) -> String {
+    use crate::journal::bound_text;
+
+    if let Some(fields) = details.as_object().filter(|fields| !fields.is_empty()) {
+        let overhead = fields.keys().map(|key| key.len() + 4).sum::<usize>() + 2;
+        let field_budget = budget.saturating_sub(overhead) / fields.len();
+        let text = fields
+            .iter()
+            .map(|(key, value)| format!("{key}: {}", format_details(value, field_budget)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return bound_text(&format!("{{{text}}}"), budget);
+    }
+    let text = details.to_string();
+    if text.len() > budget
+        && let Some(items) = details.as_array()
+    {
+        let count = format!("{} items ", items.len());
+        return bound_text(
+            &format!(
+                "{count}{}",
+                bound_text(&text, budget.saturating_sub(count.len()))
+            ),
+            budget,
+        );
+    }
+    bound_text(&text, budget)
+}
+
+pub(crate) fn identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
 
 pub(crate) fn matches(query: &str, name: &str) -> bool {
@@ -99,4 +148,34 @@ pub(crate) fn matches(query: &str, name: &str) -> bool {
         p += 1;
     }
     p == pattern.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn mutation_message_bounds_inventory_without_hiding_other_fields() {
+        let details = json!({"released":["x".repeat(64 * 1024)],"failures":[{"name":"shared","reason":"concurrent pin"}],"warnings":["partial release"],"memory":{"rssBytes":99},"disposal":{"failures":[{"name":"handle","reason":"dispose failed"}]},"checkpoint":{"skipped":[{"name":"socket","reason":"runtime-only"}]},"continuation":{"cellId":"next-cell"}});
+        let result = NotebookControlResult::with_details("Notebook release", details.clone());
+        assert!(result.message.len() < 13 * 1024);
+        for text in [
+            "concurrent pin",
+            "partial release",
+            "rssBytes",
+            "dispose failed",
+            "runtime-only",
+            "next-cell",
+            "truncated",
+        ] {
+            assert!(
+                result.message.contains(text),
+                "missing {text}: {}",
+                result.message
+            );
+        }
+        assert_eq!(result.message.matches("concurrent pin").count(), 1);
+        assert_eq!(result.details, details);
+    }
 }

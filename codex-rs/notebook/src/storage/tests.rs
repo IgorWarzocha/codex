@@ -62,6 +62,32 @@ fn binding<'a>(snapshot: &'a Value, name: &str) -> Option<&'a Value> {
 }
 
 #[tokio::test]
+async fn cold_binding_names_include_validated_project_and_private_entries_only() -> TestResult {
+    let disk = Disk::new()?;
+    let mut store = disk.store("thread")?;
+    let mut private = snapshot(vec![entry("privateValue", "private")]);
+    private["skipped"] = json!([{"name":"skippedValue","reason":"runtime-only"}]);
+    let project = snapshot(vec![entry("projectValue", "project")]);
+    store.checkpoint(&private, &project).await?;
+    let cold = disk.store("thread")?;
+    assert_eq!(
+        cold.binding_names().await?,
+        ["privateValue", "projectValue"]
+    );
+    assert_eq!(
+        disk.store("other")?.binding_names().await?,
+        ["projectValue"]
+    );
+
+    let paths = files::Paths::new(disk.home.clone(), &disk.project, "thread")?;
+    let mut invalid: Value = serde_json::from_slice(&fs::read(&paths.session)?)?;
+    invalid["snapshot"]["entries"][0]["data"] = json!("invalid base64");
+    fs::write(&paths.session, serde_json::to_vec(&invalid)?)?;
+    assert!(cold.binding_names().await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
 async fn heap_budget_bounds_capture_restore_and_merged_projects_without_partial_writes()
 -> TestResult {
     let disk = Disk::new()?;

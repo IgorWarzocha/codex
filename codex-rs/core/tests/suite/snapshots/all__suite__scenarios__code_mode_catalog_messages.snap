@@ -32,8 +32,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=abe3a2edd75e0e4d):
-    - custom/exec: Catalog exec instructions. Default yield: 1234 ms. image(dataUrl | { image_url, detail? } | Image...; hash=5ee391bb1ca7ac3d
+  tools (7; hash=983be128972a196e):
+    - custom/exec: Catalog exec instructions. Default yield: 1234 ms. image(dataUrl | { image_url, detail? } | Image...; hash=d49e95b47d048d18
     - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=67bc0f04da3505b3
     - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=be451617efc003d1
     - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=d6d74f33db330162
@@ -102,12 +102,7 @@ Settings:
 -- request 2 (turn) --
 05:custom_tool_call/exec:text('started'); yield_control(); text('finished');
 06:custom_tool_call_output:Script running with cell ID 1
-    Wall time <DURATION> seconds
-    Output:
      | started
 -- request 3 (turn) --
 07:function_call/functions.wait:{"cell_id":"1"}
-08:function_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | finished
+08:function_call_output:finished

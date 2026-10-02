@@ -81,10 +81,7 @@ struct NotebookOutput(NotebookControlResult);
 
 impl NotebookOutput {
     fn render(&self) -> String {
-        formatted_truncate_text(
-            &format!("{}\n{}", self.0.message, self.0.details),
-            TruncationPolicy::Bytes(32 * 1024),
-        )
+        formatted_truncate_text(&self.0.message, TruncationPolicy::Bytes(32 * 1024))
     }
 }
 
@@ -112,10 +109,10 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn notebook_output_keeps_management_details_in_native_response() {
+    fn notebook_output_forwards_authoritative_message_and_keeps_structured_js_details() {
         let output = NotebookOutput(NotebookControlResult {
-            message: "Notebook idle".to_string(),
-            details: json!({"memory":{"heapUsedBytes":42},"checkpoint":{"skipped":[{"name":"handle","reason":"runtime-only"}]}}),
+            message: "Notebook result from its producer".to_string(),
+            details: json!({"internalMarker":"not-appended"}),
         });
         let response = output.to_response_item(
             "status",
@@ -124,11 +121,17 @@ mod tests {
             },
         );
         let serialized = serde_json::to_string(&response).unwrap();
-        assert!(serialized.contains("heapUsedBytes"));
-        assert!(serialized.contains("runtime-only"));
+        assert!(serialized.contains("Notebook result from its producer"));
+        assert!(!serialized.contains("not-appended"));
+        assert_eq!(
+            output.code_mode_result(&ToolPayload::Function {
+                arguments: "{}".into()
+            })["details"]["internalMarker"],
+            "not-appended"
+        );
         let large = NotebookOutput(NotebookControlResult {
-            message: "Profiles".to_string(),
-            details: json!({"profiles":"x".repeat(64 * 1024)}),
+            message: "x".repeat(64 * 1024),
+            details: json!({}),
         });
         let rendered = large.render();
         assert!(rendered.len() < 34 * 1024);

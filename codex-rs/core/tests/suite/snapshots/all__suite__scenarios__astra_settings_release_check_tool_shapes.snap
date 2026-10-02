@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=4ed41e8ac0ee1a89):
-        - namespace/functions; hash=b458b8a943fd157c
+00:additional_tools/developer (3; hash=c311e05a4ea5fa5e):
+        - namespace/functions; hash=47e4061305af25c1
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -110,10 +110,7 @@ Settings:
     ]);
     text(`diagnostics:\\n${log.output}`);
     text(`MCP: ${ping.structuredContent?.echo ?? "missing"}`);
-10:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | diagnostics:
+10:custom_tool_call_output:diagnostics:
     UI-42: expected Settings button label: Apply
     diagnostic 001: rendering settings panel
     diagnostic 002: rendering settings panel
@@ -132,10 +129,7 @@ Settings:
     UI-42: observed Settings button label: Save | MCP: ECHOING: settings-release-check
 -- request 4 (turn) --
 11:custom_tool_call/exec:image(await tools.view_image({ path: "release/settings.png", detail: "original" }));
-12:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | <input_image>
+12:custom_tool_call_output:<input_image>
 -- request 5 (turn) --
 13:custom_tool_call/exec:text(await tools.apply_patch(`*** Begin Patch
     *** Update File: release/status.md
@@ -146,15 +140,9 @@ Settings:
     +MCP: reachable
     *** End Patch
     `));
-14:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | {}
+14:custom_tool_call_output:{}
 -- request 6 (turn) --
 15:custom_tool_call/exec:text((await tools.exec_command({ cmd: "cat release/status.md", login: false })).output);
-16:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
-    Output:
-     | Status: blocked
+16:custom_tool_call_output:Status: blocked
     Reason: expected Apply; observed Save
     MCP: reachable

@@ -70,7 +70,7 @@ fn compact_inventory_preserves_call_shape_without_nested_manuals() {
     let freeform = definition("patch", CodeModeToolKind::Freeform);
     assert_eq!(
         standing(&[function.clone(), freeform.clone()], &BTreeMap::new()),
-        "Tools available in exec (nested object details and results: inspect tool help in ALL_TOOLS):\n- tools.hidden_dynamic(args: { mode?: \"fast\" | \"safe\"; options?: object; queries: Array<object>; })\n- tools.patch(input: string)",
+        "Tools available in exec:\n- tools.hidden_dynamic(args: { mode?: \"fast\" | \"safe\"; options?: object; queries: Array<object>; })\n- tools.patch(input: string)",
     );
 
     // This is the metadata consumed by V8 ALL_TOOLS, not a separate test facade.
@@ -127,7 +127,7 @@ fn namespaces_keep_shared_guidance_once_without_restating_tool_help() {
     beta.tool_name = ToolName::namespaced("group", "beta");
     assert_eq!(
         standing(&[alpha, beta], &namespaces),
-        "Tools available in exec (nested object details and results: inspect tool help in ALL_TOOLS):\n## group\nShared safety boundary\n- tools.group__alpha(input: string)\n- tools.group__beta(input: string)"
+        "Tools available in exec:\n## group\nShared safety boundary\n- tools.group__alpha(input: string)\n- tools.group__beta(input: string)"
     );
 }
 

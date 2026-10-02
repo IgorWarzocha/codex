@@ -12,12 +12,98 @@ use codex_protocol::ToolName;
 use serde_json::json;
 use std::path::PathBuf;
 
+#[test]
+fn status_message_is_complete_bounded_and_does_not_duplicate_binding_inventory() {
+    let mut bindings = vec![
+        json!({"name":"retainedMarker","pinned":true,"description":"useful helper","bytes":42}),
+    ];
+    bindings.extend(
+        (0..10_000).map(|i| json!({"name":format!("binding{i}"),"description":"x".repeat(256)})),
+    );
+    let status = json!({"bindings":bindings,"memory":{"heapUsedBytes":42,"heapLimitBytes":1024,"rssBytes":99},"retainedBindings":1,"retainedBytes":42,"userCells":3,"defaultProfile":{"name":"default","loadedBindings":1,"skipped":[{"name":"collision","reason":"existing binding"}]},"npmImportsError":"import inventory failure"});
+    let checkpoint = json!({"sessionEntries":1,"projectEntries":1,"conflicts":["concurrentMarker"],"skipped":[{"name":"handle","reason":"runtime-only"}]});
+    let result = crate::lifecycle::status_result(
+        &status,
+        &checkpoint,
+        Some("disk failure"),
+        Some("*"),
+        true,
+    );
+    assert!(result.message.len() < 16 * 1024);
+    for text in [
+        "heapUsedBytes",
+        "heapLimitBytes",
+        "rssBytes",
+        "concurrentMarker",
+        "runtime-only",
+        "disk failure",
+        "existing binding",
+        "import inventory failure",
+        "omitted",
+        "3 completed cells",
+    ] {
+        assert!(
+            result.message.contains(text),
+            "missing {text}: {}",
+            result.message
+        );
+    }
+    assert_eq!(result.message.matches("retainedMarker").count(), 1);
+    assert_eq!(result.message.matches("disk failure").count(), 1);
+    assert!(result.details["omittedBindings"].as_u64().unwrap() > 0);
+}
+
 #[derive(Default)]
 struct Delegate {
     calls: Mutex<Vec<CodeModeNestedToolCall>>,
     notifications: Mutex<Vec<(String, CellId, String)>>,
     closed: Mutex<Vec<CellId>>,
     blocked_cancelled: CancellationToken,
+}
+
+#[tokio::test]
+async fn cold_storage_free_recovery_validates_names_without_starting_or_persisting() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let ephemeral = DenoNotebookSessionProvider::new_with_identity(
+        "/nonexistent/notebook-deno".into(),
+        cwd.path().into(),
+        home.path().into(),
+        "cold-ephemeral".into(),
+    )
+    .with_ephemeral(true);
+    let no_identity =
+        DenoNotebookSessionProvider::new("/nonexistent/notebook-deno".into(), cwd.path().into());
+    for provider in [&ephemeral, &no_identity] {
+        let reset = provider.control(NotebookRequest::Reset).await.unwrap();
+        assert_eq!(reset.details["reset"], true);
+        let unpin = provider
+            .control(NotebookRequest::Unpin {
+                names: vec!["missing".into()],
+            })
+            .await
+            .unwrap();
+        assert_eq!(unpin.details["unpinned"], json!([]));
+        assert_eq!(unpin.details["missing"], json!(["missing"]));
+        for names in [vec![], vec!["invalid-name".into()], vec!["".into()]] {
+            assert!(
+                provider
+                    .control(NotebookRequest::Unpin { names })
+                    .await
+                    .unwrap_err()
+                    .contains("valid binding names")
+            );
+        }
+        assert!(
+            provider
+                .control(NotebookRequest::Status { query: None })
+                .await
+                .unwrap_err()
+                .contains("has not been initialized")
+        );
+    }
+    assert!(!home.path().join("notebook").exists());
+    assert_eq!(std::fs::read_dir(cwd.path()).unwrap().count(), 0);
 }
 
 struct CallbackDrop {

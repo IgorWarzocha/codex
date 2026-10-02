@@ -214,28 +214,19 @@ impl CodeModeService {
         if self.shutdown_token.is_cancelled() {
             return Err("notebook session is shut down".to_string());
         }
-        // Disk-only reads must not replay a failing startup hook just to inspect
-        // saved history or profiles. They still have the same access validation.
+        // Reads and recovery must not initialize a cold kernel or replay startup
+        // side effects. The provider uses the live session when one exists.
         if matches!(
             &request,
             codex_notebook::NotebookRequest::Diagnostics
                 | codex_notebook::NotebookRequest::List { .. }
+                | codex_notebook::NotebookRequest::Unpin { .. }
+                | codex_notebook::NotebookRequest::Reset
         ) {
             return provider.control(request).await;
         }
         // Initialization may restore bindings. Access must be checked before even creating it.
-        if let Err(error) = self.session().await
-            && (self.shutdown_token.is_cancelled()
-                || !matches!(
-                    &request,
-                    codex_notebook::NotebookRequest::Unpin { .. }
-                        | codex_notebook::NotebookRequest::Reset
-                ))
-        {
-            return Err(error);
-        }
-        // A corrupt snapshot or pinned startup hook can prevent session creation. The
-        // concrete provider owns disk-only unpin/reset recovery even without a kernel.
+        self.session().await?;
         provider.control(request).await
     }
 
@@ -659,6 +650,169 @@ mod tests {
             assert!(error.contains("danger-full-access"), "{error}");
             assert!(service.session.get().is_none());
             assert!(!notebook_home.exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn notebook_core_cold_ephemeral_recovery_needs_neither_runtime_nor_storage() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let (session, turn, _rx) =
+            crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+                codex_login::CodexAuth::from_api_key("Test API Key"),
+                Vec::new(),
+                |config| {
+                    config.codex_home =
+                        codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(home.path())
+                            .unwrap();
+                    config.cwd = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
+                        project.path(),
+                    )
+                    .unwrap();
+                    config.ephemeral = true;
+                    config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
+                    config.code_mode.deno_program = Some("/nonexistent/notebook-deno".into());
+                    config
+                        .permissions
+                        .set_permission_profile(codex_protocol::models::PermissionProfile::Disabled)
+                        .unwrap();
+                },
+            )
+            .await;
+        let step = StepContext::for_test(turn);
+        let service = super::CodeModeService::new(
+            codex_protocol::ThreadId::new(),
+            Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
+            &step.turn.config,
+            session.services.executed_tool_calls.clone(),
+        );
+        let reset = service
+            .control_notebook(codex_notebook::NotebookRequest::Reset, &step)
+            .await
+            .unwrap();
+        assert_eq!(reset.details["reset"], true);
+        let unpin = service
+            .control_notebook(
+                codex_notebook::NotebookRequest::Unpin {
+                    names: vec!["missing".into()],
+                },
+                &step,
+            )
+            .await
+            .unwrap();
+        assert_eq!(unpin.details["unpinned"], json!([]));
+        assert_eq!(unpin.details["missing"], json!(["missing"]));
+        let error = service
+            .control_notebook(
+                codex_notebook::NotebookRequest::Unpin {
+                    names: vec!["invalid-name".into()],
+                },
+                &step,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.contains("valid binding names"));
+        assert!(service.session.get().is_none());
+        assert!(!home.path().join("notebook").exists());
+        assert_eq!(std::fs::read_dir(project.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a local Deno Jupyter executable"]
+    async fn notebook_core_cold_recovery_never_replays_startup_side_effects() {
+        use crate::session::tests::make_session_and_context_with_auth_and_config_and_rx;
+        use codex_protocol::models::PermissionProfile;
+
+        for fail_first in [false, true] {
+            for action in ["unpin", "reset"] {
+                let home = tempfile::tempdir().unwrap();
+                let project = tempfile::tempdir().unwrap();
+                let (session, turn, _rx) = make_session_and_context_with_auth_and_config_and_rx(
+                    codex_login::CodexAuth::from_api_key("Test API Key"),
+                    Vec::new(),
+                    |config| {
+                        config.codex_home =
+                            codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
+                                home.path(),
+                            )
+                            .unwrap();
+                        config.cwd =
+                            codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
+                                project.path(),
+                            )
+                            .unwrap();
+                        config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
+                        config.code_mode.deno_program = Some(
+                            std::env::var_os("DENO_PROGRAM")
+                                .map(std::path::PathBuf::from)
+                                .unwrap_or_else(|| "deno".into()),
+                        );
+                        config
+                            .permissions
+                            .set_permission_profile(PermissionProfile::Disabled)
+                            .unwrap();
+                    },
+                )
+                .await;
+                let step = StepContext::for_test(turn);
+                let thread = codex_protocol::ThreadId::new();
+                let make_service = || {
+                    super::CodeModeService::new(
+                        thread,
+                        Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
+                        &step.turn.config,
+                        session.services.executed_tool_calls.clone(),
+                    )
+                };
+                let original = make_service();
+                let started = original.execute(codex_code_mode::ExecuteRequest {
+                    tool_call_id: "seed-hook".into(),
+                    source: "function brokenStartup() { Deno.writeTextFileSync('hook-runs', 'x', {append:true}); throw new Error('expected startup failure'); }".into(),
+                    enabled_tools: Vec::new(),
+                    yield_time_ms: Some(10_000),
+                    max_output_tokens: None,
+                }, step.clone()).await.unwrap();
+                assert!(matches!(
+                    started.initial_response().await.unwrap(),
+                    codex_code_mode::RuntimeResponse::Result {
+                        error_text: None,
+                        ..
+                    }
+                ));
+                original
+                    .control_notebook(
+                        serde_json::from_value(
+                            json!({"action":"pin","names":["brokenStartup"],"hook":"startup"}),
+                        )
+                        .unwrap(),
+                        &step,
+                    )
+                    .await
+                    .unwrap();
+                original.shutdown().await.unwrap();
+
+                let resumed = make_service();
+                if fail_first {
+                    let error = resumed.session().await.err().expect("startup must fail");
+                    assert!(error.contains("expected startup failure"), "{error}");
+                }
+                let request = if action == "unpin" {
+                    json!({"action":"unpin","names":["brokenStartup"]})
+                } else {
+                    json!({"action":"reset"})
+                };
+                resumed
+                    .control_notebook(serde_json::from_value(request).unwrap(), &step)
+                    .await
+                    .unwrap();
+                assert!(resumed.session.get().is_none());
+                assert_eq!(
+                    std::fs::read_to_string(project.path().join("hook-runs")).unwrap_or_default(),
+                    if fail_first { "x" } else { "" },
+                    "{action} must not start or retry the hook"
+                );
+                resumed.shutdown().await.unwrap();
+            }
         }
     }
 

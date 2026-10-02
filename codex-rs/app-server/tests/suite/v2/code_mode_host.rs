@@ -227,12 +227,16 @@ async fn code_mode_model_output_uses_structured_host_timing(
         format!(
             "{status}\nWall time {total_seconds:.3} seconds (code-mode {host_seconds:.3} seconds; overhead {overhead_seconds:.3} seconds)\nOutput:\n"
         )
+    } else if tool_name == "exec" {
+        "timed".to_string()
     } else {
-        let seconds = Duration::from_nanos(code_mode_host_duration_ns).as_secs_f32();
-        let seconds = (seconds * 10.0).round() / 10.0;
-        format!("{status}\nWall time {seconds:.1} seconds\nOutput:\n")
+        format!("{status}\n")
     };
-    assert_eq!(output["output"][0]["text"], expected_header);
+    if !experimental_show_cell_overhead && tool_name == "exec" {
+        assert_eq!(output["output"], expected_header);
+    } else {
+        assert_eq!(output["output"][0]["text"], expected_header);
+    }
     Ok(())
 }
 
@@ -330,16 +334,7 @@ async fn app_server_shares_flag_selected_grpc_code_mode_host_across_threads() ->
         (&requests[3], "second-remote-cell"),
     ] {
         let output = request.custom_tool_call_output(call_id);
-        assert_eq!(
-            output["output"]
-                .as_array()
-                .and_then(|items| items.last())
-                .cloned(),
-            Some(json!({
-                "type": "input_text",
-                "text": "remote app-server host",
-            }))
-        );
+        assert_eq!(output["output"], "remote app-server host");
     }
     assert_eq!(
         std::fs::read_to_string(codex_home.path().join("config.toml"))?,

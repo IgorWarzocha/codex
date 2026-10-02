@@ -106,7 +106,7 @@ fn exec_override_preserves_runtime_sections() {
             }
         })),
     }];
-    let declaration = "Tools available in exec (nested object details and results: inspect tool help in ALL_TOOLS):\n- tools.alpha(args: unknown)";
+    let declaration = "Tools available in exec:\n- tools.alpha(args: unknown)";
     for (code_mode_only, guidance, preamble, expected) in [
         (true, Some(""), Some(""), declaration.to_string()),
         (

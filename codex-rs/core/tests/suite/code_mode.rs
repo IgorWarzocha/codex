@@ -210,7 +210,15 @@ fn custom_tool_output_body_and_success(
     let output = match text_items.as_slice() {
         [] => content.unwrap_or_default(),
         [only] => (*only).to_string(),
-        [_, rest @ ..] => rest.concat(),
+        [header, rest @ ..]
+            if matches!(
+                *header,
+                "Script failed\n" | "Script terminated\n" | "Script completed\n"
+            ) || header.starts_with("Script running with cell ID ") =>
+        {
+            rest.concat()
+        }
+        _ => text_items.concat(),
     };
     (output, success)
 }
@@ -796,15 +804,8 @@ text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marke
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    assert_eq!(items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&items, /*index*/ 0),
-    );
-    let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 1))?;
+    assert_eq!(items.len(), 1);
+    let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 0))?;
     assert!(
         parsed
             .get("chunk_id")
@@ -1852,7 +1853,7 @@ async fn code_mode_wait_id_stays_known_after_compaction(
     let final_items = function_tool_output_items(&final_request, terminal_call_id);
     assert_eq!(final_items.len(), 1);
     assert_regex_match(
-        r"^Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z",
+        r"^Script terminated\n\z",
         text_item(&final_items, /*index*/ 0),
     );
     let output = final_request.function_call_output(terminal_call_id);
@@ -3255,9 +3256,8 @@ async fn code_mode_resumed_wait_does_not_certify_a_reused_runtime_cell() -> Resu
     let requests = continued.requests();
     assert_eq!(requests.len(), 4);
     let items = function_tool_output_items(&requests[3], "call-stale-wait");
-    assert_eq!(items.len(), 2);
-    assert!(text_item(&items, /*index*/ 0).starts_with("Script completed\n"));
-    assert_eq!(text_item(&items, /*index*/ 1), "B");
+    assert_eq!(items.len(), 1);
+    assert_eq!(text_item(&items, /*index*/ 0), "B");
     let wait = requests[3].function_call_output("call-stale-wait");
     let metadata = &wait["internal_chat_message_metadata_passthrough"];
     assert!(metadata.get("tool_calls_complete").is_none());
@@ -3399,15 +3399,15 @@ async fn code_mode_recovers_complete_inventory_after_orphaned_mapping_pressure()
         .iter()
         .find(|item| item["type"] == "custom_tool_call_output" && item["call_id"] == "call-fresh")
         .unwrap();
-    assert_eq!(
-        output["output"]
-            .as_array()
-            .unwrap()
+    let emitted = match &output["output"] {
+        Value::String(text) => Some(text.as_str()),
+        Value::Array(items) => items
             .iter()
             .filter_map(|item| item["text"].as_str())
             .rfind(|text| !text.trim().is_empty()),
-        Some("recovered"),
-    );
+        _ => None,
+    };
+    assert_eq!(emitted, Some("recovered"));
     let metadata = &output["internal_chat_message_metadata_passthrough"];
     assert_eq!(
         metadata["executed_tool_calls"],
@@ -3712,7 +3712,7 @@ if (!tool) {
             })
         })
         .expect("exec description should be present");
-    assert!(exec_description.contains("filtering ALL_TOOLS by name and description"));
+    assert!(exec_description.contains("Inspect ALL_TOOLS entries {name, description}"));
     assert!(!exec_description.contains("Shared MCP Types:"));
     assert!(!exec_description.contains("calendar_timezone_option_99"));
 
@@ -4124,8 +4124,8 @@ text(JSON.stringify(results));
         .last_request()
         .expect("parallel code mode run should send a completion request");
     let items = custom_tool_output_items(&req, "call-1");
-    assert_eq!(items.len(), 2);
-    assert_eq!(text_item(&items, /*index*/ 1), "[\"ok\",\"ok\"]");
+    assert_eq!(items.len(), 1);
+    assert_eq!(text_item(&items, /*index*/ 0), "[\"ok\",\"ok\"]");
 
     Ok(())
 }
@@ -4164,7 +4164,7 @@ text(JSON.stringify([results[0].output.includes("code-alpha-ready"), results[1].
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let result: Value = serde_json::from_str(text_item(&items, /*index*/ 1))?;
+    let result: Value = serde_json::from_str(text_item(&items, /*index*/ 0))?;
     assert_eq!(result, serde_json::json!([true, true]));
 
     Ok(())
@@ -4198,7 +4198,7 @@ text(result.output);
     assert_eq!(
         text_item(
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
+            /*index*/ 0
         ),
         "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
     );
@@ -4235,7 +4235,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let output = text_item(&items, /*index*/ 0);
     assert_regex_match(
         r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
         output,
@@ -4272,7 +4272,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let output = text_item(&items, /*index*/ 0);
     // The nested 20,000-token budget leaves about 80,000 characters. This
     // ceiling independently proves that history applied its smaller cap.
     assert!(
@@ -4321,7 +4321,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let output = text_item(&items, /*index*/ 0);
     // The 50-token override must shrink this 50,000-character value far below
     // what the default 10,000-token history cap would retain.
     assert!(
@@ -4365,7 +4365,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let output = text_item(&items, /*index*/ 0);
     assert_regex_match(
         r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
         output,
@@ -4404,7 +4404,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let output = text_item(&items, /*index*/ 0);
     // The 50-token override must shrink this 50,000-character value far below
     // what the default 10,000-token history cap would retain.
     assert!(
@@ -4443,7 +4443,7 @@ text(result.output);
     assert_eq!(
         text_item(
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
+            /*index*/ 0
         ),
         "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
     );
@@ -4471,10 +4471,7 @@ throw new Error("boom");
     let items = custom_tool_output_items(&req, "call-1");
     assert_eq!(items.len(), 4);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script failed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script failed\n\z"),
         text_item(&items, /*index*/ 0),
     );
     assert_eq!(text_item(&items, /*index*/ 1), "before crash");
@@ -4758,10 +4755,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
     let first_items = custom_tool_output_items(&first_request, "call-1");
     assert_eq!(first_items.len(), 2);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script running with cell ID \d+\n\z"),
         text_item(&first_items, /*index*/ 0),
     );
     assert_eq!(text_item(&first_items, /*index*/ 1), "phase 1");
@@ -4802,10 +4796,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
     let second_items = function_tool_output_items(&second_request, "call-2");
     assert_eq!(second_items.len(), 2);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script running with cell ID \d+\n\z"),
         text_item(&second_items, /*index*/ 0),
     );
     assert_eq!(
@@ -4847,15 +4838,8 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
 
     let third_request = third_completion.single_request();
     let third_items = function_tool_output_items(&third_request, "call-3");
-    assert_eq!(third_items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&third_items, /*index*/ 0),
-    );
-    assert_eq!(text_item(&third_items, /*index*/ 1), "phase 3");
+    assert_eq!(third_items.len(), 1);
+    assert_eq!(text_item(&third_items, /*index*/ 0), "phase 3");
 
     // Nested calls retain the original exec item and turn context when later
     // turns resume the cell with wait.
@@ -4942,10 +4926,7 @@ for (let index = 0; index < 256; index++) {{
     let first_items = custom_tool_output_items(&first_request, "call-1");
     assert_eq!(first_items.len(), 1);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script running with cell ID \d+\n\z"),
         text_item(&first_items, /*index*/ 0),
     );
     let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
@@ -4981,10 +4962,7 @@ for (let index = 0; index < 256; index++) {{
     let second_items = function_tool_output_items(&second_request, "call-2");
     assert!(!second_items.is_empty());
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script terminated\n\z"),
         text_item(&second_items, /*index*/ 0),
     );
 
@@ -5109,15 +5087,8 @@ text("session b done");
 
     let third_request = third_completion.single_request();
     let third_items = function_tool_output_items(&third_request, "call-3");
-    assert_eq!(third_items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&third_items, /*index*/ 0),
-    );
-    assert_eq!(text_item(&third_items, /*index*/ 1), "session a done");
+    assert_eq!(third_items.len(), 1);
+    assert_eq!(text_item(&third_items, /*index*/ 0), "session a done");
 
     fs::write(&session_b_gate, "ready")?;
     responses::mount_sse_once(
@@ -5149,15 +5120,8 @@ text("session b done");
 
     let fourth_request = fourth_completion.single_request();
     let fourth_items = function_tool_output_items(&fourth_request, "call-4");
-    assert_eq!(fourth_items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&fourth_items, /*index*/ 0),
-    );
-    assert_eq!(text_item(&fourth_items, /*index*/ 1), "session b done");
+    assert_eq!(fourth_items.len(), 1);
+    assert_eq!(text_item(&fourth_items, /*index*/ 0), "session b done");
     for (output, originating_call_id, expected_command) in [
         (
             first_request.custom_tool_call_output("call-1"),
@@ -5432,10 +5396,7 @@ text("phase 2");
     let second_items = function_tool_output_items(&second_request, "call-2");
     assert_eq!(second_items.len(), 1);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script terminated\n\z"),
         text_item(&second_items, /*index*/ 0),
     );
 
@@ -5467,15 +5428,8 @@ text("after terminate");
 
     let third_request = third_completion.single_request();
     let third_items = custom_tool_output_items(&third_request, "call-3");
-    assert_eq!(third_items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&third_items, /*index*/ 0),
-    );
-    assert_eq!(text_item(&third_items, /*index*/ 1), "after terminate");
+    assert_eq!(third_items.len(), 1);
+    assert_eq!(text_item(&third_items, /*index*/ 0), "after terminate");
 
     Ok(())
 }
@@ -5526,10 +5480,7 @@ async fn code_mode_wait_returns_error_for_unknown_session() -> Result<()> {
     let items = function_tool_output_items(&request, "call-1");
     assert_eq!(items.len(), 2);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script failed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script failed\n\z"),
         text_item(&items, /*index*/ 0),
     );
     assert_eq!(
@@ -5662,10 +5613,7 @@ text("session b done");
     let third_items = function_tool_output_items(&third_request, "call-3");
     assert_eq!(third_items.len(), 1);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script running with cell ID \d+\n\z"),
         text_item(&third_items, /*index*/ 0),
     );
     assert_eq!(
@@ -5712,20 +5660,14 @@ text("session b done");
     let fourth_items = function_tool_output_items(&fourth_request, "call-4");
     match fourth_items.len() {
         1 => {
-            assert_regex_match(
-                concat!(
-                    r"(?s)\A",
-                    r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
-                ),
+            assert!(matches!(
                 text_item(&fourth_items, /*index*/ 0),
-            );
+                "Script terminated\n" | "session a done"
+            ));
         }
         2 => {
             assert_regex_match(
-                concat!(
-                    r"(?s)\A",
-                    r"Script (?:completed|terminated)\nWall time \d+\.\d seconds\nOutput:\n\z"
-                ),
+                concat!(r"(?s)\A", r"Script (?:completed|terminated)\n\z"),
                 text_item(&fourth_items, /*index*/ 0),
             );
             assert_eq!(text_item(&fourth_items, /*index*/ 1), "session a done");
@@ -5784,10 +5726,7 @@ text("after yield");
     let first_items = custom_tool_output_items(&first_request, "call-1");
     assert_eq!(first_items.len(), 2);
     assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
+        concat!(r"(?s)\A", r"Script running with cell ID \d+\n\z"),
         text_item(&first_items, /*index*/ 0),
     );
     assert_eq!(text_item(&first_items, /*index*/ 1), "before yield");
@@ -6027,7 +5966,7 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
     let active_output = function_tool_output_items(&requests[2], "call-wait-active");
     assert!(text_item(&active_output, /*index*/ 1).contains("not found"));
     let recovery_items = custom_tool_output_items(&requests[3], "call-recovery");
-    assert_eq!(text_item(&recovery_items, /*index*/ 1), "preserved");
+    assert_eq!(text_item(&recovery_items, /*index*/ 0), "preserved");
 
     Ok(())
 }
@@ -6106,14 +6045,7 @@ text("token one token two token three token four token five token six token seve
 
     let second_request = second_completion.single_request();
     let second_items = function_tool_output_items(&second_request, "call-2");
-    assert_eq!(second_items.len(), 2, "wait output: {second_items:?}");
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&second_items, /*index*/ 0),
-    );
+    assert_eq!(second_items.len(), 1, "wait output: {second_items:?}");
     let expected_pattern = r#"(?sx)
 \A
 Warning:\ truncated\ output\ \(original\ token\ count:\ \d+\)\n
@@ -6122,7 +6054,7 @@ Total\ output\ lines:\ 1\n
 .*…\d+\ tokens\ truncated….*
 \z
 "#;
-    assert_regex_match(expected_pattern, text_item(&second_items, /*index*/ 1));
+    assert_regex_match(expected_pattern, text_item(&second_items, /*index*/ 0));
 
     Ok(())
 }
@@ -6214,15 +6146,8 @@ text("after");
         Some(false),
         "exec exit helper call failed unexpectedly: {output}"
     );
-    assert_eq!(items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&items, /*index*/ 0),
-    );
-    assert_eq!(text_item(&items, /*index*/ 1), "before");
+    assert_eq!(items.len(), 1);
+    assert_eq!(text_item(&items, /*index*/ 0), "before");
     assert_eq!(output, "before");
 
     Ok(())
@@ -6295,7 +6220,7 @@ text("after");
     let (_, success) = custom_tool_output_body_and_success(&req, "call-1");
     assert_ne!(success, Some(false));
     assert_eq!(
-        &items[1..],
+        &items,
         &[
             serde_json::json!({ "type": "input_text", "text": "before" }),
             serde_json::json!({
@@ -6327,9 +6252,9 @@ async fn code_mode_replaces_malformed_image() -> Result<()> {
     let items = custom_tool_output_items(&req, "call-1");
     let (_, success) = custom_tool_output_body_and_success(&req, "call-1");
     assert_ne!(success, Some(false));
-    assert_eq!(items.len(), 2);
+    assert_eq!(items.len(), 1);
     assert_eq!(
-        items[1],
+        items[0],
         serde_json::json!({
             "type": "input_text",
             "text": "image content omitted because it could not be processed"
@@ -6374,10 +6299,10 @@ async fn code_mode_resizes_explicit_original_image() -> Result<()> {
     let items = custom_tool_output_items(&req, "call-1");
     let (_, success) = custom_tool_output_body_and_success(&req, "call-1");
     assert_ne!(success, Some(false));
-    let resized_url = items[1]["image_url"]
+    let resized_url = items[0]["image_url"]
         .as_str()
         .expect("code mode image output should contain a data URL");
-    assert_eq!(items[1]["detail"], "original");
+    assert_eq!(items[0]["detail"], "original");
     let (_, resized_base64) = resized_url
         .split_once(',')
         .expect("resized image should contain a data URL prefix");
@@ -6433,8 +6358,8 @@ image({{
 
     let request = second_mock.single_request();
     let items = custom_tool_output_items(&request, "call-1");
-    assert_eq!(items.len(), 6, "unexpected code-mode output: {items:?}");
-    for item in &items[1..] {
+    assert_eq!(items.len(), 5, "unexpected code-mode output: {items:?}");
+    for item in &items {
         assert_eq!(item["type"], "input_image");
         assert_eq!(item["detail"], "original");
         let image_url = item["image_url"]
@@ -6486,8 +6411,8 @@ async fn code_mode_unified_image_budget_preserves_legacy_contract_for_unsupporte
 
     let request = second_mock.single_request();
     let items = custom_tool_output_items(&request, "call-1");
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[1]["detail"], "high");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["detail"], "high");
 
     let body = request.body_json();
     let exec_description = body["tools"]
@@ -6635,21 +6560,14 @@ image(out);
         Some(false),
         "code_mode view_image call failed unexpectedly"
     );
-    assert_eq!(items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&items, /*index*/ 0),
-    );
+    assert_eq!(items.len(), 1);
 
     assert_eq!(
-        items[1].get("type").and_then(Value::as_str),
+        items[0].get("type").and_then(Value::as_str),
         Some("input_image")
     );
 
-    let emitted_image_url = items[1]
+    let emitted_image_url = items[0]
         .get("image_url")
         .and_then(Value::as_str)
         .expect("image helper should emit an input_image item with image_url");
@@ -6670,7 +6588,7 @@ image(out);
         ((2, 1), Orientation::Rotate90, Some(rotate_90_exif))
     );
     assert_eq!(
-        items[1].get("detail").and_then(Value::as_str),
+        items[0].get("detail").and_then(Value::as_str),
         Some("original")
     );
 
@@ -6706,27 +6624,20 @@ image(imageItem);
         Some(false),
         "code_mode mcp image scenario call failed unexpectedly"
     );
-    assert_eq!(items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&items, /*index*/ 0),
-    );
+    assert_eq!(items.len(), 1);
 
     assert_eq!(
-        items[1].get("type").and_then(Value::as_str),
+        items[0].get("type").and_then(Value::as_str),
         Some("input_image")
     );
 
-    let emitted_image_url = items[1]
+    let emitted_image_url = items[0]
         .get("image_url")
         .and_then(Value::as_str)
         .expect("image helper should emit an input_image item with image_url");
     assert!(emitted_image_url.starts_with("data:image/png;base64,"));
     assert_eq!(
-        items[1].get("detail").and_then(Value::as_str),
+        items[0].get("detail").and_then(Value::as_str),
         Some("original")
     );
 
@@ -6757,15 +6668,8 @@ async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
         Some(false),
         "exec apply_patch call failed unexpectedly: {items:?}"
     );
-    assert_eq!(items.len(), 2);
-    assert_regex_match(
-        concat!(
-            r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
-        ),
-        text_item(&items, /*index*/ 0),
-    );
-    assert_eq!(text_item(&items, /*index*/ 1), "{}");
+    assert_eq!(items.len(), 1);
+    assert_eq!(text_item(&items, /*index*/ 0), "{}");
 
     let file_path = test.cwd_path().join(file_name);
     assert_eq!(fs::read_to_string(&file_path)?, "hello from code_mode\n");
@@ -7636,8 +7540,8 @@ async fn yielded_code_mode_tool_callbacks_keep_their_originating_step() -> Resul
     );
     let live = completed.single_request();
     let a_output = function_tool_output_items(&live, "call-wait-a");
-    assert!(text_item(&a_output, /*index*/ 0).starts_with("Script completed"));
-    assert_eq!(text_item(&a_output, /*index*/ 1), "A_ORIGIN:1");
+    assert_eq!(a_output.len(), 1);
+    assert_eq!(text_item(&a_output, /*index*/ 0), "A_ORIGIN:1");
     Ok(())
 }
 

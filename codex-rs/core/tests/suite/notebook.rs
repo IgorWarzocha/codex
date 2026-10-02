@@ -96,10 +96,7 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
     );
     assert!(output.contains("Notebook running (cached)"), "{output}");
     let checkpoint = requests[4].function_call_output("checkpoint").to_string();
-    assert!(
-        checkpoint.contains("Notebook management complete"),
-        "{checkpoint}"
-    );
+    assert!(checkpoint.contains("Notebook checkpoint"), "{checkpoint}");
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }
