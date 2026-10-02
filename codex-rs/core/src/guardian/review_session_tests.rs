@@ -13,6 +13,7 @@ use codex_prompts::ResolvedModelMessages;
 use codex_protocol::openai_models::AutoReviewMessages;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::protocol::AgentStatus;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
@@ -177,6 +178,7 @@ fn turn_complete_event(
         id: turn_id.to_string(),
         msg: EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: turn_id.to_string(),
+            notes_checkpoint: None,
             started_at: None,
             last_agent_message: last_agent_message.map(str::to_string),
             error: None,
@@ -319,6 +321,191 @@ async fn spawned_guardian_reuse_key_matches_inherited_instructions() {
     assert_eq!(inherited.thread, latest);
     assert!(inherited.thread_provider.is_none());
     manager.shutdown().await;
+}
+
+async fn notes_review_parent(
+    configure: impl FnOnce(&mut Config),
+) -> (Arc<Session>, Arc<TurnContext>) {
+    let auth = codex_login::CodexAuth::from_external_chatgpt_tokens(
+        "header.e30.signature",
+        "account-123",
+        Some("plus"),
+    )
+    .expect("backend authentication");
+    let (parent, turn, _events) =
+        crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+            auth,
+            Vec::new(),
+            |config| {
+                assert_eq!(
+                    config.context_strategy,
+                    crate::config::ContextStrategy::Notes
+                );
+                config.features.enable(Feature::ContextManagement).unwrap();
+                config.features.enable(Feature::TokenBudget).unwrap();
+                config.token_budget = Some(crate::config::TokenBudgetConfig {
+                    use_history_notes_extension: true,
+                    guidance_message: Some("Parent notes guidance".to_owned()),
+                    reminder_threshold_tokens: Some(16_000),
+                    auto_compact_fallback_prompt: Some("Parent notes checkpoint".to_owned()),
+                    ..Default::default()
+                });
+                configure(config);
+                config.prepare_token_budget_for_startup().unwrap();
+            },
+        )
+        .await;
+    (parent, turn)
+}
+
+#[tokio::test]
+async fn spawned_guardian_from_notes_parent_keeps_internal_continuity() {
+    let (parent, turn) = notes_review_parent(|_| {}).await;
+    let parent_config = turn.config.clone();
+    let manager = parent
+        .guardian_review_session()
+        .expect("Guardian pool installed");
+    let context = setup::prepare_prewarm(Arc::clone(&parent), turn)
+        .await
+        .expect("prepare reviewer from Notes parent");
+    let key = context.reuse_key(None);
+    manager
+        .prewarm(Arc::new(context), key)
+        .await
+        .expect("start isolated reviewer");
+    let reviewer = manager.trunk().await.expect("prewarmed reviewer");
+    // Inspect the real post-startup turn, not just build_reviewer_config's output.
+    let reviewer_turn = reviewer.session.new_default_turn().await;
+    assert_eq!(
+        reviewer_turn.config.context_strategy,
+        crate::config::ContextStrategy::Compaction
+    );
+    for feature in [Feature::ContextManagement, Feature::TokenBudget] {
+        assert!(!reviewer.session.features().enabled(feature));
+        assert!(!reviewer_turn.config.features.enabled(feature));
+        assert!(parent_config.features.enabled(feature));
+    }
+    assert!(reviewer_turn.config.token_budget.is_none());
+    let world_state = crate::session::tests::build_world_state_from_turn_context(
+        &reviewer.session,
+        &reviewer_turn,
+    )
+    .await;
+    let (snapshot, fragments) = world_state.render_full();
+    let snapshot = serde_json::to_value(snapshot).unwrap();
+    assert_eq!(snapshot["context_window_guidance"], "");
+    assert!(snapshot.get("context_window").is_none());
+    let rendered = fragments
+        .iter()
+        .map(|fragment| fragment.render())
+        .collect::<String>();
+    assert!(!rendered.contains(codex_protocol::protocol::CONTEXT_WINDOW_OPEN_TAG));
+    assert!(!rendered.contains("Parent notes guidance"));
+    let tool_policy = &reviewer.session.tool_policy;
+    assert_eq!(
+        tool_policy.allowed_tools,
+        codex_guardian_reviewer::reviewer_tool_policy().allowed_tools
+    );
+    assert!(tool_policy.require_managed_sandbox);
+    assert!(tool_policy.require_unified_exec);
+    assert!(!tool_policy.expose_additional_permissions);
+    assert!(
+        reviewer
+            .session
+            .services
+            .extensions
+            .tool_contributors()
+            .is_empty()
+    );
+    assert_eq!(reviewer_turn.approval_policy(), AskForApproval::Never);
+    assert_eq!(
+        reviewer_turn.config.permissions.permission_profile(),
+        &codex_protocol::models::PermissionProfile::read_only()
+    );
+    assert_eq!(
+        parent_config.context_strategy,
+        crate::config::ContextStrategy::Notes
+    );
+    assert_eq!(
+        parent_config
+            .token_budget
+            .as_ref()
+            .unwrap()
+            .guidance_message
+            .as_deref(),
+        Some("Parent notes guidance")
+    );
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn ordinary_child_from_notes_parent_keeps_notes_continuity() {
+    let (parent, turn) = notes_review_parent(|_| {}).await;
+    let config = turn.config.as_ref().clone();
+    let manager = crate::test_support::thread_manager_with_models_provider(
+        parent.services.auth_manager.auth_cached().unwrap(),
+        config.model_provider.clone(),
+    );
+    let mut options = crate::StartThreadOptions::new(config);
+    options.session_source = Some(SessionSource::SubAgent(SubAgentSource::Other(
+        "ordinary-child".to_owned(),
+    )));
+    let child = manager
+        .start_thread(options)
+        .await
+        .expect("start Notes child");
+    let child_turn = child.thread.session.new_default_turn().await;
+    assert_eq!(
+        child_turn.config.context_strategy,
+        crate::config::ContextStrategy::Notes
+    );
+    for feature in [Feature::ContextManagement, Feature::TokenBudget] {
+        assert!(child.thread.session.features().enabled(feature));
+        assert!(child_turn.config.features.enabled(feature));
+    }
+    let budget = child_turn.config.token_budget.as_ref().unwrap();
+    assert!(budget.use_history_notes_extension);
+    assert_eq!(
+        budget.guidance_message.as_deref(),
+        Some("Parent notes guidance")
+    );
+    child
+        .thread
+        .shutdown_and_wait()
+        .await
+        .expect("stop Notes child");
+}
+
+#[tokio::test]
+async fn spawned_guardian_internal_continuity_reports_managed_notes_conflicts() {
+    for feature in [Feature::ContextManagement, Feature::TokenBudget] {
+        let (parent, turn) = notes_review_parent(|config| {
+            config.features = ManagedFeatures::from_configured(
+                config.features.get().clone(),
+                Some(codex_config::Sourced {
+                    value: codex_config::FeatureRequirementsToml {
+                        entries: [(feature.key().to_owned(), true)].into(),
+                    },
+                    source: codex_config::RequirementSource::Unknown,
+                }),
+            )
+            .unwrap();
+        })
+        .await;
+        let manager = parent
+            .guardian_review_session()
+            .expect("Guardian pool installed");
+        let context = setup::prepare_prewarm(Arc::clone(&parent), turn)
+            .await
+            .expect("prepare retains managed feature requirements");
+        let key = context.reuse_key(None);
+        let error = manager.prewarm(Arc::new(context), key).await.unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("managed requirement"), "{message}");
+        assert!(message.contains(feature.key()), "{message}");
+        assert!(manager.trunk().await.is_none());
+        manager.shutdown().await;
+    }
 }
 
 #[tokio::test]

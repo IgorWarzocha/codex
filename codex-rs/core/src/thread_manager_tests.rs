@@ -1119,6 +1119,7 @@ async fn start_thread_keeps_internal_threads_hidden_from_normal_lookups() {
 async fn spawn_internal_guardian_session_preserves_windows_sandbox_proxy_settings() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");

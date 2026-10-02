@@ -58,6 +58,12 @@ pub use codex_prompts::SUMMARIZATION_PROMPT;
 pub use codex_prompts::SUMMARY_PREFIX;
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 
+#[derive(Clone, Copy)]
+enum CompactionWindowTransition {
+    Advance,
+    Preserve,
+}
+
 /// Controls whether compaction replacement history must include initial context.
 ///
 /// Pre-turn/manual compaction variants use `DoNotInject`: they replace history with a summary and
@@ -135,12 +141,48 @@ pub(crate) async fn run_inline_auto_compact_task(
         turn_context,
         input,
         initial_context_injection,
-        CompactionTrigger::Auto,
-        reason,
-        phase,
+        CompactionTurnMetadata::new(
+            CompactionTrigger::Auto,
+            reason,
+            CompactionImplementation::Responses,
+            phase,
+        ),
+        CompactionWindowTransition::Advance,
     )
     .await?;
     Ok(())
+}
+
+/// Emergency readable summarization for notes continuity. The caller owns the
+/// bounded retry; this replaces model history without retiring the notes window.
+pub(crate) async fn run_inline_emergency_compact_task(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    initial_context_injection: InitialContextInjection,
+) -> CodexResult<()> {
+    let prompt = turn_context
+        .config
+        .compact_prompt
+        .as_deref()
+        .unwrap_or(SUMMARIZATION_PROMPT)
+        .to_string();
+    run_compact_task_inner(
+        sess,
+        turn_context,
+        vec![UserInput::Text {
+            text: prompt,
+            text_elements: Vec::new(),
+        }],
+        initial_context_injection,
+        CompactionTurnMetadata::new(
+            CompactionTrigger::Auto,
+            CompactionReason::ContextLimit,
+            CompactionImplementation::Responses,
+            CompactionPhase::MidTurn,
+        ),
+        CompactionWindowTransition::Preserve,
+    )
+    .await
 }
 
 pub(crate) async fn run_compact_task(
@@ -154,9 +196,13 @@ pub(crate) async fn run_compact_task(
         turn_context,
         input,
         InitialContextInjection::DoNotInject,
-        CompactionTrigger::Manual,
-        CompactionReason::UserRequested,
-        CompactionPhase::StandaloneTurn,
+        CompactionTurnMetadata::new(
+            CompactionTrigger::Manual,
+            CompactionReason::UserRequested,
+            CompactionImplementation::Responses,
+            CompactionPhase::StandaloneTurn,
+        ),
+        CompactionWindowTransition::Advance,
     )
     .await?;
     Ok(())
@@ -167,12 +213,12 @@ async fn run_compact_task_inner(
     turn_context: Arc<TurnContext>,
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
-    trigger: CompactionTrigger,
-    reason: CompactionReason,
-    phase: CompactionPhase,
+    compaction_metadata: CompactionTurnMetadata,
+    window_transition: CompactionWindowTransition,
 ) -> CodexResult<()> {
-    let compaction_metadata =
-        CompactionTurnMetadata::new(trigger, reason, CompactionImplementation::Responses, phase);
+    let trigger = compaction_metadata.trigger();
+    let reason = compaction_metadata.reason();
+    let phase = compaction_metadata.phase();
     let attempt = CompactionAnalyticsAttempt::begin(
         sess.as_ref(),
         turn_context.as_ref(),
@@ -204,6 +250,7 @@ async fn run_compact_task_inner(
         input,
         initial_context_injection,
         compaction_metadata,
+        window_transition,
     )
     .await;
     let status = compaction_status_from_result(&result);
@@ -253,6 +300,7 @@ async fn run_compact_task_inner_impl(
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
+    window_transition: CompactionWindowTransition,
 ) -> CodexResult<String> {
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
@@ -295,7 +343,6 @@ async fn run_compact_task_inner_impl(
             &mut client_session,
             &responses_metadata,
             &prompt,
-            compaction_metadata.phase(),
         )
         .await;
 
@@ -348,17 +395,11 @@ async fn run_compact_task_inner_impl(
 
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.annotated_items();
-    let summary_suffix = if matches!(compaction_metadata.phase(), CompactionPhase::PostTurn) {
-        get_last_assistant_message_from_turn(compaction_response.output.iter())
-            .filter(|summary| !summary.trim().is_empty())
-            .ok_or_else(|| {
-                CodexErr::Stream(
-                    "Post-turn compaction completed without an assistant summary".to_string(),
-                )
-            })?
-    } else {
-        get_last_assistant_message_from_turn(history_snapshot.raw_items()).unwrap_or_default()
-    };
+    let summary_suffix = get_last_assistant_message_from_turn(compaction_response.output.iter())
+        .filter(|summary| !summary.trim().is_empty())
+        .ok_or_else(|| {
+            CodexErr::Stream("Compaction completed without an assistant summary".to_string())
+        })?;
     let summary_text = format!("{SUMMARY_PREFIX}\n{summary_suffix}");
     let user_messages = collect_annotated_user_messages(history_items);
 
@@ -368,7 +409,10 @@ async fn run_compact_task_inner_impl(
         // belongs to this compaction turn.
         summary_item.set_turn_id_if_missing(&turn_context.sub_id);
     }
-    let (window_number, window_ids) = sess.advance_auto_compact_window().await;
+    let (window_number, window_ids) = match window_transition {
+        CompactionWindowTransition::Advance => sess.advance_auto_compact_window().await,
+        CompactionWindowTransition::Preserve => sess.auto_compact_window_state().await,
+    };
 
     let (initial_context, world_state_baseline) =
         build_compaction_initial_context(sess.as_ref(), &initial_context_injection).await;
@@ -757,7 +801,6 @@ async fn drain_to_completed(
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
     prompt: &Prompt,
-    phase: CompactionPhase,
 ) -> CodexResult<CompactionResponse> {
     let mut stream = client_session
         .stream(
@@ -787,24 +830,9 @@ async fn drain_to_completed(
         };
         match event {
             Ok(ResponseEvent::OutputItemDone(item)) => {
-                if matches!(phase, CompactionPhase::PostTurn) {
-                    // Commit post-turn summaries only after success; failures must leave both
-                    // the live history and persisted rollout intact.
-                    output.push(item);
-                } else {
-                    sess.record_annotated_conversation_items(
-                        turn_context,
-                        turn_context.model_info(),
-                        vec![ResponseItemEnvelope {
-                            item,
-                            metadata: Some(CodexHarnessMetadata {
-                                compaction_output: true,
-                                ..Default::default()
-                            }),
-                        }],
-                    )
-                    .await;
-                }
+                // Every phase is transactional: only the successful replacement
+                // checkpoint may publish this attempt's summary to history/rollout.
+                output.push(item);
             }
             Ok(ResponseEvent::ServerReasoningIncluded(included)) => {
                 sess.set_server_reasoning_included(included).await;

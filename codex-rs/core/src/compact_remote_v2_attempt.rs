@@ -8,7 +8,7 @@ use super::run_remote_compaction_request_v2;
 use crate::Prompt;
 use crate::client::ModelClientSession;
 use crate::compact::CompactionAnalyticsDetails;
-use crate::compact_remote_history::trim_function_call_history_to_fit_context_window;
+use crate::compact_remote_history::trim_function_call_history_to_fit_compaction_budget;
 use crate::responses_metadata::CompactionTurnMetadata;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -44,11 +44,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
     let base_instructions = sess.get_prompt_base_instructions().await;
     let (rewritten_outputs, estimated_deleted_tokens) =
-        trim_function_call_history_to_fit_context_window(
-            &mut history,
-            turn_context.as_ref(),
-            &base_instructions,
-        );
+        trim_function_call_history_to_fit_compaction_budget(&mut history, &base_instructions);
     if rewritten_outputs > 0 {
         info!(
             turn_id = %turn_context.sub_id,

@@ -84,6 +84,8 @@ pub(crate) struct SessionState {
     /// Latest task admitted in this runtime, retained across completion and history edits.
     /// Cleared by standalone settings changes to invalidate pending continuation.
     pub(crate) last_started_turn_id: Option<String>,
+    /// Settled notes from the selected run only. Admission of new work invalidates them.
+    pub(crate) notes_checkpoint: Option<codex_protocol::protocol::NotesCheckpoint>,
     /// Runtime accounting state for the active auto-compaction window.
     auto_compact_window: AutoCompactWindow,
     /// Original request effort for the current model while configuration updates remain active.
@@ -129,6 +131,7 @@ impl SessionState {
             additional_context: AdditionalContextStore::default(),
             previous_turn_settings: None,
             last_started_turn_id: None,
+            notes_checkpoint: None,
             auto_compact_window: AutoCompactWindow::new_with_ids(auto_compact_window_ids),
             reasoning_effort_pin: ReasoningEffortPin::Unset,
             shutting_down: false,

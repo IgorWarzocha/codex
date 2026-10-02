@@ -1,7 +1,9 @@
 use anyhow::Result;
 use codex_code_mode::CodeModeSessionProvider;
+use codex_config::types::ContextStrategy;
 use codex_features::CodeModeRuntime;
 use codex_features::Feature;
+use codex_login::CodexAuth;
 use codex_notebook::DenoNotebookSessionProvider;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -67,8 +69,16 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
         ],
     )
     .await;
+    let backend_url = format!("{}/backend-api/codex", server.uri());
     let test = test_codex()
+        .with_context_strategy(ContextStrategy::Notes)
+        .with_auth(CodexAuth::from_external_chatgpt_tokens(
+            "header.e30.signature",
+            "account-123",
+            Some("plus"),
+        )?)
         .with_config(move |config| {
+            config.model_provider.base_url = Some(backend_url);
             config.code_mode.runtime = CodeModeRuntime::Notebook;
             config.code_mode.deno_program = Some(deno);
             config.ephemeral = true;

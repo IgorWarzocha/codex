@@ -43,6 +43,7 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
             completed_at: Some(20),
             duration_ms: Some(10_000),
             time_to_first_token_ms: None,
+            notes_checkpoint: None,
         },
     )));
 
@@ -88,6 +89,7 @@ fn projects_failed_turn_completion_as_snapshot() {
             completed_at: Some(20),
             duration_ms: Some(10_000),
             time_to_first_token_ms: None,
+            notes_checkpoint: None,
         },
     )));
 

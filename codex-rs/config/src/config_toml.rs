@@ -15,6 +15,8 @@ use crate::types::AnalyticsConfigToml;
 use crate::types::ApprovalsReviewer;
 use crate::types::AppsConfigToml;
 use crate::types::AuthCredentialsStoreMode;
+use crate::types::CompactionRetentionTokens;
+use crate::types::ContextStrategy;
 use crate::types::FeedbackConfigToml;
 use crate::types::History;
 use crate::types::MarketplaceConfig;
@@ -176,6 +178,17 @@ pub struct ConfigToml {
 
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,
+
+    /// Context continuity policy. Omitted selects notes with remote storage.
+    /// Use compaction explicitly when remote notes are unavailable.
+    pub context_strategy: Option<ContextStrategy>,
+
+    /// User-message retention budget for normal compaction. Defaults to 64000.
+    pub compaction_retention_tokens: Option<CompactionRetentionTokens>,
+
+    /// Roll over a notes window before the next user turn after this many idle minutes.
+    /// Omitted disables idle rollover. Must be a positive integer.
+    pub context_idle_rollover_minutes: Option<NonZeroU64>,
 
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,

@@ -1,4 +1,5 @@
 use codex_extension_api::FunctionCallError;
+use codex_extension_api::NotesCheckpointTracker;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolCallSource;
@@ -222,6 +223,7 @@ pub(crate) struct HistoryNotesTool {
     backend: HistoryNotesBackend,
     session_id: String,
     current_agent_name: String,
+    checkpoint_tracker: Option<std::sync::Arc<NotesCheckpointTracker>>,
 }
 
 impl HistoryNotesTool {
@@ -236,19 +238,49 @@ impl HistoryNotesTool {
             backend,
             session_id,
             current_agent_name,
+            checkpoint_tracker: None,
         }
+    }
+
+    pub(crate) fn with_checkpoint_tracker(
+        mut self,
+        tracker: std::sync::Arc<NotesCheckpointTracker>,
+    ) -> Self {
+        self.checkpoint_tracker = Some(tracker);
+        self
     }
 
     async fn handle_call(
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        let arguments = call.function_arguments()?;
-        let arguments = if arguments.trim().is_empty() {
-            json!({})
-        } else {
-            serde_json::from_str(arguments)
-                .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?
+        let is_write = matches!(
+            self.action,
+            HistoryNotesAction::NotesAppendToFile | HistoryNotesAction::NotesWriteFile
+        );
+        let attempt = is_write
+            .then(|| {
+                self.checkpoint_tracker
+                    .as_ref()
+                    .and_then(|tracker| tracker.begin_write(&call.turn_id))
+            })
+            .flatten();
+        let arguments = call.function_arguments().and_then(|arguments| {
+            if arguments.trim().is_empty() {
+                Ok(json!({}))
+            } else {
+                serde_json::from_str(arguments)
+                    .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))
+            }
+        });
+        let arguments = match arguments {
+            Ok(arguments) => arguments,
+            Err(error) => {
+                if let (Some(tracker), Some(attempt)) = (&self.checkpoint_tracker, attempt) {
+                    tracker.finish_write(attempt, false);
+                }
+                return Err(error);
+            }
         };
         let result = self
             .backend
@@ -260,10 +292,26 @@ impl HistoryNotesTool {
                 call.truncation_policy,
                 matches!(call.source, ToolCallSource::Direct),
             )
-            .await
-            .map_err(FunctionCallError::RespondToModel)?;
-
-        Ok(Box::new(HistoryNotesToolOutput::new(result, call.call_id)?))
+            .await;
+        let output = result
+            .map_err(FunctionCallError::RespondToModel)
+            .and_then(|result| HistoryNotesToolOutput::new(result, call.call_id));
+        if let (Some(tracker), Some(attempt)) = (&self.checkpoint_tracker, attempt) {
+            // The successful HTTP/backend operation and validated protected output are the
+            // authority, not an arbitrary success flag in model-visible result text.
+            tracker.finish_write(
+                attempt,
+                output.as_ref().is_ok_and(|output| {
+                    output
+                        .result
+                        .get("encrypted_output")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| !value.is_empty())
+                        && output.result.get("error").is_none()
+                }),
+            );
+        }
+        Ok(Box::new(output?))
     }
 }
 

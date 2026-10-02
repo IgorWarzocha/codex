@@ -1,5 +1,6 @@
 mod capabilities;
 mod contributors;
+mod notes_checkpoint;
 mod registry;
 mod session_isolation;
 mod state;
@@ -7,6 +8,8 @@ mod tool_policy;
 mod turn_admission;
 mod user_instructions;
 
+pub use notes_checkpoint::NotesCheckpointTracker;
+pub use notes_checkpoint::NotesWriteAttempt;
 pub use session_isolation::IsolatedSessionExtensions;
 pub use session_isolation::SessionIsolation;
 pub use tool_policy::ToolPolicy;

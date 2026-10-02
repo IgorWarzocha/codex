@@ -12,6 +12,7 @@ use crate::compact_remote_v2::run_inline_remote_auto_compact_task as run_inline_
 use crate::connectors;
 use crate::context::ContextualUserFragment;
 use crate::context::UserVerificationNotice;
+use crate::context_manager::estimate_item_token_count;
 use crate::cyber_access_program;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::feedback_tags;
@@ -69,6 +70,7 @@ use codex_analytics::InvocationType;
 use codex_analytics::TurnResolvedConfigFact;
 use codex_analytics::build_track_events_context;
 use codex_async_utils::OrCancelExt;
+use codex_config::types::ContextStrategy;
 use codex_connectors::AppToolPolicyEvaluator;
 use codex_core_plugins::RecommendedPluginCandidatesInput;
 use codex_extension_api::ExtensionData;
@@ -119,6 +121,7 @@ use codex_thread_store::PersistContext;
 use codex_tools::DiscoverableTool;
 use codex_tools::ToolName;
 use codex_tools::filter_request_plugin_install_discoverable_tools_for_client;
+use codex_utils_output_truncation::approx_token_count;
 use codex_utils_path_uri::PathUri;
 use codex_utils_stream_parser::AssistantTextChunk;
 use codex_utils_stream_parser::AssistantTextStreamParser;
@@ -331,11 +334,9 @@ pub(crate) async fn run_turn(
         )
         .await
     {
-        // Token-budget compaction resets history, which can discard the evidence
-        // referenced by a pending delta review. Leave budget failures unreusable.
-        if !matches!(error.details(), CodexErrorDetails::ContextWindowExceeded)
-            || turn_context.config.features.enabled(Feature::TokenBudget)
-        {
+        // Only readable same-window rescue may recover evidence overflow in notes
+        // mode. Never discard the pending Guardian action with a notes reset.
+        if !matches!(error.details(), CodexErrorDetails::ContextWindowExceeded) {
             return Err(error);
         }
         // Incoming evidence can overflow even below the normal history
@@ -423,6 +424,8 @@ pub(crate) async fn run_turn(
 
     let mut next_step_context = Some(first_step_context);
     let mut guardian_budget_compacted = false;
+    // Configured hard-cap exhaustion and backend overflow share one rescue per turn.
+    let mut notes_context_rescued = false;
     loop {
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
@@ -598,9 +601,18 @@ pub(crate) async fn run_turn(
                     );
                 }
 
-                let should_roll_over = needs_follow_up
-                    && (sess.take_new_context_window_request().await || token_limit_reached);
-                let allow_auto_compact_fallback = !should_roll_over && !token_limit_reached;
+                // An explicit native tool request is distinct from an exhausted budget.
+                // Notes soft budgets remind the model. The next request's admission
+                // check rescues hard-cap exhaustion without retiring the notes window.
+                let requested_new_context =
+                    needs_follow_up && sess.take_new_context_window_request().await;
+                let should_roll_over = requested_new_context
+                    || (needs_follow_up
+                        && token_limit_reached
+                        && turn_context.config.context_strategy == ContextStrategy::Compaction);
+                let allow_auto_compact_fallback = !should_roll_over
+                    && (turn_context.config.context_strategy == ContextStrategy::Notes
+                        || !token_limit_reached);
                 super::token_budget::maybe_record(
                     sess.as_ref(),
                     turn_context.as_ref(),
@@ -611,20 +623,33 @@ pub(crate) async fn run_turn(
 
                 // as long as compaction works well in getting us way below the token limit, we shouldn't worry about being in an infinite loop.
                 if should_roll_over {
-                    if let Err(err) = run_auto_compact(
-                        &sess,
-                        Arc::clone(&step_context),
-                        /*fallback_step_context*/ None,
-                        &mut client_session,
-                        InitialContextInjection::BeforeLastUserMessage {
-                            world_state: Arc::clone(&world_state),
-                            step_context: Arc::clone(&step_context),
-                        },
-                        CompactionReason::ContextLimit,
-                        CompactionPhase::MidTurn,
-                    )
-                    .await
-                    {
+                    let compact_result = if requested_new_context {
+                        crate::compact_token_budget::run_inline_auto_compact_task(
+                            Arc::clone(&sess),
+                            Arc::clone(&step_context),
+                            InitialContextInjection::BeforeLastUserMessage {
+                                world_state: Arc::clone(&world_state),
+                                step_context: Arc::clone(&step_context),
+                            },
+                            cancellation_token.child_token(),
+                        )
+                        .await
+                    } else {
+                        run_auto_compact(
+                            &sess,
+                            Arc::clone(&step_context),
+                            /*fallback_step_context*/ None,
+                            &mut client_session,
+                            InitialContextInjection::BeforeLastUserMessage {
+                                world_state: Arc::clone(&world_state),
+                                step_context: Arc::clone(&step_context),
+                            },
+                            CompactionReason::ContextLimit,
+                            CompactionPhase::MidTurn,
+                        )
+                        .await
+                    };
+                    if let Err(err) = compact_result {
                         if matches!(err.details(), CodexErrorDetails::TurnAborted) {
                             return Err(err);
                         }
@@ -714,7 +739,7 @@ pub(crate) async fn run_turn(
                     // policy. Keep summarizing compaction in this task to serialize history updates.
                     let config = &turn_context.config;
                     if config.model_post_turn_compact_threshold_percent > 0
-                        && !config.features.enabled(Feature::TokenBudget)
+                        && config.context_strategy == ContextStrategy::Compaction
                         && super::context_window::context_window_token_status(
                             sess.as_ref(),
                             turn_context.as_ref(),
@@ -758,8 +783,37 @@ pub(crate) async fn run_turn(
             }
             Err(err)
                 if matches!(err.details(), CodexErrorDetails::ContextWindowExceeded)
+                    && turn_context.config.context_strategy == ContextStrategy::Notes
+                    && !notes_context_rescued =>
+            {
+                notes_context_rescued = true;
+                if sess
+                    .services
+                    .thread_extension_data
+                    .get::<crate::guardian::ExhaustedReviewBudget>()
+                    .is_some()
+                {
+                    sess.services
+                        .thread_extension_data
+                        .insert(crate::guardian::ExhaustedReviewBudget::Compacting);
+                }
+                crate::compact::run_inline_emergency_compact_task(
+                    Arc::clone(&sess),
+                    Arc::clone(&turn_context),
+                    InitialContextInjection::BeforeLastUserMessage {
+                        world_state: Arc::clone(&world_state),
+                        step_context: Arc::clone(&step_context),
+                    },
+                )
+                .or_cancel(&cancellation_token)
+                .await??;
+                can_drain_pending_input = false;
+                continue;
+            }
+            Err(err)
+                if matches!(err.details(), CodexErrorDetails::ContextWindowExceeded)
                     && !guardian_budget_compacted
-                    && !turn_context.config.features.enabled(Feature::TokenBudget)
+                    && turn_context.config.context_strategy == ContextStrategy::Compaction
                     && sess
                         .services
                         .thread_extension_data
@@ -1312,8 +1366,12 @@ async fn run_pre_sampling_compact(
     let token_status =
         super::context_window::context_window_token_status(sess.as_ref(), turn_context.as_ref())
             .await;
-    // Compact if the configured auto-compaction budget or usable context window is exhausted.
-    if token_status.token_limit_reached {
+    // Notes checks the usable hard cap after recording accepted input and injections,
+    // sharing one same-window rescue with backend overflow in the sampling loop.
+    // Compaction also acts on its configured auto-compaction threshold here.
+    if token_status.token_limit_reached
+        && turn_context.config.context_strategy == ContextStrategy::Compaction
+    {
         // Pre-turn compaction runs before run_turn creates the normal sampling step.
         let step_context = sess
             .capture_step_context(Arc::clone(turn_context), cancellation_token)
@@ -1496,12 +1554,10 @@ async fn run_auto_compact(
         conversation.id = %sess.thread_id,
         turn.id = %turn_context.sub_id,
     );
-    if turn_context.config.features.enabled(Feature::TokenBudget) {
-        // Compaction is the reset request, so force a new context window
-        // instead of consuming a pending `new_context` tool request.
-        crate::compact_token_budget::run_inline_auto_compact_task(
+    if turn_context.config.context_strategy == ContextStrategy::Notes {
+        crate::compact::run_inline_emergency_compact_task(
             Arc::clone(sess),
-            step_context,
+            Arc::clone(turn_context),
             initial_context_injection,
         )
         .await?;
@@ -1704,6 +1760,23 @@ async fn run_sampling_request(
                 &responses_metadata,
             )
             .await?;
+        }
+        if turn_context.config.context_strategy == ContextStrategy::Notes
+            && let Some(limit) = step_context.settings.model_info.usable_context_window()
+        {
+            let base_tokens = i64::try_from(approx_token_count(&prompt.base_instructions.text))
+                .unwrap_or(i64::MAX);
+            let estimated_tokens = prompt
+                .input
+                .iter()
+                .map(estimate_item_token_count)
+                .fold(base_tokens, i64::saturating_add);
+            // Check each assembled request, including stream retries and newly accepted
+            // input without a usage report. Keep native usage and model headroom authoritative
+            // even if the backend accepts a larger window. The caller owns one shared rescue.
+            if sess.get_total_token_usage().await >= limit || estimated_tokens >= limit {
+                return Err(CodexErr::ContextWindowExceeded);
+            }
         }
         let err = match try_run_sampling_request(
             tool_runtime.clone(),

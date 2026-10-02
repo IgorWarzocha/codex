@@ -1995,6 +1995,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -2057,6 +2058,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -2219,6 +2221,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -2274,6 +2277,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -2355,6 +2359,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
         let items = events
@@ -2472,6 +2477,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -2575,6 +2581,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -2677,6 +2684,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
         ];
 
@@ -3066,6 +3074,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -3737,6 +3746,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -3802,6 +3812,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -3849,6 +3860,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -3912,6 +3924,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -3959,6 +3972,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -4043,6 +4057,7 @@ mod tests {
             completed_at: Some(102),
             duration_ms: Some(2_000),
             time_to_first_token_ms: None,
+            notes_checkpoint: None,
         }));
         expected.status = TurnStatus::Completed;
         expected.completed_at = Some(102);
@@ -4096,6 +4111,7 @@ mod tests {
             completed_at: Some(102),
             duration_ms: Some(2_000),
             time_to_first_token_ms: None,
+            notes_checkpoint: None,
         }));
         expected.status = TurnStatus::Completed;
         expected.completed_at = Some(102);
@@ -4271,6 +4287,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -4296,6 +4313,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
                 message: "still in b".into(),
@@ -4312,6 +4330,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -4373,6 +4392,7 @@ mod tests {
                 completed_at: Some(20),
                 duration_ms: Some(10_000),
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -4457,6 +4477,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -4536,6 +4557,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
         ];
 
@@ -4804,6 +4826,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
             EventMsg::Error(ErrorEvent {
                 misalignment: None,
@@ -4874,6 +4897,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -4931,6 +4955,7 @@ mod tests {
                 completed_at: Some(20),
                 duration_ms: Some(10_000),
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ];
 
@@ -4999,6 +5024,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
         ];
 
@@ -5080,6 +5106,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
             RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
                 thread_id: ThreadId::new(),
@@ -5140,6 +5167,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
         ];
 
@@ -5318,6 +5346,7 @@ mod tests {
                 completed_at: Some(20),
                 duration_ms: Some(123),
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         ));
 
@@ -5407,6 +5436,7 @@ mod tests {
                 completed_at: Some(20),
                 duration_ms: Some(123),
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
         ]);
 

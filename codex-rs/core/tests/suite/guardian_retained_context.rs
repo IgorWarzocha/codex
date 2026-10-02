@@ -54,6 +54,7 @@ use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_message_item_added;
 use core_test_support::responses::ev_output_text_delta;
 use core_test_support::responses::ev_response_created;
+use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
@@ -408,6 +409,33 @@ async fn compact_and_assert_answers(
         expected
     );
     Ok(actual.clone())
+}
+
+async fn remote_compact_and_assert_answers(
+    test: &TestCodex,
+    thread: &CodexThread,
+    server: &MockServer,
+    expected: &[VerifiedAnswer],
+) -> Result<RetainedContext> {
+    let compact = mount_sse_once(
+        server,
+        sse(vec![
+            json!({"type": "response.output_item.done", "item": {
+                "type": "compaction", "encrypted_content": "Retained authorization checkpoint."
+            }}),
+            ev_completed("authorization-compacted"),
+        ]),
+    )
+    .await;
+    let retained = compact_and_assert_answers(test, thread, expected).await?;
+    assert_eq!(
+        compact
+            .single_request()
+            .inputs_of_type("compaction_trigger")
+            .len(),
+        1
+    );
+    Ok(retained)
 }
 
 #[derive(Clone, Copy)]
@@ -899,11 +927,8 @@ async fn standalone_fork_retains_inherited_user_instructions(
         assert!(inherited_text.contains("tokens truncated"));
         assert!(inherited_text.len() < 900 * 4);
     }
-    // The adopted root later compacts through the mechanical path, which can drop originals.
-    test.config
-        .features
-        .enable(Feature::TokenBudget)
-        .expect("use mechanical root compaction");
+    // The adopted root uses opaque remote compaction, which can drop originals.
+    test.config.model_provider.name = "OpenAI".to_owned();
     let fork = if history_mode == ThreadHistoryMode::Paginated {
         let prepared = test
             .thread_store
@@ -972,7 +997,7 @@ async fn standalone_fork_retains_inherited_user_instructions(
         .clone();
     assert!(!expected.verified_answers_complete());
     let root = fork.thread;
-    compact_and_assert_answers(&test, &root, &[after]).await?;
+    remote_compact_and_assert_answers(&test, &root, &server, &[after]).await?;
     let root = resume(&test, &root).await?;
     assert_eq!(
         root.conversation_history_snapshot()
@@ -1233,7 +1258,8 @@ async fn retained_answers_cross_real_session_boundaries(
     )
     .await?;
     let thread = resume(&test, &test.codex).await?;
-    compact_and_assert_answers(&test, &thread, std::slice::from_ref(&before)).await?;
+    remote_compact_and_assert_answers(&test, &thread, &server, std::slice::from_ref(&before))
+        .await?;
 
     let after = record_answer(
         &thread,
@@ -1319,11 +1345,11 @@ async fn retained_answers_cross_real_session_boundaries(
         serde_json::to_string(&child_history)?.contains("Delegate an inspection."),
         "the child must actually inherit parent conversation context"
     );
-    compact_and_assert_answers(&test, &child, &[]).await?;
+    remote_compact_and_assert_answers(&test, &child, &server, &[]).await?;
     let child = resume(&test, &child).await?;
-    compact_and_assert_answers(&test, &child, &[]).await?;
+    remote_compact_and_assert_answers(&test, &child, &server, &[]).await?;
     child.shutdown_and_wait().await?;
-    compact_and_assert_answers(&test, &thread, &expected).await?;
+    remote_compact_and_assert_answers(&test, &thread, &server, &expected).await?;
 
     thread.shutdown_and_wait().await?;
     Ok(())

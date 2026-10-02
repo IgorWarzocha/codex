@@ -72,7 +72,6 @@ enum RetainedImageBudget {
     Enabled,
 }
 
-pub(crate) const RETAINED_MESSAGE_TOKEN_BUDGET: usize = 64_000;
 const MAX_RETAINED_AGENT_MESSAGE_TOKENS: i64 = 10_000;
 // Compact attempts can run much longer than normal turns, so keep the per-transport
 // retry budget smaller than the general Responses stream retry budget.
@@ -313,6 +312,10 @@ async fn run_remote_compact_task_inner_impl(
         prompt_input,
         prompt_input_metadata,
         compaction_output,
+        compaction_turn_context
+            .config
+            .compaction_retention_tokens
+            .tokens() as usize,
         sess.enabled(Feature::RetainClientDeveloperMessages),
         if sess.enabled(Feature::CompactionImageBudget) {
             RetainedImageBudget::Enabled
@@ -507,6 +510,7 @@ fn build_v2_compacted_history(
     prompt_input: Vec<ResponseItem>,
     prompt_input_metadata: Vec<Option<CodexHarnessMetadata>>,
     compaction_output: ResponseItem,
+    retained_message_token_budget: usize,
     retain_client_developer_messages: bool,
     image_budget: RetainedImageBudget,
 ) -> (Vec<ResponseItemEnvelope>, usize) {
@@ -523,7 +527,7 @@ fn build_v2_compacted_history(
         .flat_map(HistoryItemGroup::into_items)
         .collect::<Vec<_>>();
     let mut retained =
-        truncate_retained_messages(retained, RETAINED_MESSAGE_TOKEN_BUDGET, image_budget);
+        truncate_retained_messages(retained, retained_message_token_budget, image_budget);
     let retained_image_count = retained
         .iter()
         .map(|envelope| retained_input_image_count(&envelope.item))
@@ -814,6 +818,7 @@ mod tests {
             input,
             metadata,
             output,
+            64_000,
             /*retain_client_developer_messages*/ false,
             RetainedImageBudget::Disabled,
         )
@@ -932,6 +937,7 @@ mod tests {
                     None,
                 ],
                 output.clone(),
+                64_000,
                 enabled,
                 RetainedImageBudget::Disabled,
             );
@@ -974,13 +980,61 @@ mod tests {
     }
 
     #[test]
+    fn build_v2_compacted_history_honors_each_retention_budget() {
+        use codex_config::types::CompactionRetentionTokens;
+
+        for budget in [
+            CompactionRetentionTokens::Tokens16000,
+            CompactionRetentionTokens::Tokens32000,
+            CompactionRetentionTokens::Tokens64000,
+        ] {
+            let tokens = budget.tokens() as usize;
+            let input = vec![message("user", &"x".repeat(80_000 * 4), None)];
+            let output = ResponseItem::Compaction {
+                id: None,
+                encrypted_content: "checkpoint".to_string(),
+                internal_chat_message_metadata_passthrough: None,
+            };
+            let (history, _) = build_v2_compacted_history(
+                input,
+                vec![Some(CodexHarnessMetadata::default())],
+                output.clone(),
+                tokens,
+                false,
+                RetainedImageBudget::Disabled,
+            );
+            assert_eq!(history.len(), 2);
+            assert_eq!(history[0].metadata, Some(CodexHarnessMetadata::default()));
+            let mut expected = message(
+                "user",
+                &truncate_text(&"x".repeat(80_000 * 4), TruncationPolicy::Tokens(tokens)),
+                None,
+            );
+            // Rebuilding truncated annotated content keeps its unknown source kind.
+            if let ResponseItem::Message {
+                internal_chat_message_metadata_passthrough,
+                ..
+            } = &mut expected
+            {
+                *internal_chat_message_metadata_passthrough =
+                    Some(InternalChatMessageMetadataPassthrough {
+                        content_item_kinds: Some(vec![ContentItemKind("unknown".to_string())]),
+                        ..Default::default()
+                    });
+            }
+            assert_eq!(history[0].item, expected);
+            assert_eq!(history[1].item, output);
+        }
+    }
+
+    #[test]
     fn build_v2_compacted_history_discards_messages_before_truncating() {
         let old = message("user", "old", /*phase*/ None);
         let new = message("user", "new", /*phase*/ None);
-        let huge_developer_message = "d".repeat((RETAINED_MESSAGE_TOKEN_BUDGET + 1) * 4);
+        let huge_developer_message = "d".repeat((64_000 + 1) * 4);
         let huge_contextual_message = format!(
             "<environment_context>\n{}\n</environment_context>",
-            "c".repeat((RETAINED_MESSAGE_TOKEN_BUDGET + 1) * 4)
+            "c".repeat((64_000 + 1) * 4)
         );
         let input = vec![
             old.clone(),

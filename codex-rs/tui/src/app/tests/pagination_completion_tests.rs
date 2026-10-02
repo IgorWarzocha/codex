@@ -101,6 +101,7 @@ pub(super) async fn completed_history_app(
             completed_at: Some(finished),
             duration_ms: Some(125_000),
             time_to_first_token_ms: None,
+            notes_checkpoint: None,
         }));
         for event in events {
             records.push(serde_json::json!({

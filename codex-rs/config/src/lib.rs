@@ -11,6 +11,7 @@ mod config_layer_source;
 mod config_requirements;
 pub mod config_toml;
 mod constraint;
+mod context_strategy;
 mod diagnostics;
 mod filesystem_constraints;
 mod fingerprint;

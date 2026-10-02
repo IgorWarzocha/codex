@@ -2329,6 +2329,7 @@ async fn fork_injects_changed_agents_md_once() -> Result<()> {
     )?;
     assert_ne!(source, new_source);
     let mut fork_config = load_default_config_for_test(home.as_ref()).await;
+    fork_config.context_strategy = parent.config.context_strategy;
     fork_config.cwd = parent.config.cwd.clone();
     fork_config.model = parent.config.model.clone();
     fork_config.model_provider = parent.config.model_provider.clone();
@@ -2481,6 +2482,8 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
         .with_home(Arc::clone(&home))
         .with_config(|config| {
             let _ = config.features.enable(Feature::Collab);
+            // The mocked spawn call uses the V1 namespace, not the default V2 backend.
+            let _ = config.features.disable(Feature::MultiAgentV2);
             let _ = config.features.disable(Feature::EnableRequestCompression);
         });
     let test = builder.build(&server).await?;

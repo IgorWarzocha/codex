@@ -1,6 +1,8 @@
 use anyhow::Result;
+use codex_config::types::ContextStrategy;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
+use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
 use codex_core::config::Config;
 use codex_core::config::TokenBudgetConfig;
@@ -16,8 +18,6 @@ use codex_protocol::protocol::CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG;
 use codex_protocol::protocol::CONTEXT_WINDOW_GUIDANCE_OPEN_TAG;
 use codex_protocol::protocol::CONTEXT_WINDOW_OPEN_TAG;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::HookEventName;
-use codex_protocol::protocol::HookRunStatus;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::Op;
@@ -30,6 +30,7 @@ use core_test_support::assert_regex_match;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::hooks::trust_discovered_hooks;
+use core_test_support::load_default_config_for_test;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -44,10 +45,10 @@ use core_test_support::responses::sse_completed;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
+use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::local;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex as base_test_codex;
 use core_test_support::wait_for_event;
-use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_mcp_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -56,10 +57,76 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use tempfile::TempDir;
 use test_case::test_case;
 
 const CONFIGURED_CONTEXT_WINDOW: i64 = 128_000;
 const AUTO_COMPACT_FALLBACK_PROMPT: &str = "Save the important state before rollover.";
+
+/// Notes cases use real backend eligibility rather than the ordinary compaction fixture.
+fn test_codex() -> TestCodexBuilder {
+    base_test_codex()
+        .with_context_strategy(ContextStrategy::Notes)
+        .with_auth(
+            CodexAuth::from_external_chatgpt_tokens(
+                "header.e30.signature",
+                "account-123",
+                Some("plus"),
+            )
+            .expect("test backend authentication"),
+        )
+        .with_config(|config| {
+            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            config.model_provider.base_url = Some(format!(
+                "{}/backend-api/codex",
+                base_url.strip_suffix("/v1").unwrap()
+            ));
+        })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn omitted_context_strategy_starts_a_real_notes_session() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let response = mount_sse_once(&server, sse_completed("default-notes")).await;
+    let home = TempDir::new()?;
+    // No ordinary test_codex fixture and no context_strategy assignment.
+    let mut config = load_default_config_for_test(&home).await;
+    assert_eq!(config.context_strategy, ContextStrategy::Notes);
+    config.model = Some("gpt-5.5".to_string());
+    config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
+    config.model_provider.base_url = Some(format!("{}/backend-api/codex", server.uri()));
+    config.model_provider.supports_websockets = false;
+    let auth = CodexAuth::from_external_chatgpt_tokens(
+        "header.e30.signature",
+        "account-123",
+        Some("plus"),
+    )?;
+    let manager = codex_core::test_support::thread_manager_with_models_provider(
+        auth,
+        config.model_provider.clone(),
+    );
+    let thread = manager
+        .start_thread(StartThreadOptions::new(config))
+        .await?
+        .thread;
+    thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "inspect default continuity".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    let request = response.single_request();
+    assert_eq!(token_budget_contexts(&request).len(), 1);
+    assert!(
+        tool_names(&request)
+            .iter()
+            .any(|name| name == "new_context")
+    );
+    thread.shutdown_and_wait().await?;
+    Ok(())
+}
 
 fn model_token_budget_config() -> ModelTokenBudgetConfig {
     ModelTokenBudgetConfig {
@@ -162,9 +229,8 @@ fn write_token_budget_compact_hooks(home: &Path) {
     std::fs::write(home.join("hooks.json"), hooks.to_string()).expect("write hooks.json");
 }
 
-async fn assert_context_compaction_item_lifecycle(codex: &std::sync::Arc<codex_core::CodexThread>) {
-    let mut saw_compaction_started = false;
-    let mut saw_compaction_completed = false;
+async fn assert_notes_checkpoint_failure(codex: &std::sync::Arc<codex_core::CodexThread>) {
+    let mut saw_checkpoint_error = false;
 
     loop {
         let event = codex.next_event().await.expect("next event");
@@ -172,18 +238,27 @@ async fn assert_context_compaction_item_lifecycle(codex: &std::sync::Arc<codex_c
             EventMsg::ItemStarted(ItemStartedEvent {
                 item: TurnItem::ContextCompaction(_),
                 ..
-            }) => saw_compaction_started = true,
+            }) => panic!("failed checkpoint must not start a reset"),
             EventMsg::ItemCompleted(ItemCompletedEvent {
                 item: TurnItem::ContextCompaction(_),
                 ..
-            }) => saw_compaction_completed = true,
+            }) => panic!("failed checkpoint must not complete a reset"),
+            EventMsg::HookStarted(_) | EventMsg::HookCompleted(_) => {
+                panic!("failed checkpoint must not run compact hooks")
+            }
+            EventMsg::Error(error) => {
+                assert!(error.message.contains("Context was not reset"), "{error:?}");
+                saw_checkpoint_error = true;
+            }
             EventMsg::TurnComplete(_) => break,
             _ => {}
         }
     }
 
-    assert!(saw_compaction_started, "compaction item should start");
-    assert!(saw_compaction_completed, "compaction item should complete");
+    assert!(
+        saw_checkpoint_error,
+        "missing notes must report a checkpoint failure"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -306,17 +381,19 @@ async fn token_budget_guidance_precedes_standalone_context_window(
     Ok(())
 }
 
-#[test_case("OpenAI", "/backend-api/codex", None, true, true; "codex_backend")]
-#[test_case("OpenAI", "/backend-api/codex", None, false, false; "unsupported_model")]
-#[test_case("Custom", "/backend-api/codex", None, true, false; "custom_provider")]
-#[test_case("OpenAI", "/v1", None, true, false; "non_codex_endpoint")]
-#[test_case("OpenAI", "/backend-api/codex", Some("test-provider-token"), true, false; "provider_credentials")]
+#[test_case("OpenAI", "/backend-api/codex", None, true, false, true; "codex_backend")]
+#[test_case("OpenAI", "/backend-api/codex", None, false, false, true; "model_without_legacy_experiment")]
+#[test_case("Custom", "/backend-api/codex", None, true, false, false; "custom_provider")]
+#[test_case("OpenAI", "/v1", None, true, false, false; "non_codex_endpoint")]
+#[test_case("OpenAI", "/backend-api/codex", Some("test-provider-token"), true, false, false; "provider_credentials")]
+#[test_case("OpenAI", "/backend-api/codex", None, true, true, false; "api_key_auth")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn experimental_context_requires_capable_model_and_codex_backend(
+async fn notes_strategy_requires_codex_backend_not_legacy_model_experiment(
     provider_name: &'static str,
     base_path: &'static str,
     bearer_token: Option<&'static str>,
     supports_context: bool,
+    use_api_key: bool,
     expected_enabled: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -324,15 +401,20 @@ async fn experimental_context_requires_capable_model_and_codex_backend(
     let server = start_mock_server().await;
     let response = mount_sse_once(&server, sse_completed("resp-1")).await;
     let base_url = format!("{}{base_path}", server.uri());
-    let test = test_codex()
-        .with_model_info_override("gpt-5.2", move |model| {
-            model.supports_experimental_context = supports_context;
-        })
-        .with_auth(CodexAuth::from_external_chatgpt_tokens(
+    let auth = if use_api_key {
+        CodexAuth::from_api_key("test-api-key")
+    } else {
+        CodexAuth::from_external_chatgpt_tokens(
             "header.e30.signature",
             "account-123",
             Some("plus"),
-        )?)
+        )?
+    };
+    let startup = test_codex()
+        .with_model_info_override("gpt-5.2", move |model| {
+            model.supports_experimental_context = supports_context;
+        })
+        .with_auth(auth)
         .with_config(move |config| {
             config.model_provider.name = provider_name.to_string();
             config.model_provider.base_url = Some(base_url);
@@ -344,7 +426,18 @@ async fn experimental_context_requires_capable_model_and_codex_backend(
                 .expect("test config should allow experimental context");
         })
         .build_with_auto_env(&server)
-        .await?;
+        .await;
+
+    if !expected_enabled {
+        let error = match startup {
+            Ok(_) => panic!("unsupported notes backend unexpectedly started"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("context_strategy"), "{error:#}");
+        assert!(response.requests().is_empty());
+        return Ok(());
+    }
+    let test = startup?;
 
     test.submit_turn("inspect experimental context activation")
         .await?;
@@ -707,24 +800,33 @@ async fn token_budget_ignores_invalid_model_message_defaults() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn model_token_budget_defaults_do_not_enable_disabled_feature() -> Result<()> {
+async fn model_token_budget_defaults_and_legacy_flags_do_not_override_compaction_strategy()
+-> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
     let response = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let test = test_codex()
+    let test = base_test_codex()
         .with_model_info_override("gpt-5.2", |model_info| {
             model_info
                 .model_messages
                 .as_mut()
                 .expect("bundled model should have model messages")
-                .token_budget = Some(model_token_budget_config());
+                .token_budget = Some(ModelTokenBudgetConfig {
+                enabled: true,
+                use_history_notes_extension: true,
+                ..model_token_budget_config()
+            });
         })
         .with_config(|config| {
             config
                 .features
-                .disable(Feature::TokenBudget)
-                .expect("test config should allow token budget to be disabled");
+                .enable(Feature::TokenBudget)
+                .expect("test config should allow legacy token-budget activation");
+            config
+                .features
+                .enable(Feature::ContextManagement)
+                .expect("test config should allow legacy context activation");
         })
         .build_with_auto_env(&server)
         .await?;
@@ -748,9 +850,36 @@ async fn model_token_budget_defaults_do_not_enable_disabled_feature() -> Result<
 async fn token_budget_context_injects_plain_thread_hint_text() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
+    // Notes consumes native context contributors, never the legacy MCP bridge.
+    // Keep the MCP server below to verify its hint remains hidden and is not appended.
+    struct PlainThreadHint;
+
+    impl codex_extension_api::ContextContributor for PlainThreadHint {
+        fn contribute_thread_context<'a>(
+            &'a self,
+            _session_store: &'a codex_extension_api::ExtensionData,
+            thread_store: &'a codex_extension_api::ExtensionData,
+        ) -> codex_extension_api::ExtensionFuture<'a, Vec<codex_extension_api::PromptFragment>>
+        {
+            Box::pin(async move {
+                vec![codex_extension_api::PromptFragment::new(
+                    codex_extension_api::PromptSlot::ContextWindow,
+                    format!(
+                        "plain history hint for thread {}\nunstructured notes/thread_hint fixture result",
+                        thread_store.level_id(),
+                    ),
+                    codex_extension_api::ContentItemKind("notes.thread_hint".to_string()),
+                )]
+            })
+        }
+    }
+
     let server = start_mock_server().await;
     let rmcp_test_server_bin = stdio_server_bin()?;
+    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+    extensions.prompt_contributor(Arc::new(PlainThreadHint));
     let test = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
             config
@@ -813,7 +942,7 @@ async fn token_budget_context_injects_plain_thread_hint_text() -> Result<()> {
     assert_eq!(token_budgets.len(), 1);
     let captures = assert_regex_match(
         &format!(
-            r"^{CONTEXT_WINDOW_OPEN_TAG}\nAgent name: /root\nFirst context window id: ([0-9a-f-]{{36}})\nCurrent context window id: ([0-9a-f-]{{36}})\nmanual history hint for thread {thread_id}\nunstructured notes/thread_hint fixture result\n{CONTEXT_WINDOW_CLOSE_TAG}$"
+            r"^{CONTEXT_WINDOW_OPEN_TAG}\nAgent name: /root\nFirst context window id: ([0-9a-f-]{{36}})\nCurrent context window id: ([0-9a-f-]{{36}})\nplain history hint for thread {thread_id}\nunstructured notes/thread_hint fixture result\n{CONTEXT_WINDOW_CLOSE_TAG}$"
         ),
         &token_budgets[0],
     );
@@ -1133,7 +1262,7 @@ async fn get_context_remaining_returns_unknown_when_threshold_is_unbounded() -> 
 #[test_case(false; "token_budget_only")]
 #[test_case(true; "with_client_developer_retention")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn token_budget_context_uses_new_window_after_compaction(
+async fn manual_compact_without_notes_preserves_window_and_history(
     retain_client_developer_messages: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -1147,12 +1276,16 @@ async fn token_budget_context_uses_new_window_after_compaction(
                 ev_assistant_message("msg-1", "assistant before compact"),
                 ev_completed("resp-1"),
             ]),
+            sse(vec![
+                ev_assistant_message("checkpoint", "No notes were saved."),
+                ev_completed("checkpoint"),
+            ]),
             sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
         ],
     )
     .await;
     let mut model_provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
-    model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    model_provider.base_url = Some(format!("{}/backend-api/codex", server.uri()));
     model_provider.supports_websockets = false;
 
     let test = test_codex()
@@ -1184,11 +1317,11 @@ async fn token_budget_context_uses_new_window_after_compaction(
     }
     test.submit_turn("before compact").await?;
     test.codex.submit(Op::Compact).await?;
-    assert_context_compaction_item_lifecycle(&test.codex).await;
+    assert_notes_checkpoint_failure(&test.codex).await;
     test.submit_turn("after compact").await?;
 
     let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
 
     let initial_token_budget = token_budget_contexts(&requests[0]);
     assert_eq!(initial_token_budget.len(), 1);
@@ -1203,7 +1336,7 @@ async fn token_budget_context_uses_new_window_after_compaction(
         initial_turn_metadata["context_window_id"].as_str(),
         Some(initial_window_id.as_str())
     );
-    let post_compaction_token_budget = token_budget_contexts(&requests[1]);
+    let post_compaction_token_budget = token_budget_contexts(&requests[2]);
     assert_eq!(post_compaction_token_budget.len(), 1);
     let (
         post_compaction_first_window_id,
@@ -1211,7 +1344,7 @@ async fn token_budget_context_uses_new_window_after_compaction(
         post_compaction_window_id,
     ) = token_budget_window_ids(&post_compaction_token_budget[0], "/root");
     let post_compaction_turn_metadata: Value = serde_json::from_str(
-        &requests[1]
+        &requests[2]
             .header("x-codex-turn-metadata")
             .expect("post-compaction context window metadata"),
     )?;
@@ -1222,26 +1355,23 @@ async fn token_budget_context_uses_new_window_after_compaction(
     assert_eq!(initial_previous_window_id, None);
     assert_eq!(initial_first_window_id, initial_window_id);
     assert_eq!(post_compaction_first_window_id, initial_first_window_id);
-    assert_eq!(
-        post_compaction_previous_window_id.as_deref(),
-        Some(initial_window_id.as_str())
-    );
-    assert_ne!(post_compaction_window_id, initial_window_id);
+    assert_eq!(post_compaction_previous_window_id.as_deref(), None);
+    assert_eq!(post_compaction_window_id, initial_window_id);
     assert!(
-        !requests[1].body_contains_text("before compact"),
-        "token budget compaction should drop prior user messages"
+        requests[2].body_contains_text("before compact"),
+        "failed checkpoint must retain prior user messages"
     );
     assert!(
-        !requests[1].body_contains_text("assistant before compact"),
-        "token budget compaction should drop prior assistant messages"
-    );
-    assert_eq!(
-        requests[1].body_contains_text("CLIENT_DEVELOPER_INSTRUCTIONS"),
-        retain_client_developer_messages,
-        "token budget compaction should retain client-authored developer messages when enabled"
+        requests[2].body_contains_text("assistant before compact"),
+        "failed checkpoint must retain prior assistant messages"
     );
     assert!(
-        requests[1].body_contains_text("after compact"),
+        !retain_client_developer_messages
+            || requests[2].body_contains_text("CLIENT_DEVELOPER_INSTRUCTIONS"),
+        "failed checkpoint must retain injected developer instructions"
+    );
+    assert!(
+        requests[2].body_contains_text("after compact"),
         "follow-up should still include the new turn input"
     );
 
@@ -1249,10 +1379,18 @@ async fn token_budget_context_uses_new_window_after_compaction(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn token_budget_compaction_runs_compact_hooks() -> Result<()> {
+async fn manual_compact_without_notes_skips_compact_hooks() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    let response = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("checkpoint", "No notes were saved."),
+            ev_completed("checkpoint"),
+        ]),
+    )
+    .await;
     let test = test_codex()
         .with_pre_build_hook(write_token_budget_compact_hooks)
         .with_config(|config| {
@@ -1268,31 +1406,8 @@ async fn token_budget_compaction_runs_compact_hooks() -> Result<()> {
 
     test.codex.submit(Op::Compact).await?;
 
-    let pre_compact = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::HookCompleted(completed)
-            if completed.run.event_name == HookEventName::PreCompact =>
-        {
-            Some(completed.clone())
-        }
-        _ => None,
-    })
-    .await;
-    assert_eq!(pre_compact.run.status, HookRunStatus::Completed);
-
-    let post_compact = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::HookCompleted(completed)
-            if completed.run.event_name == HookEventName::PostCompact =>
-        {
-            Some(completed.clone())
-        }
-        _ => None,
-    })
-    .await;
-    assert_eq!(post_compact.run.status, HookRunStatus::Completed);
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+    assert_notes_checkpoint_failure(&test.codex).await;
+    assert_eq!(response.requests().len(), 1);
 
     Ok(())
 }
@@ -1300,7 +1415,7 @@ async fn token_budget_compaction_runs_compact_hooks() -> Result<()> {
 #[test_case(false; "token_budget_only")]
 #[test_case(true; "with_client_developer_retention")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
+async fn notes_threshold_preserves_window_and_active_tool_output(
     retain_client_developer_messages: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -1313,7 +1428,7 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
             sse(vec![
                 ev_response_created("resp-1"),
                 ev_function_call(call_id, "get_context_remaining", "{}"),
-                ev_completed_with_tokens("resp-1", /*total_tokens*/ 9_500),
+                ev_completed_with_tokens("resp-1", /*total_tokens*/ 9_400),
             ]),
             sse(vec![
                 ev_response_created("resp-2"),
@@ -1324,8 +1439,7 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
     )
     .await;
     let mut model_provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
-    model_provider.name = "OpenAI (test)".into();
-    model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    model_provider.base_url = Some(format!("{}/backend-api/codex", server.uri()));
     model_provider.supports_websockets = false;
     let test = test_codex()
         .with_model_info_override("gpt-5.2", |model_info| {
@@ -1373,7 +1487,7 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
     assert_eq!(
         requests.len(),
         2,
-        "token-budget auto-compaction should reset locally before the continuation"
+        "a notes threshold must not add a reset or summary request"
     );
     assert!(
         !requests
@@ -1389,11 +1503,11 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
         "an explicit token-budget config must not enable model-owned fallback"
     );
     assert!(
-        !requests[1].input().iter().any(|item| {
+        requests[1].input().iter().any(|item| {
             item.get("type").and_then(Value::as_str) == Some("function_call_output")
                 && item.get("call_id").and_then(Value::as_str) == Some(call_id)
         }),
-        "fresh token-budget windows should drop active tool output with the prior history"
+        "a notes threshold must preserve active tool evidence"
     );
 
     let initial_token_budget = token_budget_contexts(&requests[0]);
@@ -1405,22 +1519,19 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
     let (follow_up_first_window_id, follow_up_previous_window_id, follow_up_window_id) =
         token_budget_window_ids(&follow_up_token_budget[0], "/root");
     assert_eq!(follow_up_first_window_id, initial_first_window_id);
-    assert_eq!(
-        follow_up_previous_window_id.as_deref(),
-        Some(initial_window_id.as_str())
-    );
+    assert_eq!(follow_up_previous_window_id.as_deref(), None);
     assert!(
-        !requests[1].body_contains_text("trigger mid-turn auto compaction"),
-        "fresh token-budget windows should drop prior user messages"
+        requests[1].body_contains_text("trigger mid-turn auto compaction"),
+        "a notes threshold must preserve prior user messages"
     );
     assert_eq!(
         requests[1].body_contains_text("MID_TURN_CLIENT_INSTRUCTIONS"),
         retain_client_developer_messages,
         "mid-turn token-budget compaction should retain client-authored developer messages when enabled"
     );
-    assert_ne!(
+    assert_eq!(
         follow_up_window_id, initial_window_id,
-        "mid-turn token-budget auto-compaction should reset the context window"
+        "a notes threshold must not reset the context window"
     );
 
     Ok(())
@@ -1462,7 +1573,6 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     .await;
     let test = test_codex()
         .with_config(|config| {
-            config.model_provider.name = "OpenAI (test)".into();
             config.model_context_window = Some(50_000);
             config.model_auto_compact_token_limit = Some(9_000);
             config.token_budget = Some(TokenBudgetConfig {
@@ -1528,7 +1638,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<()> {
+async fn notes_fallback_buffer_exhaustion_does_not_reset_without_request() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -1555,7 +1665,6 @@ async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<
     .await;
     let test = test_codex()
         .with_config(|config| {
-            config.model_provider.name = "OpenAI (test)".into();
             config.model_context_window = Some(50_000);
             config.model_auto_compact_token_limit = Some(9_000);
             config.token_budget = Some(TokenBudgetConfig {
@@ -1582,9 +1691,17 @@ async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<
             .iter()
             .any(|text| text == AUTO_COMPACT_FALLBACK_PROMPT)
     );
-    assert!(!requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
-    assert!(!requests[2].body_contains_text("exhaust the fallback buffer"));
-    assert_eq!(requests[2].function_call_output_text("buffer-call"), None);
+    assert!(requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+    assert!(requests[2].body_contains_text("exhaust the fallback buffer"));
+    assert!(
+        requests[2]
+            .function_call_output_text("buffer-call")
+            .is_some()
+    );
+    assert_eq!(
+        token_budget_contexts(&requests[2]),
+        token_budget_contexts(&requests[0])
+    );
 
     Ok(())
 }

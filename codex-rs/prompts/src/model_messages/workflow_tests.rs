@@ -4,6 +4,7 @@ use codex_protocol::openai_models::AutoReviewMessages;
 use codex_protocol::openai_models::CollaborationModeMessages;
 use codex_protocol::openai_models::ConfirmationPolicies;
 use codex_protocol::openai_models::GuardianV2ModelConfig;
+use codex_protocol::openai_models::ModelTokenBudgetConfig;
 use codex_protocol::openai_models::MultiAgentMessages;
 use codex_protocol::openai_models::MultiAgentModeMessages;
 use codex_protocol::openai_models::MultiAgentRoleMessages;
@@ -34,6 +35,15 @@ fn default_workflow_preserves_absence_suppression_and_custom_mode_hints() {
                     hint_text: Some("specific mode hint".to_string()),
                 }),
             }),
+            token_budget: text.as_ref().map(|text| ModelTokenBudgetConfig {
+                enabled: true,
+                use_history_notes_extension: true,
+                reminder_threshold_tokens: 13_579,
+                reminder_message_template: text.clone(),
+                guidance_message: text.clone(),
+                auto_compact_fallback_prompt: text.clone(),
+                auto_compact_fallback_buffer_tokens: 321,
+            }),
             ..Default::default()
         };
         let original = messages.clone();
@@ -43,6 +53,34 @@ fn default_workflow_preserves_absence_suppression_and_custom_mode_hints() {
     let mut absent = ModelMessages::default();
     apply_default_catalog_workflow(&mut absent);
     assert_eq!(absent, ModelMessages::default());
+}
+
+#[test]
+fn default_workflow_replaces_budget_prose_without_changing_runtime_settings() {
+    for enabled in [false, true] {
+        let mut messages = ModelMessages {
+            token_budget: Some(ModelTokenBudgetConfig {
+                enabled,
+                use_history_notes_extension: !enabled,
+                reminder_threshold_tokens: 13_579,
+                reminder_message_template: "Catalog reminder {n_remaining}.".to_string(),
+                guidance_message: "Catalog checkpoint guidance.".to_string(),
+                auto_compact_fallback_prompt: "Catalog fallback.".to_string(),
+                auto_compact_fallback_buffer_tokens: 321,
+            }),
+            ..Default::default()
+        };
+        let mut expected = messages.clone();
+        let budget = expected.token_budget.as_mut().unwrap();
+        budget.guidance_message = TOKEN_BUDGET_GUIDANCE.to_string();
+        budget.reminder_message_template = TOKEN_BUDGET_REMINDER.to_string();
+        budget.auto_compact_fallback_prompt = TOKEN_BUDGET_FALLBACK.to_string();
+
+        apply_default_catalog_workflow(&mut messages);
+        assert_eq!(messages, expected);
+        apply_default_catalog_workflow(&mut messages);
+        assert_eq!(messages, expected);
+    }
 }
 
 #[test]

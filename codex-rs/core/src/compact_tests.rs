@@ -23,6 +23,114 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use test_case::test_case;
 
+#[test_case(CompactionPhase::StandaloneTurn; "manual")]
+#[test_case(CompactionPhase::PreTurn; "pre turn")]
+#[test_case(CompactionPhase::MidTurn; "mid turn")]
+#[test_case(CompactionPhase::PostTurn; "post turn")]
+#[tokio::test]
+async fn failed_local_stream_leaves_history_and_window_unchanged(
+    phase: CompactionPhase,
+) -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    let provider = ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    let (session, turn, _events) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        Vec::new(),
+        move |config| {
+            config.model_provider = provider;
+            config.model_provider.supports_websockets = false;
+            config.model_provider.stream_max_retries = Some(0);
+        },
+    )
+    .await;
+    session
+        .record_conversation_items(&turn, turn.model_info(), &[user_message("keep this")])
+        .await;
+    let before = session.clone_history().await;
+    let window_before = session.current_window().await;
+    let mock = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![responses::ev_assistant_message(
+            "partial-summary",
+            "FAILED_SUMMARY_MUST_NOT_LEAK",
+        )]),
+    )
+    .await;
+    let result = run_compact_task_inner(
+        Arc::clone(&session),
+        turn,
+        vec![UserInput::Text {
+            text: "summarize".to_string(),
+            text_elements: Vec::new(),
+        }],
+        InitialContextInjection::DoNotInject,
+        CompactionTurnMetadata::new(
+            CompactionTrigger::Auto,
+            CompactionReason::ContextLimit,
+            CompactionImplementation::Responses,
+            phase,
+        ),
+        CompactionWindowTransition::Advance,
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(
+        session.clone_history().await.annotated_items(),
+        before.annotated_items()
+    );
+    assert_eq!(session.current_window().await, window_before);
+    let _ = mock.single_request();
+    Ok(())
+}
+
+#[tokio::test]
+async fn emergency_local_compaction_installs_summary_in_same_window() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    let provider = ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    let (session, turn, _events) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        Vec::new(),
+        move |config| {
+            config.model_provider = provider;
+            config.model_provider.supports_websockets = false;
+        },
+    )
+    .await;
+    session
+        .record_conversation_items(&turn, turn.model_info(), &[user_message("keep this")])
+        .await;
+    let window_before = session.current_window().await;
+    responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_assistant_message("summary", "EMERGENCY_SUMMARY"),
+            responses::ev_completed("emergency-completed"),
+        ]),
+    )
+    .await;
+    run_inline_emergency_compact_task(
+        Arc::clone(&session),
+        turn,
+        InitialContextInjection::DoNotInject,
+    )
+    .await?;
+    assert_eq!(session.current_window().await, window_before);
+    let history = session.clone_history().await;
+    assert!(history.raw_items().any(|item| {
+        serde_json::to_string(item)
+            .unwrap()
+            .contains("EMERGENCY_SUMMARY")
+    }));
+    assert!(
+        !history.raw_items().any(|item| {
+            matches!(item, ResponseItem::Message { role, .. } if role == "assistant")
+        })
+    );
+    Ok(())
+}
+
 #[test_case(true; "metadata enabled")]
 #[test_case(false; "metadata disabled after capture")]
 #[tokio::test]

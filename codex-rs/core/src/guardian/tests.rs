@@ -2967,6 +2967,7 @@ async fn guardian_reused_trunk_ignores_stale_prior_turn_completion() -> anyhow::
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: Some(1),
+                notes_checkpoint: None,
             }),
         })
         .await;
@@ -3503,7 +3504,9 @@ async fn guardian_review_routes_required_actions(
 #[tokio::test]
 async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() -> anyhow::Result<()>
 {
-    const TEST_STACK_SIZE_BYTES: usize = 4 * 1024 * 1024;
+    // This explicit worker stack overrides RUST_MIN_STACK. Keep the fixture's
+    // nested session-start and parallel-review futures on the suite's 8 MiB budget.
+    const TEST_STACK_SIZE_BYTES: usize = 8 * 1024 * 1024;
 
     let handle = std::thread::Builder::new()
         .name("guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history".to_string())

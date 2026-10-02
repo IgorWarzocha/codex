@@ -792,11 +792,17 @@ async fn load_config_resolves_token_budget_config() -> std::io::Result<()> {
     for (config_toml, expected) in [
         (
             "[features]\ntoken_budget = true\n",
-            Some(TokenBudgetConfig::default()),
+            Some(TokenBudgetConfig {
+                use_history_notes_extension: true,
+                ..TokenBudgetConfig::default()
+            }),
         ),
         (
             "features.context_management.experimental_mode = true\n",
-            None,
+            Some(TokenBudgetConfig {
+                use_history_notes_extension: true,
+                ..TokenBudgetConfig::default()
+            }),
         ),
         (
             r#"
@@ -828,14 +834,82 @@ auto_compact_fallback_buffer_tokens = 8000
         )
         .await?;
 
-        assert_eq!(
-            config.features.enabled(Feature::TokenBudget),
-            expected.is_some()
-        );
-        if expected.is_none() {
-            assert!(config.features.enabled(Feature::ContextManagement));
-        }
+        // Configuration resolves preferences, not destructive startup activation.
+        assert_eq!(config.context_strategy, ContextStrategy::Notes);
         assert_eq!(config.token_budget, expected);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn context_strategy_defaults_and_legacy_flags() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    for (input, strategy, retention, idle) in [
+        ("", ContextStrategy::Notes, 64_000, None),
+        (
+            "features.context_management = false\nfeatures.token_budget = false",
+            ContextStrategy::Notes,
+            64_000,
+            None,
+        ),
+        (
+            "context_strategy = 'compaction'\nfeatures.context_management = true\nfeatures.token_budget = true",
+            ContextStrategy::Compaction,
+            64_000,
+            None,
+        ),
+        (
+            "context_strategy = 'notes'\ncompaction_retention_tokens = 16000\ncontext_idle_rollover_minutes = 25\nfeatures.token_budget.use_history_notes_extension = false",
+            ContextStrategy::Notes,
+            16_000,
+            Some(25),
+        ),
+    ] {
+        let config = Config::load_from_base_config_with_overrides(
+            toml::from_str(input)?,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await?;
+        assert_eq!(config.context_strategy, strategy);
+        assert_eq!(config.compaction_retention_tokens.tokens(), retention);
+        assert_eq!(
+            config
+                .context_idle_rollover_minutes
+                .map(std::num::NonZeroU64::get),
+            idle
+        );
+        assert_eq!(
+            config.token_budget.is_some(),
+            strategy == ContextStrategy::Notes
+        );
+        if let Some(budget) = config.token_budget {
+            assert!(budget.use_history_notes_extension);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn context_strategy_legacy_flags_do_not_conflict_with_managed_requirements() -> std::io::Result<()>
+{
+    for enabled in [true, false] {
+        let cfg: ConfigToml = toml::from_str(&format!(
+            "features.token_budget = {enabled}\nfeatures.context_management = {enabled}"
+        ))
+        .expect("valid legacy flags");
+        let requirements = Sourced::new(
+            FeatureRequirementsToml {
+                entries: BTreeMap::from([
+                    ("token_budget".to_string(), !enabled),
+                    ("context_management".to_string(), !enabled),
+                ]),
+            },
+            RequirementSource::Unknown,
+        );
+        // Requirements still pin runtime capability. Retired user flags cannot
+        // reject configuration before strategy validation runs at startup.
+        validate_feature_requirements_for_config_toml(&cfg, Some(&requirements))?;
     }
     Ok(())
 }

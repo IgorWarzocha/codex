@@ -3,6 +3,7 @@ use crate::ThreadManager;
 use crate::agent::LocalAgentControl;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
+use crate::config::ContextStrategy;
 use crate::config::test_config;
 use crate::thread_manager::ThreadManagerState;
 use codex_features::Feature;
@@ -22,6 +23,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn residency_slot_reservation_unloads_oldest_idle_v2_agent() {
     let mut config = test_config().await;
+    config.context_strategy = ContextStrategy::Compaction;
     let _ = config.features.enable(Feature::MultiAgentV2);
     config.multi_agent_v2.max_concurrent_threads_per_session = 2;
     let temp_home = tempfile::tempdir().expect("create temp home");
@@ -84,6 +86,7 @@ async fn residency_slot_reservation_unloads_oldest_idle_v2_agent() {
 #[tokio::test]
 async fn interrupted_v2_agent_is_lost_after_residency_eviction() {
     let mut config = test_config().await;
+    config.context_strategy = ContextStrategy::Compaction;
     let _ = config.features.enable(Feature::MultiAgentV2);
     config.multi_agent_v2.max_concurrent_threads_per_session = 2;
     let temp_home = tempfile::tempdir().expect("create temp home");
@@ -201,6 +204,7 @@ async fn mark_thread_completed(thread: &CodexThread) {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         )
         .await;

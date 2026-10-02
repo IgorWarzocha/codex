@@ -1,6 +1,9 @@
 //! Checks request-history trimming at the streamed remote compaction boundary.
 
 use super::*;
+use codex_config::types::CompactionRetentionTokens;
+use codex_protocol::protocol::TruncationPolicy;
+use codex_utils_output_truncation::truncate_text;
 use core_test_support::apps_test_server::configure_search_capable_model;
 use pretty_assertions::assert_eq;
 
@@ -12,6 +15,50 @@ fn compact_response() -> String {
         }),
         responses::ev_completed("compact"),
     ])
+}
+
+#[test_case::test_case(CompactionRetentionTokens::Tokens16000; "16k retained")]
+#[test_case::test_case(CompactionRetentionTokens::Tokens32000; "32k retained")]
+#[test_case::test_case(CompactionRetentionTokens::Tokens64000; "64k retained")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_compact_v2_installs_configured_retained_message_budget(
+    budget: CompactionRetentionTokens,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let harness = TestCodexHarness::with_builder(
+        test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(move |config| {
+                config.compaction_retention_tokens = budget;
+            }),
+    )
+    .await?;
+    let codex = &harness.test().codex;
+    let original = "x".repeat(80_000 * 4);
+    codex
+        .inject_response_items(vec![serde_json::from_value(json!({
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": &original}],
+        }))?])
+        .await?;
+    let mock = responses::mount_sse_sequence(
+        harness.server(),
+        vec![compact_response(), responses::sse_completed("followup")],
+    )
+    .await;
+    codex.submit(Op::Compact).await?;
+    wait_for_turn_complete(codex).await;
+    harness.test().submit_text_turn("continue").await?;
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].message_input_texts("user").contains(&original));
+    let expected = truncate_text(
+        &original,
+        TruncationPolicy::Tokens(budget.tokens() as usize),
+    );
+    assert!(requests[1].message_input_texts("user").contains(&expected));
+    assert!(!requests[1].message_input_texts("user").contains(&original));
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -87,25 +134,27 @@ async fn remote_compact_v2_token_estimate_ignores_message_bookkeeping_and_json_e
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_compact_v2_trims_tool_search_output_to_empty_tools_array() -> Result<()> {
+async fn remote_compact_v2_tool_search_output_uses_compaction_not_active_window_budget()
+-> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let call_id = "tool-search-1";
-    let tools = json!([{
-        "type": "namespace", "name": "codex_app", "description": "Codex app tools.",
-        "tools": [{
-            "type": "function", "name": "oversized_dynamic_tool", "description": "x".repeat(20_000),
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": false},
-            "strict": false, "defer_loading": true,
-        }],
-    }]);
-    for (context_window, expected_tools) in [(200_000, &tools), (2_000, &json!([]))] {
+    for (description_bytes, truncate) in [(800_000, false), (3_600_000, true)] {
+        let tools = json!([{
+            "type": "namespace", "name": "codex_app", "description": "Codex app tools.",
+            "tools": [{
+                "type": "function", "name": "oversized_dynamic_tool", "description": "x".repeat(description_bytes),
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": false},
+                "strict": false, "defer_loading": true,
+            }],
+        }]);
+        let expected_tools = if truncate { json!([]) } else { tools.clone() };
         let harness = TestCodexHarness::with_builder(
             test_codex()
                 .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
                 .with_config(move |config| {
                     configure_search_capable_model(config);
-                    config.model_context_window = Some(context_window);
+                    config.model_context_window = Some(2_000);
                 }),
         )
         .await?;
@@ -133,7 +182,7 @@ async fn remote_compact_v2_trims_tool_search_output_to_empty_tools_array() -> Re
                 .any(|item| item["call_id"] == call_id)
         );
         let output = request.tool_search_output(call_id);
-        assert_eq!(&output["tools"], expected_tools);
+        assert_eq!(output["tools"], expected_tools);
         assert_eq!(output["call_id"], call_id);
         assert_eq!(output["status"], "completed");
         assert_eq!(output["execution"], "client");
@@ -146,7 +195,7 @@ async fn remote_compact_v2_trim_estimate_uses_session_base_instructions() -> Res
     skip_if_no_network!(Ok(()));
 
     let short_instructions = "session base instructions";
-    let long_instructions = format!("{short_instructions} {}", "x".repeat(24_000));
+    let long_instructions = format!("{short_instructions} {}", "x".repeat(872_000 * 4));
     let trailing_output = "x".repeat(12_000);
     for (instructions, expected_output) in [
         (short_instructions, trailing_output.as_str()),

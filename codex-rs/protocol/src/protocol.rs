@@ -2149,9 +2149,20 @@ pub struct SafetyBufferingEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ContextCompactedEvent;
 
+/// Host-authored settlement of the selected run, not a timestamp inferred from a reply.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct NotesCheckpoint {
+    pub window_id: String,
+    pub settled_at_ms: i64,
+    pub fresh: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TurnCompleteEvent {
     pub turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub notes_checkpoint: Option<NotesCheckpoint>,
     pub last_agent_message: Option<String>,
     /// Terminal error details when the turn completed unsuccessfully.
     #[serde(default, skip_serializing_if = "Option::is_none")]

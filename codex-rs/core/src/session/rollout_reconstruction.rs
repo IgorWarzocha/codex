@@ -14,6 +14,7 @@ pub(super) struct RolloutReconstruction {
     pub(super) retained_context: codex_history::RetainedContext,
     pub(super) guardian_history: Option<codex_history::GuardianHistoryCheckpoint>,
     pub(super) last_started_turn_id: Option<String>,
+    pub(super) notes_checkpoint: Option<codex_protocol::protocol::NotesCheckpoint>,
     pub(super) previous_turn_settings: Option<PreviousTurnSettings>,
     pub(super) reference_context_item: Option<TurnContextItem>,
     pub(super) world_state_baseline: Option<WorldStateSnapshot>,
@@ -91,6 +92,8 @@ fn select_input_compaction(
 struct ActiveReplaySegment<'a> {
     turn_id: Option<String>,
     turn_completed: bool,
+    post_completion_work: bool,
+    notes_checkpoint: Option<codex_protocol::protocol::NotesCheckpoint>,
     counts_as_user_turn: bool,
     previous_turn_settings: Option<PreviousTurnSettings>,
     reference_context_item: TurnReferenceContextItem,
@@ -112,6 +115,7 @@ fn finalize_active_segment<'a>(
     world_state_replay: &mut Vec<&'a RolloutItem>,
     window: &mut Option<ReconstructedWindow>,
     pending_rollback_turns: &mut usize,
+    notes_checkpoint: &mut Option<Option<codex_protocol::protocol::NotesCheckpoint>>,
 ) {
     // Thread rollback drops the newest surviving real user-message boundaries. In replay, that
     // means skipping the next finalized segments that contain a non-contextual
@@ -121,6 +125,18 @@ fn finalize_active_segment<'a>(
             *pending_rollback_turns -= 1;
         }
         return;
+    }
+
+    // Only the newest surviving run can prove freshness. A missing/failed/cancelled
+    // run must not fall back to a successful write from an older run.
+    if notes_checkpoint.is_none() && active_segment.turn_id.is_some() {
+        *notes_checkpoint = Some(
+            if active_segment.turn_completed && !active_segment.post_completion_work {
+                active_segment.notes_checkpoint
+            } else {
+                None
+            },
+        );
     }
 
     // Full world-state snapshots are persisted after installing initial context. They still
@@ -218,6 +234,7 @@ impl Session {
             .or_else(|| resume_metadata.and_then(|metadata| metadata.last_started_turn_id.clone()));
 
         let mut previous_turn_settings = None;
+        let mut notes_checkpoint = None;
         let mut reference_context_item = TurnReferenceContextItem::NeverSet;
         let mut world_state_replay = Vec::new();
         // Rollback is "drop the newest N user turns". While scanning in reverse, that becomes
@@ -264,6 +281,13 @@ impl Session {
                     let active_segment =
                         active_segment.get_or_insert_with(ActiveReplaySegment::default);
                     active_segment.turn_completed = true;
+                    if active_segment.turn_id.is_none() {
+                        active_segment.notes_checkpoint = event
+                            .error
+                            .is_none()
+                            .then(|| event.notes_checkpoint.clone())
+                            .flatten();
+                    }
                     // Reverse replay often sees `TurnComplete` before any turn-scoped metadata.
                     // Capture the turn id early so later `TurnContext` / abort items can match it.
                     if active_segment.turn_id.is_none() {
@@ -322,6 +346,12 @@ impl Session {
                     active_segment.world_state_replay.push(item);
                 }
                 RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => {
+                    if active_segment.is_none() {
+                        active_segment = Some(ActiveReplaySegment {
+                            turn_id: Some(event.turn_id.clone()),
+                            ..Default::default()
+                        });
+                    }
                     // `TurnStarted` is the oldest boundary of the active reverse segment.
                     if active_segment.as_ref().is_some_and(|active_segment| {
                         turn_ids_are_compatible(
@@ -338,18 +368,21 @@ impl Session {
                             &mut world_state_replay,
                             &mut window,
                             &mut pending_rollback_turns,
+                            &mut notes_checkpoint,
                         );
                     }
                 }
                 RolloutItem::ResponseItem(response_item) => {
                     let active_segment =
                         active_segment.get_or_insert_with(ActiveReplaySegment::default);
+                    active_segment.post_completion_work |= !active_segment.turn_completed;
                     active_segment.counts_as_user_turn |=
                         is_user_turn_boundary(&response_item.item);
                 }
                 RolloutItem::InterAgentCommunication(_) => {
                     let active_segment =
                         active_segment.get_or_insert_with(ActiveReplaySegment::default);
+                    active_segment.post_completion_work |= !active_segment.turn_completed;
                     active_segment.counts_as_user_turn = true;
                 }
                 RolloutItem::EventMsg(_)
@@ -376,6 +409,7 @@ impl Session {
                 &mut world_state_replay,
                 &mut window,
                 &mut pending_rollback_turns,
+                &mut notes_checkpoint,
             );
         }
 
@@ -524,6 +558,7 @@ impl Session {
             retained_context: history.retained_context().clone(),
             guardian_history: history.guardian_history_checkpoint(),
             last_started_turn_id,
+            notes_checkpoint: notes_checkpoint.flatten(),
             history: history.into_annotated_items(),
             previous_turn_settings,
             reference_context_item,

@@ -77,6 +77,10 @@ State lives under `$CODEX_HOME/notebook`, outside the working tree. These privat
 
 Codex backend authentication enables remote notes and history independently of token-budget settings. Agents can call them through `exec`, including independent calls in `Promise.all`. Await dependent writes to the same note path.
 
+The default `context_strategy = "notes"` uses this remote storage for continuity
+across context resets. Sessions without supported backend authentication must
+explicitly select `context_strategy = "compaction"`. See [configuration](config.md#context-continuity).
+
 These are not local files or notebook bindings. Encrypted results are delivered directly to the model. JavaScript receives `{ delivered_to_model: true, call_id }`, not decrypted contents. The call ID matches the model's result, so parallel receipts can be associated with their requests. API-key and other-provider sessions do not expose this backend capability.
 
 ## Boundaries

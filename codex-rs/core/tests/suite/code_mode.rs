@@ -5,6 +5,7 @@ use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_analytics::AnalyticsEventsClient;
+use codex_config::types::ContextStrategy;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::StartThreadOptions;
@@ -3955,20 +3956,33 @@ async fn code_mode_get_context_remaining_returns_structured_result() -> Result<(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let (_test, second_mock) = run_code_mode_turn_with_config(
+    let backend_url = format!("{}/backend-api/codex", server.uri());
+    let builder = test_codex()
+        .with_model("test-gpt-5.1-codex")
+        .with_context_strategy(ContextStrategy::Notes)
+        .with_auth(CodexAuth::from_external_chatgpt_tokens(
+            "header.e30.signature",
+            "account-123",
+            Some("plus"),
+        )?)
+        .with_config(move |config| {
+            config.model_provider.base_url = Some(backend_url);
+            config.model_context_window = Some(10_000);
+            config.features.enable(Feature::CodeMode).unwrap();
+            config
+                .features
+                .enable(Feature::ExecutedToolCallMetadata)
+                .unwrap();
+            config.features.enable(Feature::TokenBudget).unwrap();
+        });
+    let (_test, second_mock) = run_code_mode_turn_with_builder(
         &server,
         "use exec to get remaining context",
         r#"
 const result = await tools.get_context_remaining({});
 text(JSON.stringify(result));
 "#,
-        |config| {
-            config.model_context_window = Some(10_000);
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-        },
+        builder,
     )
     .await?;
 

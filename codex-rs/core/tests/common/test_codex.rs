@@ -16,6 +16,7 @@ use anyhow::anyhow;
 use codex_analytics::AnalyticsEventsClient;
 use codex_attachment_store::AttachmentStore;
 use codex_config::CloudConfigBundleLoader;
+use codex_config::types::ContextStrategy;
 use codex_core::CodexThread;
 pub use codex_core::StartThreadOptions;
 use codex_core::ThreadManager;
@@ -381,6 +382,7 @@ impl TestAuth {
 
 pub struct TestCodexBuilder {
     config_mutators: Vec<Box<ConfigMutator>>,
+    context_strategy: ContextStrategy,
     thread_manager_configurer: Option<Box<dyn FnOnce(ThreadManager) -> ThreadManager + Send>>,
     auth: TestAuth,
     analytics_events_client: Option<AnalyticsEventsClient>,
@@ -420,6 +422,13 @@ impl TestCodexBuilder {
         T: FnOnce(&mut Config) + Send + 'static,
     {
         self.config_mutators.push(Box::new(mutator));
+        self
+    }
+
+    /// Overrides the ordinary fixture's compaction policy. Notes tests must also supply
+    /// remote-capable authentication; use the raw config loader to test omitted defaults.
+    pub fn with_context_strategy(mut self, strategy: ContextStrategy) -> Self {
+        self.context_strategy = strategy;
         self
     }
 
@@ -946,6 +955,8 @@ impl TestCodexBuilder {
         } else {
             load_default_config_for_test(home).await
         };
+        // Unlike one-shot config mutators, continuity remains explicit on restart.
+        config.context_strategy = self.context_strategy;
         // Keep generic tests stable when the bundled catalog default changes. Tests that need a
         // specific model can still override this with a config mutator.
         config.model = Some("gpt-5.5".to_string());
@@ -1454,9 +1465,13 @@ fn function_call_output<'a>(bodies: &'a [Value], call_id: &str) -> &'a Value {
         .expect(&missing_output)
 }
 
+/// Ordinary mock-provider fixture with explicit compaction continuity.
+/// Notes lifecycle tests opt in with `with_context_strategy`; production-default
+/// configuration tests use `load_default_config_for_test` without this fixture.
 pub fn test_codex() -> TestCodexBuilder {
     TestCodexBuilder {
         thread_manager_configurer: None,
+        context_strategy: ContextStrategy::Compaction,
         config_mutators: vec![Box::new(|config| {
             config
                 .features

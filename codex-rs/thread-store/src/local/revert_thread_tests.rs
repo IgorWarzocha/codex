@@ -339,6 +339,7 @@ fn turn_completed(turn_id: &str) -> RolloutItem {
         completed_at: Some(20),
         duration_ms: Some(10_000),
         time_to_first_token_ms: None,
+        notes_checkpoint: None,
     }))
 }
 

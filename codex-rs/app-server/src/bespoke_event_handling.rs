@@ -2186,6 +2186,7 @@ mod tests {
             completed_at: Some(TEST_TURN_COMPLETED_AT),
             duration_ms: Some(TEST_TURN_DURATION_MS),
             time_to_first_token_ms: None,
+            notes_checkpoint: None,
         }
     }
 

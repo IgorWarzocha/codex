@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use codex_config::test_support::CloudConfigBundleFixture;
+use codex_config::types::ContextStrategy;
 use codex_core::TurnInputRequest;
 use codex_core::config::Constrained;
 use codex_core::config::CurrentTimeReminderConfig;
@@ -11,6 +12,7 @@ use codex_core::context::GuardianContextMode;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_features::Feature;
 use codex_history::RolloutItem;
+use codex_login::CodexAuth;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -230,6 +232,8 @@ async fn review_respects_complete_context_budget(
     );
     let server = responses::start_mock_server().await;
     let mut builder = test_codex()
+        .with_context_strategy(ContextStrategy::Notes)
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_cloud_config_bundle(
             CloudConfigBundleFixture::loader_with_enterprise_requirement(
                 if matches!(reviewer_response, ReviewerResponse::CompactionError) {
@@ -261,6 +265,11 @@ async fn review_respects_complete_context_budget(
             model.auto_review_model_override = Some("gpt-5.6-luna".to_owned());
         })
         .with_config(move |config| {
+            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            config.model_provider.base_url = Some(format!(
+                "{}/backend-api/codex",
+                base_url.strip_suffix("/v1").unwrap()
+            ));
             config
                 .features
                 .enable(Feature::TokenBudget)
@@ -329,7 +338,7 @@ async fn review_respects_complete_context_budget(
                             "risk_level": "low",
                             "user_authorization": "high",
                             "outcome": "allow",
-                            "rationale": "Previous review reasoning. ".repeat(/*n*/ 256),
+                            "rationale": "Previous review reasoning. ".repeat(/*n*/ 512),
                         })
                         .to_string(),
                     ),
@@ -341,7 +350,8 @@ async fn review_respects_complete_context_budget(
                         "text('inspection-output'.repeat(600));",
                     ),
                     // A tiny inline image fits before upload. Its opaque original-detail file
-                    // reference must reserve 10k tokens in reviewer history and force compaction.
+                    // reference reserves 10k tokens in reviewer history and forces compaction,
+                    // but fits the independent 872k compaction endpoint budget intact.
                     ReviewerResponse::FileImageContinuation => ev_custom_tool_call(
                         "reviewer-inspect",
                         "exec",
@@ -471,11 +481,14 @@ async fn review_respects_complete_context_budget(
                         .len(),
                     1
                 );
-                // The file reservation also protects the compaction request itself: an output
-                // larger than its window is replaced before the summary request is sent.
+                // Compaction input uses the endpoint's budget, not the reviewer's window.
                 assert_eq!(
                     compact.custom_tool_call_output("reviewer-inspect")["output"],
-                    "Output exceeded the available model context and was truncated"
+                    json!([{
+                        "type": "input_image",
+                        "file_id": "file_uploaded_image",
+                        "detail": "original",
+                    }])
                 );
             } else {
                 assert!(

@@ -1307,6 +1307,7 @@ async fn remote_compact_v2_rewrites_multiple_trailing_function_call_outputs(
             .with_config(|config| {
                 config.model_context_window = Some(2_000);
                 config.model_auto_compact_token_limit = Some(200_000);
+                config.tool_output_token_limit = Some(2_000_000);
             }),
     )
     .await?;
@@ -1331,8 +1332,13 @@ async fn remote_compact_v2_rewrites_multiple_trailing_function_call_outputs(
         json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": second_user_message}]}),
         json!({"type": "function_call", "call_id": first_trimmed_call_id, "name": "exec_command", "arguments": "{}"}),
         json!({"type": "function_call", "call_id": second_trimmed_call_id, "name": "exec_command", "arguments": "{}"}),
-        json!({"type": "function_call_output", "call_id": first_trimmed_call_id, "output": "x".repeat(12_000)}),
-        json!({"type": "function_call_output", "call_id": second_trimmed_call_id, "output": "y".repeat(12_000)}),
+        json!({"type": "custom_tool_call", "call_id": "encrypted-notes", "name": "notes", "input": "{}"}),
+        json!({"type": "function_call_output", "call_id": first_trimmed_call_id, "output": "x".repeat(900_000 * 4)}),
+        json!({"type": "function_call_output", "call_id": second_trimmed_call_id, "output": "y".repeat(900_000 * 4)}),
+        json!({"type": "custom_tool_call_output", "call_id": "encrypted-notes", "output": [
+            {"type": "input_text", "text": "notes receipt"},
+            {"type": "encrypted_content", "encrypted_content": "OPAQUE_NOTES_KEEP_INTACT"},
+        ]}),
     ]
     .into_iter()
     .map(serde_json::from_value)
@@ -1411,6 +1417,14 @@ async fn remote_compact_v2_rewrites_multiple_trailing_function_call_outputs(
         compact_request.function_call_output_text(second_trimmed_call_id),
         Some(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string()),
         "expected compact request to rewrite the second trailing function call output"
+    );
+    assert_eq!(
+        compact_request.inputs_of_type("custom_tool_call_output")[0]["output"],
+        json!([
+            {"type": "input_text", "text": "notes receipt"},
+            {"type": "encrypted_content", "encrypted_content": "OPAQUE_NOTES_KEEP_INTACT"},
+        ]),
+        "encrypted notes must survive even when preceding outputs exceed the compaction budget"
     );
 
     assert_eq!(

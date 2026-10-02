@@ -654,6 +654,14 @@
       ],
       "type": "string"
     },
+    "CompactionRetentionTokens": {
+      "enum": [
+        16000,
+        32000,
+        64000
+      ],
+      "type": "integer"
+    },
     "ComputerUseConfigToml": {
       "additionalProperties": false,
       "properties": {
@@ -737,6 +745,17 @@
         },
         "chatgpt_base_url": {
           "type": "string"
+        },
+        "compaction_retention_tokens": {
+          "$ref": "#/definitions/CompactionRetentionTokens"
+        },
+        "context_idle_rollover_minutes": {
+          "format": "uint64",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "context_strategy": {
+          "$ref": "#/definitions/ContextStrategy"
         },
         "experimental_compact_prompt_file": {
           "$ref": "#/definitions/AbsolutePathBuf"
@@ -1378,6 +1397,14 @@
         }
       },
       "type": "object"
+    },
+    "ContextStrategy": {
+      "description": "Continuity policy for context windows. Notes requires usable remote storage.",
+      "enum": [
+        "notes",
+        "compaction"
+      ],
+      "type": "string"
     },
     "CopyOnSelect": {
       "description": "When transcript mouse selections are copied on release.",
@@ -6786,8 +6813,30 @@
       "description": "Compact prompt used for history compaction.",
       "type": "string"
     },
+    "compaction_retention_tokens": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/CompactionRetentionTokens"
+        }
+      ],
+      "description": "User-message retention budget for normal compaction. Defaults to 64000."
+    },
     "computer_use": {
       "$ref": "#/definitions/ComputerUseConfigToml"
+    },
+    "context_idle_rollover_minutes": {
+      "description": "Roll over a notes window before the next user turn after this many idle minutes. Omitted disables idle rollover. Must be a positive integer.",
+      "format": "uint64",
+      "minimum": 1.0,
+      "type": "integer"
+    },
+    "context_strategy": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ContextStrategy"
+        }
+      ],
+      "description": "Context continuity policy. Omitted selects notes with remote storage. Use compaction explicitly when remote notes are unavailable."
     },
     "daybreak": {
       "description": "Default Daybreak preference for new threads and non-interactive turns.",

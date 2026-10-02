@@ -86,6 +86,7 @@ fn resume_history(
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
         ]),
         rollout_path: Some(rollout_path.to_path_buf()),
@@ -97,6 +98,7 @@ async fn emits_warning_when_resumed_model_differs() {
     // Arrange a config with a current model and a prior rollout recorded under a different model.
     let home = TempDir::new().expect("tempdir");
     let mut config = load_default_config_for_test(&home).await;
+    config.context_strategy = codex_config::types::ContextStrategy::Compaction;
     config.model = Some("current-model".to_string());
     // Ensure cwd is absolute (the helper sets it to the temp dir already).
     assert!(config.cwd.is_absolute());

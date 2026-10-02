@@ -5,6 +5,7 @@
 use super::Config;
 use super::Constrained;
 use super::TokenBudgetConfig;
+use codex_config::types::ContextStrategy;
 use codex_features::Feature;
 use codex_protocol::protocol::AskForApproval;
 use std::collections::HashMap;
@@ -18,7 +19,10 @@ pub(crate) fn build_reviewer_config(parent_config: &Config) -> anyhow::Result<Co
     config.include_skill_instructions = false;
     config.memories.use_memories = false;
     config.memories.dedicated_tools = false;
-    // An explicit disabled config prevents model defaults from reactivating it.
+    // Private reviewers have neither the notes extension nor rollover tools. Select
+    // their internal continuity explicitly, so startup cannot reactivate inherited
+    // Notes controls. Managed feature conflicts still fail startup normally.
+    config.context_strategy = ContextStrategy::Compaction;
     config.token_budget_startup_config = None;
     config.token_budget = Some(TokenBudgetConfig::default());
     config.notify = None;

@@ -1494,13 +1494,15 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
                     .flatten()
                     .filter_map(|item| item.get("text").and_then(|text| text.as_str()));
 
-                // Ignore cached prefix messages (project docs + permissions) since they are not
+                // Ignore cached prefix messages (project docs, permissions, agent guidance) since they are not
                 // relevant to compaction behavior and can change as bundled prompts evolve.
                 let role = value.get("role").and_then(|role| role.as_str());
                 if role == Some("developer")
-                    && texts
-                        .into_iter()
-                        .any(|text| text.contains("`sandbox_mode`"))
+                    && texts.into_iter().any(|text| {
+                        text.contains("`sandbox_mode`")
+                            || text.starts_with("Role: `/root`.")
+                            || text.starts_with("<multi_agent_mode>")
+                    })
                 {
                     return None;
                 }
@@ -1527,10 +1529,10 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
         let input = body.get("input").and_then(|v| v.as_array()).unwrap();
         let input = normalize_inputs(input);
         assert_eq!(input.len(), 3);
-        let environment_message = input[0]["content"][0]["text"].as_str().unwrap();
+        let environment_message_received = input[0]["content"][0]["text"].as_str().unwrap();
         let user_message_received = input[1]["content"][0]["text"].as_str().unwrap();
         let summary_message = input[2]["content"][0]["text"].as_str().unwrap();
-        assert_eq!(environment_message, environment_message);
+        assert_eq!(environment_message_received, environment_message);
         assert_eq!(user_message_received, user_message);
         assert_eq!(
             summary_message, expected_summary,
@@ -4254,6 +4256,136 @@ async fn manual_compact_non_context_failure_retries_then_emits_task_error() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 }
 
+#[test_case::test_case(false; "exhausted stream retries")]
+#[test_case::test_case(true; "successful stream retry")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_compact_failed_stream_never_publishes_partial_summary(recover: bool) {
+    skip_if_no_network!();
+    let server = start_mock_server().await;
+    let failed_summary = "FAILED_COMPACTION_OUTPUT_MUST_NOT_PERSIST";
+    let partial = sse(vec![ev_assistant_message("partial", failed_summary)]);
+    let retry = if recover {
+        sse(vec![
+            ev_assistant_message("summary", "SUCCESSFUL_RETRY_SUMMARY"),
+            ev_completed("compact-completed"),
+        ])
+    } else {
+        partial.clone()
+    };
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("initial", FIRST_REPLY),
+                ev_completed("first"),
+            ]),
+            partial,
+            retry,
+            sse(vec![
+                ev_assistant_message("after", "follow-up reply"),
+                ev_completed("after"),
+            ]),
+        ],
+    )
+    .await;
+    let mut provider = non_openai_model_provider(&server);
+    provider.stream_max_retries = Some(1);
+    let test = test_codex()
+        .with_config(move |config| {
+            config.model_provider = provider;
+            set_test_compact_prompt(config);
+            config.model_auto_compact_token_limit = Some(200_000);
+        })
+        .build(&server)
+        .await
+        .expect("build codex");
+    let codex = &test.codex;
+    for text in ["first turn", "after compact"] {
+        if text == "after compact" {
+            codex.submit(Op::Compact).await.expect("compact");
+            wait_for_event(codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+        }
+        codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: text.to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await
+            .expect("submit turn");
+        wait_for_event(codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    }
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 4);
+    for request in &requests[2..] {
+        assert!(!request.body_json().to_string().contains(failed_summary));
+    }
+    let followup = requests[3].body_json().to_string();
+    assert_eq!(followup.contains("SUCCESSFUL_RETRY_SUMMARY"), recover);
+    if !recover {
+        assert!(followup.contains(FIRST_REPLY));
+    }
+    codex.submit(Op::Shutdown).await.expect("shutdown");
+    wait_for_event(codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
+    let rollout_path = test.session_configured.rollout_path.expect("rollout path");
+    let persisted = std::fs::read_to_string(rollout_path).expect("read rollout");
+    assert!(!persisted.contains(failed_summary));
+    assert_eq!(persisted.contains("SUCCESSFUL_RETRY_SUMMARY"), recover);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_compact_without_new_summary_preserves_history_and_reports_error() {
+    skip_if_no_network!();
+    let server = start_mock_server().await;
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("initial", FIRST_REPLY),
+                ev_completed("first"),
+            ]),
+            sse(vec![ev_completed("compact-without-summary")]),
+            sse(vec![
+                ev_assistant_message("after", FINAL_REPLY),
+                ev_completed("after"),
+            ]),
+        ],
+    )
+    .await;
+    let provider = non_openai_model_provider(&server);
+    let test = test_codex()
+        .with_config(move |config| {
+            config.model_provider = provider;
+            set_test_compact_prompt(config);
+            config.model_auto_compact_token_limit = Some(200_000);
+        })
+        .build(&server)
+        .await
+        .expect("build codex");
+    test.submit_text_turn("first turn")
+        .await
+        .expect("first turn");
+    test.codex.submit(Op::Compact).await.expect("compact");
+    let completed = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::TurnComplete(completed) => Some(completed.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(
+        completed
+            .error
+            .expect("missing summary must fail visibly")
+            .message
+            .contains("Compaction completed without an assistant summary")
+    );
+    test.submit_text_turn("continue").await.expect("continue");
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 3);
+    let followup = requests[2].body_json().to_string();
+    assert!(followup.contains(FIRST_REPLY));
+    assert!(followup.contains("first turn"));
+    assert!(!followup.contains(&json_fragment(SUMMARY_PREFIX)));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_compact_twice_preserves_latest_user_messages() {
     skip_if_no_network!();
@@ -5484,17 +5616,7 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
         ev_assistant_message("m1", FIRST_REPLY),
         ev_completed_with_tokens("r1", /*total_tokens*/ 500),
     ]);
-    let mut responses = vec![first_turn];
-    responses.extend(
-        (0..5).map(|_| {
-            sse_failed(
-                "compact-failed",
-                "context_length_exceeded",
-                "Your input exceeds the context window of this model. Please adjust your input and try again.",
-            )
-        }),
-    );
-    let request_log = mount_sse_sequence(&server, responses).await;
+    let first_request_log = mount_sse_once(&server, first_turn).await;
 
     let mut model_provider = non_openai_model_provider(&server);
     model_provider.stream_max_retries = Some(0);
@@ -5519,6 +5641,28 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
         .expect("submit first user");
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
+    // Compaction drops one oldest item after each overflow until only its
+    // summarization prompt remains. Include every actual initial-context item,
+    // the assistant reply, and that prompt rather than assuming a fixed prefix.
+    let compact_input_len = first_request_log.single_request().body_json()["input"]
+        .as_array()
+        .unwrap()
+        .len()
+        + 2;
+    let request_log = mount_sse_sequence(
+        &server,
+        (0..compact_input_len)
+            .map(|_| {
+                sse_failed(
+                    "compact-failed",
+                    "context_length_exceeded",
+                    CONTEXT_LIMIT_MESSAGE,
+                )
+            })
+            .collect(),
+    )
+    .await;
+
     codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "USER_TWO".to_string(),
@@ -5534,10 +5678,16 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let requests = request_log.requests();
-    assert!(
-        requests.len() >= 2,
-        "expected first turn and at least one compaction request"
-    );
+    assert_eq!(requests.len(), compact_input_len);
+    for (index, request) in requests.iter().enumerate() {
+        let body = request.body_json();
+        assert_eq!(
+            body["input"].as_array().unwrap().len(),
+            compact_input_len - index
+        );
+        assert!(!body.to_string().contains("USER_TWO"));
+        assert!(body_contains_text(&body.to_string(), SUMMARIZATION_PROMPT));
+    }
 
     insta::assert_snapshot!(
         "pre_turn_compaction_context_window_exceeded_shapes",
@@ -5545,7 +5695,7 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
             "Pre-turn auto-compaction context-window failure: compaction request excludes the incoming user message and the turn errors.",
             &[(
                 "Local Compaction Request (Incoming User Excluded)",
-                &requests[1]
+                &requests[0]
             ),]
         )
     );

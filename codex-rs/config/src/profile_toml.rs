@@ -6,6 +6,8 @@ use serde::Serialize;
 use crate::config_toml::ToolsToml;
 use crate::types::AnalyticsConfigToml;
 use crate::types::ApprovalsReviewer;
+use crate::types::CompactionRetentionTokens;
+use crate::types::ContextStrategy;
 use crate::types::Personality;
 use crate::types::SessionPickerViewMode;
 use crate::types::WindowsToml;
@@ -23,6 +25,9 @@ use codex_protocol::protocol::AskForApproval;
 #[schemars(deny_unknown_fields)]
 pub struct ConfigProfile {
     pub model: Option<String>,
+    pub context_strategy: Option<ContextStrategy>,
+    pub compaction_retention_tokens: Option<CompactionRetentionTokens>,
+    pub context_idle_rollover_minutes: Option<std::num::NonZeroU64>,
     /// Optional explicit service tier request id for new turns (for example
     /// `default`, `priority`, or `flex`; legacy `fast` also works).
     pub service_tier: Option<String>,

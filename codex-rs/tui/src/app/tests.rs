@@ -8359,6 +8359,7 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             })),
         ] {
             codex_rollout::append_rollout_item_to_path(&source_path, &item).await?;

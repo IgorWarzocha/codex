@@ -4,17 +4,20 @@ use crate::context::ContextualUserFragment;
 use crate::context::ImageResizeNotice;
 use crate::context_manager::ContextManager;
 use crate::context_manager::estimate_item_token_count;
-use crate::session::turn_context::TurnContext;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseItem;
 use codex_utils_output_truncation::approx_token_count;
 
 const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE: &str =
     "Output exceeded the available model context and was truncated";
+
+// The compaction backend accepts this independently of the active user context window.
+pub(crate) const COMPACTION_INPUT_TOKEN_BUDGET: i64 = 872_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HistoryItemGroup<T> {
@@ -65,14 +68,10 @@ fn is_attached_notice(notice: &ResponseItem) -> bool {
     )
 }
 
-pub(crate) fn trim_function_call_history_to_fit_context_window(
+pub(crate) fn trim_function_call_history_to_fit_compaction_budget(
     history: &mut ContextManager,
-    turn_context: &TurnContext,
     base_instructions: &BaseInstructions,
 ) -> (usize, i64) {
-    let Some(context_window) = turn_context.model_context_window() else {
-        return (0, 0);
-    };
     // Keep the unclamped total so replacing an item cannot lose an overflow hidden by i64
     // saturation in the normal history estimator.
     let base_tokens =
@@ -82,7 +81,11 @@ pub(crate) fn trim_function_call_history_to_fit_context_window(
         .map(|group| group.estimated_token_count())
         .fold(base_tokens, i128::saturating_add);
     let initial_estimated_tokens = i64::try_from(estimated_tokens).unwrap_or(i64::MAX);
-    let mut rewritten_items = Vec::new();
+    if estimated_tokens <= i128::from(COMPACTION_INPUT_TOKEN_BUDGET) {
+        return (0, 0);
+    }
+    let mut rewritten_items = original_items.to_vec();
+    let mut rewritten_outputs = 0;
     let mut consumed_items: usize = 0;
 
     for group in history_item_groups(original_items.iter().map(|item| &item.item))
@@ -90,32 +93,46 @@ pub(crate) fn trim_function_call_history_to_fit_context_window(
         .into_iter()
         .rev()
     {
-        if i64::try_from(estimated_tokens).unwrap_or(i64::MAX) <= context_window {
+        if estimated_tokens <= i128::from(COMPACTION_INPUT_TOKEN_BUDGET) {
             break;
         }
         let group_item_count = 1 + usize::from(group.attached_notice.is_some());
         let source_index = original_items
             .len()
             .saturating_sub(consumed_items.saturating_add(group_item_count));
+        // Only shrink the trailing output lane. Encrypted history/notes are part of
+        // that lane, but must be kept intact while scanning preceding outputs.
+        if !matches!(
+            group.source,
+            ResponseItem::FunctionCallOutput { .. }
+                | ResponseItem::CustomToolCallOutput { .. }
+                | ResponseItem::ToolSearchOutput { .. }
+        ) {
+            break;
+        }
+        consumed_items += group_item_count;
         let Some(rewritten_item) = original_items
             .get(source_index)
             .and_then(rewritten_output_for_context_window)
         else {
-            break;
+            continue;
         };
+        let replacement_tokens = i128::from(estimate_item_token_count(&rewritten_item.item));
+        if replacement_tokens >= group.estimated_token_count() {
+            continue;
+        }
         estimated_tokens = estimated_tokens
             .saturating_sub(group.estimated_token_count())
-            .saturating_add(i128::from(estimate_item_token_count(&rewritten_item.item)));
-        consumed_items += group_item_count;
-        rewritten_items.push(rewritten_item);
+            .saturating_add(replacement_tokens);
+        rewritten_items.splice(
+            source_index..source_index + group_item_count,
+            [rewritten_item],
+        );
+        rewritten_outputs += 1;
     }
 
-    let rewritten_outputs = rewritten_items.len();
     if rewritten_outputs > 0 {
-        let retained_len = original_items.len() - consumed_items;
-        let mut items = original_items[..retained_len].to_vec();
-        items.extend(rewritten_items.into_iter().rev());
-        history.replace_annotated(items);
+        history.replace_annotated(rewritten_items);
     }
 
     let final_estimated_tokens = i64::try_from(estimated_tokens).unwrap_or(i64::MAX);
@@ -134,7 +151,7 @@ fn rewritten_output_for_context_window(
             namespace,
             output,
             internal_chat_message_metadata_passthrough: metadata,
-        } => ResponseItem::FunctionCallOutput {
+        } if !has_encrypted_content(output) => ResponseItem::FunctionCallOutput {
             id: id.clone(),
             call_id: call_id.clone(),
             name: name.clone(),
@@ -148,7 +165,7 @@ fn rewritten_output_for_context_window(
             name,
             output,
             internal_chat_message_metadata_passthrough: metadata,
-        } => ResponseItem::CustomToolCallOutput {
+        } if !has_encrypted_content(output) => ResponseItem::CustomToolCallOutput {
             id: id.clone(),
             call_id: call_id.clone(),
             name: name.clone(),
@@ -175,6 +192,14 @@ fn rewritten_output_for_context_window(
     Some(ResponseItemEnvelope {
         item,
         metadata: envelope.metadata.clone(),
+    })
+}
+
+fn has_encrypted_content(output: &FunctionCallOutputPayload) -> bool {
+    output.content_items().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| matches!(item, FunctionCallOutputContentItem::EncryptedContent { .. }))
     })
 }
 

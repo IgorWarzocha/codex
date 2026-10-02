@@ -831,8 +831,22 @@ impl Session {
             let error = turn_context.terminal_error.lock().await.clone();
             self.emit_turn_stop_lifecycle(turn_context.extension_data.as_ref())
                 .await;
+            let notes_checkpoint = if turn_context.config.context_strategy
+                == codex_config::types::ContextStrategy::Notes
+            {
+                Some(
+                    self.notes_settlement(
+                        &turn_context,
+                        error.is_none() && last_agent_message.is_some() && pending_input.is_empty(),
+                    )
+                    .await,
+                )
+            } else {
+                None
+            };
             EventMsg::TurnComplete(TurnCompleteEvent {
                 turn_id: turn_context.sub_id.clone(),
+                notes_checkpoint,
                 last_agent_message,
                 error,
                 started_at,

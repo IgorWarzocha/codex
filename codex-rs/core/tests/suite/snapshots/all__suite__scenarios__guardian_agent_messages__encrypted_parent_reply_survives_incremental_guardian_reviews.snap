@@ -8,14 +8,22 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
 -- request 1 (turn) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
+01:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+02:message/developer:
+    <MULTI_AGENT_MODE>
+03:message/user:
     <ENVIRONMENT_CONTEXT>
-02:message/user:
+04:message/user:
     Check the change after the parent confirms the exact action.
 -- request 2 (turn) --
-03:message/assistant:
+05:message/assistant:
     I will wait for the parent reply before checking the change.
-04:agent_message
+06:agent_message
 
 ## Window 2 (after request 2: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 3 (turn) --
@@ -93,15 +101,23 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
 -- request 4 (turn) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
+01:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+02:message/developer:
+    <MULTI_AGENT_MODE>
+03:message/user:
     <ENVIRONMENT_CONTEXT>
-02:message/user:
+04:message/user:
     Check the change after the parent confirms the exact action.
-03:message/assistant:
+05:message/assistant:
     I will wait for the parent reply before checking the change.
-04:agent_message
-05:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
-06:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
+06:agent_message
+07:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
+08:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
 
 ## Window 4 (after request 4: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 5 (turn) --
@@ -224,14 +240,22 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
 -- request 6 (turn) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
+01:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+02:message/developer:
+    <MULTI_AGENT_MODE>
+03:message/user:
     <ENVIRONMENT_CONTEXT>
-02:message/user:
+04:message/user:
     Check the change after the parent confirms the exact action.
-03:message/assistant:
+05:message/assistant:
     I will wait for the parent reply before checking the change.
-04:agent_message
-05:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
-06:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
+06:agent_message
 07:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
 08:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
+09:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
+10:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use codex_config::types::ContextStrategy;
 use codex_core::config::Config;
 use codex_core::config::TokenBudgetConfig;
 use codex_extension_api::ExtensionRegistryBuilder;
@@ -39,7 +40,7 @@ async fn assert_history_images_reach_the_next_model_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let server = responses::start_mock_server().await;
     Mock::given(method("POST"))
-        .and(path("/v1/alpha/history/v2/read_item"))
+        .and(path("/backend-api/codex/alpha/history/v2/read_item"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "encrypted_output": "opaque-history-text",
             "images": [
@@ -81,14 +82,14 @@ async fn assert_history_images_reach_the_next_model_request(
         &mut extensions,
         AuthManager::from_auth_for_testing(auth.clone()),
     );
+    let backend_url = format!("{}/backend-api/codex", server.uri());
     let test = test_codex()
+        .with_context_strategy(ContextStrategy::Notes)
         .with_auth(auth)
-        .with_model_info_override("gpt-5.5", |model_info| {
-            model_info.supports_experimental_context = true;
-        })
         .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             config.model_provider.name = "OpenAI".to_string();
+            config.model_provider.base_url = Some(backend_url);
             if nested {
                 config
                     .features

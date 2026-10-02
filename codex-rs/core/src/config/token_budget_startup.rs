@@ -1,13 +1,13 @@
 //! Keeps configured token-budget preferences separate from session startup activation.
-//! Fresh child sessions restore this snapshot before applying their starting model's defaults;
-//! history forks retain their parent's effective activation and the original snapshot.
+//! Fresh child sessions restore this snapshot before validating their context strategy;
+//! history forks retain configured preferences but revalidate remote storage availability.
 
 use super::Config;
 use super::ConstraintResult;
 use super::TokenBudgetConfig;
 use codex_features::Feature;
 
-/// Token-budget preferences before a session applies experimental or model-owned activation.
+/// Token-budget preferences before a session validates strategy-owned activation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokenBudgetStartupConfig {
     enabled: bool,

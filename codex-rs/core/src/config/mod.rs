@@ -41,6 +41,8 @@ use codex_config::sandbox_mode_requirement_for_permission_profile;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::AuthKeyringBackendKind;
+pub use codex_config::types::CompactionRetentionTokens;
+pub use codex_config::types::ContextStrategy;
 use codex_config::types::History;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerDisabledReason;
@@ -1109,6 +1111,12 @@ pub struct Config {
 
     /// Context-window token budget configuration, when enabled.
     pub token_budget: Option<TokenBudgetConfig>,
+    /// Authoritative context continuity policy, validated against storage at startup.
+    pub context_strategy: ContextStrategy,
+    /// User-message retention budget for normal compaction.
+    pub compaction_retention_tokens: CompactionRetentionTokens,
+    /// Optional idle interval before notes rollover on the next user turn.
+    pub context_idle_rollover_minutes: Option<std::num::NonZeroU64>,
     /// Runtime snapshot of configured token-budget preferences before startup activation.
     pub token_budget_startup_config: Option<TokenBudgetStartupConfig>,
     /// Shared token budget for the root thread and its sub-agents.
@@ -1927,7 +1935,18 @@ impl Config {
 
     /// Remote history and notes are available independently of context-budget settings.
     pub fn uses_native_history_notes(&self, auth_manager: &codex_login::AuthManager) -> bool {
-        self.model_provider.is_openai() && auth_manager.current_auth_uses_codex_backend()
+        self.notes_backend_is_available(auth_manager.auth_cached().as_ref())
+    }
+
+    pub(crate) fn notes_backend_is_available(&self, auth: Option<&codex_login::CodexAuth>) -> bool {
+        let provider = &self.model_provider;
+        provider.supports_codex_backend_routes()
+            && provider.requires_openai_auth
+            && provider.env_key.is_none()
+            && provider.experimental_bearer_token.is_none()
+            && provider.auth.is_none()
+            && provider.aws.is_none()
+            && auth.is_some_and(codex_login::CodexAuth::uses_codex_backend)
     }
 
     pub async fn rebuild_with_session_layers(
@@ -2890,16 +2909,14 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
 
 pub(crate) fn resolve_token_budget_config(
     config_toml: &ConfigToml,
-    features: &ManagedFeatures,
 ) -> std::io::Result<Option<TokenBudgetConfig>> {
-    if !features.enabled(Feature::TokenBudget) {
+    if config_toml.context_strategy.unwrap_or_default() == ContextStrategy::Compaction {
         return Ok(None);
     }
 
     let token_budget_config = token_budget_toml_config(config_toml.features.as_ref());
-    let use_history_notes_extension = token_budget_config
-        .and_then(|config| config.use_history_notes_extension)
-        .unwrap_or_default();
+    // Activation flags are legacy input. Only context_strategy chooses continuity.
+    let use_history_notes_extension = true;
     let reminder_threshold_tokens =
         token_budget_config.and_then(|config| config.reminder_threshold_tokens);
     let reminder_message_template = token_budget_config
@@ -3836,7 +3853,7 @@ impl Config {
         };
         let code_mode = resolve_code_mode_config(&cfg)?;
         let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg);
-        let token_budget = resolve_token_budget_config(&cfg, &features)?;
+        let token_budget = resolve_token_budget_config(&cfg)?;
         let rollout_budget = resolve_rollout_budget_config(&cfg, &features)?;
         let current_time_reminder = resolve_current_time_reminder_config(&cfg, &features)?;
         let sleep_tool_mode = cfg
@@ -4512,6 +4529,9 @@ impl Config {
             ghost_snapshot,
             multi_agent_v2,
             token_budget,
+            context_strategy: cfg.context_strategy.unwrap_or_default(),
+            compaction_retention_tokens: cfg.compaction_retention_tokens.unwrap_or_default(),
+            context_idle_rollover_minutes: cfg.context_idle_rollover_minutes,
             token_budget_startup_config: None,
             rollout_budget,
             current_time_reminder,

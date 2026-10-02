@@ -8,6 +8,7 @@ use codex_core::TurnInput;
 use codex_core::TurnInputRequest;
 use codex_core::TurnInputSubmission;
 use codex_core::TurnStartOptions;
+use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::config::CurrentTimeReminderConfig;
 use codex_extension_items::ExtensionItem;
 use codex_extension_items::sleep::SleepItem;
@@ -1618,8 +1619,28 @@ async fn steer_during_compaction_is_sent_after_compaction() {
             ),
         ],
         response_completed_chunks("resp-follow-up"),
-        response_completed_chunks("resp-extra-compaction"),
-        response_completed_chunks("resp-steered"),
+        vec![
+            chunk(ev_response_created("resp-extra-compaction")),
+            chunk(ev_message_item_done(
+                "msg-extra-compact",
+                "SECOND_COMPACT_SUMMARY",
+            )),
+            chunk(ev_completed_with_tokens(
+                "resp-extra-compaction",
+                /*total_tokens*/ 50,
+            )),
+        ],
+        vec![
+            chunk(ev_response_created("resp-steered")),
+            chunk(ev_message_item_done(
+                "msg-steered",
+                "processed steered prompt",
+            )),
+            chunk(ev_completed_with_tokens(
+                "resp-steered",
+                /*total_tokens*/ 70,
+            )),
+        ],
     ])
     .await;
     let test = test_codex()
@@ -1659,6 +1680,20 @@ async fn steer_during_compaction_is_sent_after_compaction() {
     .expect("turn should complete after the steer");
 
     let requests = server.requests().await;
+    assert_eq!(requests.len(), 5);
+    let extra_compact_body: Value =
+        from_slice(&requests[3]).expect("parse second compaction request");
+    assert!(
+        message_input_texts(&extra_compact_body, "user")
+            .iter()
+            .any(|text| text == SUMMARIZATION_PROMPT)
+    );
+    let steered_body: Value = from_slice(&requests[4]).expect("parse steered request");
+    assert!(
+        message_input_texts(&steered_body, "user")
+            .iter()
+            .any(|text| text.contains("SECOND_COMPACT_SUMMARY"))
+    );
     let steer_counts = requests
         .iter()
         .skip(2)

@@ -1,9 +1,11 @@
 use anyhow::Result;
+use codex_config::types::ContextStrategy;
 use codex_core::TurnInputRequest;
 use codex_core::config::CurrentTimeReminderConfig;
 use codex_core::config::RolloutBudgetConfig;
 use codex_core::config::TokenBudgetConfig;
 use codex_features::Feature;
+use codex_login::CodexAuth;
 use codex_protocol::models::ImageReference;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::AdditionalContextEntry;
@@ -35,11 +37,19 @@ async fn first_request_item_types_roles_and_content_annotations() -> Result<()> 
         sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
     )
     .await;
+    let backend_url = format!("{}/backend-api/codex", server.uri());
     let test = test_codex()
+        .with_context_strategy(ContextStrategy::Notes)
+        .with_auth(CodexAuth::from_external_chatgpt_tokens(
+            "header.e30.signature",
+            "account-123",
+            Some("plus"),
+        )?)
         .with_model_info_override("gpt-5.5", |model_info| {
             model_info.input_modalities.push(InputModality::Audio);
         })
-        .with_config(|config| {
+        .with_config(move |config| {
+            config.model_provider.base_url = Some(backend_url);
             config.update_plan_enabled = true;
             config.developer_instructions = Some("Keep world-state annotations aligned.".into());
             config.model_context_window = Some(128_000);

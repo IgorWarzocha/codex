@@ -1237,6 +1237,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
 
     let mut config = build_test_config(codex_home.path()).await;
     config.cwd = project_dir.abs();
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.config_layer_stack = ConfigLayerStack::new(
         vec![ConfigLayerEntry::new(
             ConfigLayerSource::Project {

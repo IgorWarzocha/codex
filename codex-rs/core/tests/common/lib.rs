@@ -194,6 +194,8 @@ pub fn fetch_dotslash_file(
 /// Returns a default `Config` whose on-disk state is confined to the provided
 /// temporary directory. Using a per-test directory keeps tests hermetic and
 /// avoids clobbering a developer’s real `~/.codex`.
+/// Preserves production context-strategy defaults. Ordinary mock-provider thread
+/// tests should use `test_codex::test_codex`, which explicitly selects compaction.
 pub async fn load_default_config_for_test(codex_home: &TempDir) -> Config {
     load_default_config_for_test_with_cloud_config_bundle(
         codex_home,
@@ -202,8 +204,8 @@ pub async fn load_default_config_for_test(codex_home: &TempDir) -> Config {
     .await
 }
 
-/// Returns a default `Config` with test-provided cloud bundle requirements applied.
-/// during config construction.
+/// Returns production-default configuration with test-provided cloud bundle
+/// requirements applied during config construction, without a context-strategy override.
 pub async fn load_default_config_for_test_with_cloud_config_bundle(
     codex_home: &TempDir,
     cloud_config_bundle: CloudConfigBundleLoader,

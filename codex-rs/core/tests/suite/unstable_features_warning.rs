@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use codex_config::CONFIG_TOML_FILE;
+use codex_config::types::ContextStrategy;
 use codex_core::NewThread;
 use codex_features::Feature;
 use codex_history::InitialHistory;
@@ -20,6 +21,7 @@ use toml::toml;
 async fn emits_warning_when_unstable_features_enabled_via_config() {
     let home = TempDir::new().expect("tempdir");
     let mut config = load_default_config_for_test(&home).await;
+    config.context_strategy = ContextStrategy::Compaction;
     config
         .features
         .enable(Feature::ApplyPatchStreamingEvents)
@@ -69,6 +71,7 @@ async fn emits_warning_when_unstable_features_enabled_via_config() {
 async fn suppresses_warning_when_configured() {
     let home = TempDir::new().expect("tempdir");
     let mut config = load_default_config_for_test(&home).await;
+    config.context_strategy = ContextStrategy::Compaction;
     config
         .features
         .enable(Feature::ApplyPatchStreamingEvents)

@@ -4368,6 +4368,7 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             },
         )),
     ];
@@ -11867,6 +11868,7 @@ async fn make_remote_compaction_session(
         Vec::new(),
         move |config| {
             config.model = Some("gpt-5.2".to_string());
+            config.context_strategy = crate::config::ContextStrategy::Compaction;
             config.model_provider = provider;
             config.chatgpt_base_url = server_uri.to_string();
             let _ = config.features.disable(Feature::TokenBudget);
@@ -12976,7 +12978,16 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
-    let (sess, tc, rx) = make_session_and_context_with_rx().await;
+    let (sess, tc, rx) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            config.context_strategy = crate::config::ContextStrategy::Compaction;
+            // This fixture checks the V1 user-role interrupt marker.
+            config.features.disable(Feature::MultiAgentV2).unwrap();
+        },
+    )
+    .await;
     let input = vec![TurnInput::UserInput {
         metadata: Default::default(),
         content: vec![UserInput::Text {

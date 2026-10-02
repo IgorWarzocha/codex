@@ -8,9 +8,17 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
 -- request 1 (request) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
+01:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+02:message/developer:
+    <MULTI_AGENT_MODE>
+03:message/user:
     <ENVIRONMENT_CONTEXT>
-02:message/user:
+04:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:00:00Z</current_time_iso>
@@ -20,9 +28,9 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
     </heartbeat>
 
 -- request 2 (request) --
-03:message/assistant:
+05:message/assistant:
     Recorded this input.
-04:message/user:
+06:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:01:00Z</current_time_iso>
@@ -32,14 +40,14 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
     </heartbeat>
 
 -- request 3 (request) --
-05:message/assistant:
-    Recorded this input.
-06:message/user:
-    Create a new worktree for the fix; this overrides the monitor's no-worktree restriction.
--- request 4 (request) --
 07:message/assistant:
     Recorded this input.
 08:message/user:
+    Create a new worktree for the fix; this overrides the monitor's no-worktree restriction.
+-- request 4 (request) --
+09:message/assistant:
+    Recorded this input.
+10:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:03:00Z</current_time_iso>
@@ -49,9 +57,9 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
     </heartbeat>
 
 -- request 5 (request) --
-09:message/assistant:
+11:message/assistant:
     Recorded this input.
-10:message/user:
+12:message/user:
     Check the fix in the requested worktree.
 
 ## Window 2 (after request 5: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
@@ -171,9 +179,17 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
 -- request 7 (request) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
+01:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+02:message/developer:
+    <MULTI_AGENT_MODE>
+03:message/user:
     <ENVIRONMENT_CONTEXT>
-02:message/user:
+04:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:00:00Z</current_time_iso>
@@ -182,9 +198,9 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
       </instructions>
     </heartbeat>
 
-03:message/assistant:
+05:message/assistant:
     Recorded this input.
-04:message/user:
+06:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:01:00Z</current_time_iso>
@@ -193,13 +209,13 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
       </instructions>
     </heartbeat>
 
-05:message/assistant:
-    Recorded this input.
-06:message/user:
-    Create a new worktree for the fix; this overrides the monitor's no-worktree restriction.
 07:message/assistant:
     Recorded this input.
 08:message/user:
+    Create a new worktree for the fix; this overrides the monitor's no-worktree restriction.
+09:message/assistant:
+    Recorded this input.
+10:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:03:00Z</current_time_iso>
@@ -208,9 +224,9 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
       </instructions>
     </heartbeat>
 
-09:message/assistant:
+11:message/assistant:
     Recorded this input.
-10:message/user:
+12:message/user:
     Check the fix in the requested worktree.
-11:function_call/exec_command:{"cmd":"exit 0","justification":"Check the explicitly requested change.","sandbox_permissions":"require_escalated"}
-12:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=1920af4a5ed341ad]
+13:function_call/exec_command:{"cmd":"exit 0","justification":"Check the explicitly requested change.","sandbox_permissions":"require_escalated"}
+14:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=1920af4a5ed341ad]

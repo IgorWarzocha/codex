@@ -10,6 +10,7 @@ use codex_extension_api::ContextContributor;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::NotesCheckpointTracker;
 use codex_extension_api::PromptFragment;
 use codex_extension_api::PromptSlot;
 use codex_extension_api::ThreadLifecycleContributor;
@@ -74,6 +75,9 @@ impl ThreadLifecycleContributor<Config> for HistoryNotesExtension {
             input
                 .thread_store
                 .insert(HistoryNotesAgentIdentity { agent_name });
+            input
+                .thread_store
+                .get_or_init(NotesCheckpointTracker::default);
             self.update_config(input.thread_store, input.config);
         })
     }
@@ -165,12 +169,17 @@ impl ToolContributor for HistoryNotesExtension {
         HistoryNotesAction::ALL
             .into_iter()
             .map(|action| {
-                Arc::new(HistoryNotesTool::new(
-                    action,
-                    config.backend.clone(),
-                    session_store.level_id().to_string(),
-                    identity.agent_name.clone(),
-                )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>
+                Arc::new(
+                    HistoryNotesTool::new(
+                        action,
+                        config.backend.clone(),
+                        session_store.level_id().to_string(),
+                        identity.agent_name.clone(),
+                    )
+                    .with_checkpoint_tracker(
+                        thread_store.get_or_init(NotesCheckpointTracker::default),
+                    ),
+                ) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>
             })
             .collect()
     }

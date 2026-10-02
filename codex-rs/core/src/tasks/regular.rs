@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use codex_async_utils::OrCancelExt;
 use codex_extension_api::TurnStartPhase;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::session::TurnInput;
@@ -20,11 +21,15 @@ use super::SessionTask;
 use super::SessionTaskResult;
 
 #[derive(Default)]
-pub(crate) struct RegularTask;
+pub(crate) struct RegularTask {
+    // Keep admission input owned outside the running future until idle preparation ends.
+    // Forced abort cleanup can then retain it without rerunning prompt hooks.
+    idle_input: Mutex<Vec<TurnInput>>,
+}
 
 impl RegularTask {
     pub(crate) fn new() -> Self {
-        Self
+        Self::default()
     }
 }
 
@@ -37,6 +42,18 @@ impl SessionTask for RegularTask {
         "session_task.turn"
     }
 
+    async fn abort(&self, sess: Arc<Session>, ctx: Arc<TurnContext>) {
+        let input = std::mem::take(&mut *self.idle_input.lock().await);
+        run_hooks_and_record_inputs(
+            &sess,
+            &ctx,
+            &ctx.capture_current_model_info(),
+            &input,
+            PersistContext::Standard,
+        )
+        .await;
+    }
+
     async fn run(
         self: Arc<Self>,
         sess: Arc<Session>,
@@ -45,10 +62,34 @@ impl SessionTask for RegularTask {
         cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
         let run_turn_span = trace_span!("run_turn");
+        *self.idle_input.lock().await = input;
+        sess.emit_turn_started(&ctx).await;
+        // Hold the original input, including attachments and acceptance metadata, before
+        // preparation. Idle rollover must not replay or synthesize a replacement prompt.
+        let rollover = sess
+            .maybe_idle_notes_rollover(&ctx, &cancellation_token)
+            .await;
+        if cancellation_token.is_cancelled() {
+            // The abort owner records held input after the task has stopped, beyond
+            // the forced-abort deadline. Prompt hooks run exactly once there.
+            return Err(codex_protocol::error::CodexErr::TurnAborted);
+        }
+        let input = std::mem::take(&mut *self.idle_input.lock().await);
+        if let Err(error) = rollover {
+            run_hooks_and_record_inputs(
+                &sess,
+                &ctx,
+                &ctx.capture_current_model_info(),
+                &input,
+                PersistContext::Standard,
+            )
+            .await;
+            return Err(error);
+        }
+        sess.begin_notes_run(&ctx).await;
         // Regular turns emit `TurnStarted` inline so first-turn lifecycle does
         // not wait on startup prewarm resolution.
         let prewarmed_client_session = async {
-            sess.emit_turn_started(&ctx).await;
             // Regular-start contributors run once, after the task is visible and interruptible.
             let prepares_mcp = sess
                 .services

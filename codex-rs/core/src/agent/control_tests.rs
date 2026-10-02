@@ -133,6 +133,15 @@ async fn test_config_with_cli_overrides(
     mut cli_overrides: Vec<(String, TomlValue)>,
 ) -> (TempDir, Config) {
     let home = TempDir::new().expect("create temp dir");
+    // Ordinary agent-control harnesses use mock providers without remote notes.
+    // Later explicit CLI overrides remain authoritative for strategy-specific tests.
+    cli_overrides.insert(
+        0,
+        (
+            "context_strategy".to_string(),
+            TomlValue::String("compaction".to_string()),
+        ),
+    );
     cli_overrides.push((
         "model".to_string(),
         TomlValue::String("gpt-5.5".to_string()),
@@ -594,6 +603,7 @@ async fn on_event_updates_status_from_task_complete() {
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            notes_checkpoint: None,
         }));
         assert_eq!(status, Some(expected));
     }
@@ -4278,6 +4288,7 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         )
         .await;
@@ -4360,6 +4371,7 @@ async fn multi_agent_v2_completion_queues_message_for_direct_parent() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                notes_checkpoint: None,
             }),
         )
         .await;

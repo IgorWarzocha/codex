@@ -248,6 +248,7 @@ mod mcp_prewarm;
 mod mcp_refresh;
 mod mcp_runtime;
 pub(crate) mod multi_agents;
+pub(crate) mod notes_lifecycle;
 mod plugin_selection;
 mod realtime_history;
 mod retained_context;
@@ -291,6 +292,8 @@ use self::turn::agent_message_text;
 use self::turn::collect_explicit_app_ids_from_skill_items;
 use self::turn::realtime_text_for_event;
 use self::turn_context::TurnContext;
+#[cfg(test)]
+mod notes_lifecycle_tests;
 #[cfg(test)]
 mod rollout_reconstruction_tests;
 
@@ -506,6 +509,12 @@ pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
+
+pub(crate) struct PreparedContextWindow {
+    context_items: Vec<ResponseItemEnvelope>,
+    world_state_snapshot: WorldStateSnapshot,
+    metadata: CompactedHistoryMetadata,
+}
 
 impl Session {
     /// Spawn and initialize a new session.
@@ -735,14 +744,10 @@ impl Session {
             Arc::make_mut(&mut config)
                 .prepare_token_budget_for_startup()
                 .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
-            // Resolve activation for this runtime, including when resuming saved history.
-            token_budget::apply_experimental_context(
-                Arc::make_mut(&mut config),
-                auth.as_ref(),
-                &model_info,
-            )?;
-            token_budget::apply_model_defaults(Arc::make_mut(&mut config), &model_info);
         }
+        // Forks retain their configured budget snapshot, but must validate this runtime's
+        // strategy and backend just like a fresh or resumed thread.
+        token_budget::apply_context_strategy(Arc::make_mut(&mut config), auth.as_ref())?;
         let configured_config = Arc::clone(&config);
         let multi_agent_version = config.multi_agent_version_override().or_else(|| {
             resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
@@ -1656,6 +1661,10 @@ impl Session {
                 self.apply_rollout_reconstruction(&turn_context, &rollout_items)
                     .await;
 
+                // The destination has its own remote notes identity. Parent settlement
+                // does not prove that the child has saved a checkpoint.
+                self.state.lock().await.notes_checkpoint = None;
+
                 // Seed usage info from the recorded rollout so UIs can show token counts
                 // immediately on resume/fork.
                 if let Some(info) = Self::last_token_info_from_rollout(&rollout_items) {
@@ -1741,6 +1750,7 @@ impl Session {
             retained_context,
             guardian_history,
             last_started_turn_id,
+            notes_checkpoint,
             previous_turn_settings,
             reference_context_item,
             world_state_baseline,
@@ -1798,6 +1808,7 @@ impl Session {
                 reviewer_compaction_hash.as_deref(),
             );
             state.last_started_turn_id = last_started_turn_id;
+            state.notes_checkpoint = notes_checkpoint;
             if let Some(world_state) = world_state_baseline {
                 state.history.set_world_state_baseline(world_state);
             }
@@ -2510,10 +2521,12 @@ impl Session {
             warn!("failed to persist realtime history: {error}");
         }
         // Persist the event into rollout storage; the store applies its persistence policy.
-        if persist {
+        let persisted = if persist {
             let rollout_items = vec![RolloutItem::EventMsg(event.msg.clone())];
-            self.persist_rollout_items(&rollout_items).await;
-        }
+            self.persist_rollout_items(&rollout_items).await
+        } else {
+            false
+        };
         self.services
             .rollout_thread_trace
             .record_protocol_event(&event.msg);
@@ -2526,6 +2539,22 @@ impl Session {
         // the decision. Turn completion skips its separate before/after barriers for this case.
         if flush_guardian_completion && let Err(err) = self.flush_rollout().await {
             warn!("failed to flush completed Guardian review: {err}");
+        }
+        // A completion observer may immediately request compact or another turn.
+        // Its selected-run checkpoint must be durable and installed before delivery.
+        drop(realtime_history);
+        if !flush_guardian_completion
+            && let EventMsg::TurnComplete(completed) = &event.msg
+            && let Some(checkpoint) = &completed.notes_checkpoint
+        {
+            if persisted {
+                if let Err(error) = self.install_notes_settlement(checkpoint.clone()).await {
+                    self.state.lock().await.notes_checkpoint = None;
+                    warn!(%error, "notes settlement was not durable; disabling notes reuse");
+                }
+            } else {
+                self.state.lock().await.notes_checkpoint = None;
+            }
         }
         self.deliver_event_raw(event).await;
     }
@@ -3492,6 +3521,14 @@ impl Session {
         let force_mcp_checkpoint = items
             .iter()
             .any(|envelope| crate::context_manager::is_user_turn_boundary(&envelope.item));
+        if force_mcp_checkpoint
+            && let Some(tracker) = self
+                .services
+                .thread_extension_data
+                .get::<codex_extension_api::NotesCheckpointTracker>()
+        {
+            tracker.begin_run(&turn_context.sub_id);
+        }
         let mcp_revision = self
             .services
             .executed_tool_calls
@@ -3518,6 +3555,9 @@ impl Session {
             .collect::<Vec<_>>();
         {
             let mut state = self.state.lock().await;
+            if !items.is_empty() {
+                state.notes_checkpoint = None;
+            }
             state
                 .current_time_reminder
                 .note_recorded_items(&response_items);
@@ -3873,6 +3913,13 @@ impl Session {
             )
             .await;
         let items = items.as_ref();
+        if let Some(tracker) = self
+            .services
+            .thread_extension_data
+            .get::<codex_extension_api::NotesCheckpointTracker>()
+        {
+            tracker.begin_run(&turn_context.sub_id);
+        }
         let mut response_item = ResponseItemEnvelope::new(items[0].clone());
         // A send confirmed after the pending snapshot must not reach the rollout
         // before this boundary; older readers assign deliveries by physical order.
@@ -3900,6 +3947,7 @@ impl Session {
         }
         {
             let mut state = self.state.lock().await;
+            state.notes_checkpoint = None;
             state.current_time_reminder.note_recorded_items(items);
             state.history.record_annotated_items(
                 std::slice::from_mut(&mut response_item),
@@ -3990,10 +4038,28 @@ impl Session {
 
     pub(crate) async fn replace_compacted_history(
         &self,
+        items: Vec<ResponseItemEnvelope>,
+        reference_context_item: Option<TurnContextItem>,
+        world_state_baseline: Option<WorldStateSnapshot>,
+        metadata: CompactedHistoryMetadata,
+    ) {
+        self.replace_compacted_history_inner(
+            items,
+            reference_context_item,
+            world_state_baseline,
+            metadata,
+            false,
+        )
+        .await;
+    }
+
+    async fn replace_compacted_history_inner(
+        &self,
         mut items: Vec<ResponseItemEnvelope>,
         reference_context_item: Option<TurnContextItem>,
         world_state_baseline: Option<WorldStateSnapshot>,
         metadata: CompactedHistoryMetadata,
+        start_new_window: bool,
     ) {
         for envelope in &mut items {
             Self::assign_missing_response_item_id(&mut envelope.item);
@@ -4056,6 +4122,13 @@ impl Session {
                     .cloned(),
             );
             let replacement_history = items.clone();
+            if start_new_window {
+                // Publish identity and prepared history under the same state lock.
+                // Advancing also resets per-window budget flags and prefill.
+                state.start_new_context_window();
+                state.restore_auto_compact_window(metadata.window_number, metadata.window_ids);
+                state.notes_checkpoint = None;
+            }
             state.replace_annotated_history(
                 items,
                 reference_context_item.clone(),
@@ -4206,17 +4279,25 @@ impl Session {
         step_context: &StepContext,
         world_state: &WorldState,
     ) -> (Vec<ResponseItem>, WorldStateSnapshot) {
+        let window_ids = self.state.lock().await.auto_compact_window_ids();
+        self.build_initial_context_with_window_ids(step_context, world_state, window_ids)
+            .await
+    }
+
+    async fn build_initial_context_with_window_ids(
+        &self,
+        step_context: &StepContext,
+        world_state: &WorldState,
+        auto_compact_window_ids: AutoCompactWindowIds,
+    ) -> (Vec<ResponseItem>, WorldStateSnapshot) {
         let turn_context = step_context.turn.as_ref();
         let mut developer_sections = Vec::<RenderedFragment>::with_capacity(8);
         let mut contextual_user_sections = Vec::<RenderedFragment>::with_capacity(2);
         let mut separate_developer_sections = Vec::<RenderedFragment>::new();
         let mut context_window_hints = Vec::new();
-        let (session_source, auto_compact_window_ids) = {
+        let session_source = {
             let state = self.state.lock().await;
-            (
-                state.session_configuration.session_source.clone(),
-                state.auto_compact_window_ids(),
-            )
+            state.session_configuration.session_source.clone()
         };
         let separate_guardian_developer_message =
             crate::guardian::is_basic_session_source(&session_source);
@@ -4508,6 +4589,14 @@ impl Session {
         state.advance_auto_compact_window()
     }
 
+    pub(crate) async fn auto_compact_window_state(&self) -> (u64, AutoCompactWindowIds) {
+        let state = self.state.lock().await;
+        (
+            state.auto_compact_window_number(),
+            state.auto_compact_window_ids(),
+        )
+    }
+
     pub(crate) async fn request_new_context_window(&self) {
         let mut state = self.state.lock().await;
         state.request_new_context_window();
@@ -4518,11 +4607,24 @@ impl Session {
         state.take_new_context_window_request()
     }
 
+    #[cfg(test)]
     pub(crate) async fn start_new_context_window(
         &self,
         step_context: &StepContext,
         world_state: Arc<WorldState>,
     ) -> u64 {
+        let prepared = self
+            .prepare_new_context_window(step_context, world_state)
+            .await;
+        self.install_new_context_window(step_context, prepared)
+            .await
+    }
+
+    pub(crate) async fn prepare_new_context_window(
+        &self,
+        step_context: &StepContext,
+        world_state: Arc<WorldState>,
+    ) -> PreparedContextWindow {
         let turn_context = step_context.turn.as_ref();
         let history = self.clone_history().await;
         let input_goal_ids = crate::context::UserGoalUpdate::message_ids(history.raw_items());
@@ -4537,30 +4639,31 @@ impl Session {
                         })
                         .cloned()
                         .collect(),
-                    crate::compact_remote_v2::RETAINED_MESSAGE_TOKEN_BUDGET,
+                    usize::try_from(turn_context.config.compaction_retention_tokens.tokens())
+                        .unwrap_or(usize::MAX),
                 )
             } else {
                 Vec::new()
             };
-        let window = {
-            let mut state = self.state.lock().await;
-            state.start_new_context_window()
+        let (window_number, old_ids) = self.auto_compact_window_state().await;
+        let window_number = window_number.saturating_add(1);
+        let window_ids = AutoCompactWindowIds {
+            first_window_id: old_ids.first_window_id,
+            previous_window_id: Some(old_ids.window_id),
+            window_id: Uuid::now_v7(),
         };
-        let (window_number, window_ids) = window;
         let (context_items, world_state_snapshot) = self
-            .build_initial_context_with_world_state(step_context, world_state.as_ref())
+            .build_initial_context_with_window_ids(step_context, world_state.as_ref(), window_ids)
             .await;
         let context_items = context_items
             .into_iter()
             .map(ResponseItemEnvelope::new)
             .chain(retained_client_developer_messages)
             .collect();
-        let turn_context_item = step_context.to_turn_context_item();
-        self.replace_compacted_history(
+        PreparedContextWindow {
             context_items,
-            Some(turn_context_item),
-            Some(world_state_snapshot),
-            CompactedHistoryMetadata {
+            world_state_snapshot,
+            metadata: CompactedHistoryMetadata {
                 input_goal_ids,
                 message: String::new(),
                 window_number,
@@ -4569,9 +4672,24 @@ impl Session {
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
             },
+        }
+    }
+
+    pub(crate) async fn install_new_context_window(
+        &self,
+        step_context: &StepContext,
+        prepared: PreparedContextWindow,
+    ) -> u64 {
+        let window_number = prepared.metadata.window_number;
+        self.replace_compacted_history_inner(
+            prepared.context_items,
+            Some(step_context.to_turn_context_item()),
+            Some(prepared.world_state_snapshot),
+            prepared.metadata,
+            true,
         )
         .await;
-        self.recompute_token_usage(turn_context).await;
+        self.recompute_token_usage(step_context.turn.as_ref()).await;
         window_number
     }
 

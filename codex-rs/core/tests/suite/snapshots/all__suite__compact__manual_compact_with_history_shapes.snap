@@ -8,22 +8,38 @@ Scenario: Manual /compact with prior user history compacts existing history and 
 -- request 1 (turn) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
+01:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+02:message/developer:
+    <MULTI_AGENT_MODE>
+03:message/user:
     <ENVIRONMENT_CONTEXT>
-02:message/user:
+04:message/user:
     first manual turn
 
 ## Window 2 (after request 1: settings changed (parallel_tool_calls, tools))
 -- request 2 (compaction) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
+01:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+02:message/developer:
+    <MULTI_AGENT_MODE>
+03:message/user:
     <ENVIRONMENT_CONTEXT>
-02:message/user:
-    first manual turn
-03:message/assistant:
-    FIRST_REPLY
 04:message/user:
+    first manual turn
+05:message/assistant:
+    FIRST_REPLY
+06:message/user:
     <SUMMARIZATION_PROMPT>
 
 ## Window 3 (after request 2: input diverged at item 00, settings changed (parallel_tool_calls, tools))
@@ -36,9 +52,17 @@ Scenario: Manual /compact with prior user history compacts existing history and 
     FIRST_MANUAL_SUMMARY
 02:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-03:message/user:
+03:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+04:message/developer:
+    <MULTI_AGENT_MODE>
+05:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+06:message/user:
     second manual turn
 
 ## Window 4 (after request 3: settings changed (parallel_tool_calls, tools))
@@ -51,13 +75,21 @@ Scenario: Manual /compact with prior user history compacts existing history and 
     FIRST_MANUAL_SUMMARY
 02:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-03:message/user:
+03:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+04:message/developer:
+    <MULTI_AGENT_MODE>
+05:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
-    second manual turn
-05:message/assistant:
-    SECOND_LARGE_REPLY
 06:message/user:
+    second manual turn
+07:message/assistant:
+    SECOND_LARGE_REPLY
+08:message/user:
     <SUMMARIZATION_PROMPT>
 
 ## Window 5 (after request 4: input diverged at item 01, settings changed (parallel_tool_calls, tools))
@@ -72,7 +104,15 @@ Scenario: Manual /compact with prior user history compacts existing history and 
     SECOND_MANUAL_SUMMARY
 03:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-04:message/user:
+04:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+05:message/developer:
+    <MULTI_AGENT_MODE>
+06:message/user:
     <ENVIRONMENT_CONTEXT>
-05:message/user:
+07:message/user:
     post compact follow-up

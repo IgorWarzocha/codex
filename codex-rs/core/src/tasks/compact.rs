@@ -7,7 +7,7 @@ use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
-use codex_features::Feature;
+use codex_config::types::ContextStrategy;
 use codex_model_provider::RemoteCompactionSupport;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::protocol::CodexErrorInfo;
@@ -31,7 +31,7 @@ impl SessionTask for CompactTask {
         session: Arc<Session>,
         ctx: Arc<TurnContext>,
         _input: Vec<TurnInput>,
-        _cancellation_token: CancellationToken,
+        cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
         let _profile_guard = ctx.turn_timing_state.begin_compaction();
         let _compaction_span = tracing::trace_span!(
@@ -40,8 +40,9 @@ impl SessionTask for CompactTask {
             conversation.id = %session.thread_id,
             turn.id = %ctx.sub_id,
         );
-        if ctx.config.features.enabled(Feature::TokenBudget) {
-            crate::compact_token_budget::run_manual_compact_task(session, ctx).await?;
+        if ctx.config.context_strategy == ContextStrategy::Notes {
+            crate::compact_token_budget::run_manual_compact_task(session, ctx, cancellation_token)
+                .await?;
             return Ok(None);
         }
 

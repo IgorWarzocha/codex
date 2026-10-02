@@ -5,7 +5,11 @@ use super::ResolvedModelMessages;
 use super::permissions::DEFAULT_CATALOG_ON_REQUEST_AUTO_REVIEW;
 use codex_protocol::openai_models::ModelMessages;
 
-const TOKEN_BUDGET_GUIDANCE: &str = "Before context reset: `notes` checkpoint of goal, decisions, progress, learnings, next steps, and window and item IDs for active requests and important evidence. After reset: checkpoint first, `history` only for missing details. No automatic conversation carryover. Bookkeeping out of user-facing replies";
+const TOKEN_BUDGET_GUIDANCE: &str = concat!(
+    "Before context reset: `notes` checkpoint of active request, decisions, progress, learnings, next steps, and known window and item IDs for important evidence. After reset: read hinted notes and resume; `history` only for missing details. No automatic conversation carryover. ",
+    "After substantial work, save useful new findings, decisions, progress or resumable state in notes as your last tool calls before replying. Skip completion notes for brief clarifications, routine lookups, acknowledgements and unchanged state. Explicit checkpoints and context reminders still apply. ",
+    "Include useful deferred ideas and tasks, even unrelated ones, when checkpointing. Recording is not permission to implement. Include note paths in agent handoffs. Bookkeeping out of user-facing replies"
+);
 const TOKEN_BUDGET_REMINDER: &str = "<context_window_reminder>Remaining tokens: {n_remaining}. `notes` checkpoint: goal, decisions, progress, next steps, relevant window and item IDs. Then `functions.new_context`. No automatic conversation carryover</context_window_reminder>";
 const TOKEN_BUDGET_FALLBACK: &str = "<context_window_reminder>Context exhausted. No task continuation or answer here. Exactly one `notes` write or append: goal, decisions, progress, learnings, next steps, relevant window and item IDs. After its result: `functions.new_context`. No other tools. No automatic conversation carryover</context_window_reminder>";
 

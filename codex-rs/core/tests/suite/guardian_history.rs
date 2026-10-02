@@ -3,6 +3,7 @@
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use codex_config::types::CompactionRetentionTokens;
 use codex_core::ForkSnapshot;
 use codex_core::TurnInputRequest;
 use codex_core::config::Constrained;
@@ -75,6 +76,7 @@ async fn guardian_history_survives_restart_and_user_fork(
         .with_history_mode(history_mode)
         .with_config(move |config| {
             config.experimental_thread_store = store_config;
+            config.compaction_retention_tokens = CompactionRetentionTokens::Tokens16000;
             config
                 .features
                 .enable(Feature::TokenBudget)
@@ -86,6 +88,22 @@ async fn guardian_history_survives_restart_and_user_fork(
     let authorization = "You may publish the reviewed release.";
     mount_sse_once(&server, sse(vec![ev_completed("authorized")])).await;
     initial.submit_text_turn(authorization).await?;
+    // Exhaust retained model history with newer metadata. Guardian must recover
+    // authorization from its retained sidecar, not the original user message.
+    mount_sse_once(&server, sse(vec![ev_completed("release-metadata")])).await;
+    initial
+        .submit_text_turn(&format!("Release metadata: {}", "x".repeat(80_000)))
+        .await?;
+    mount_sse_once(
+        &server,
+        sse(vec![
+            json!({"type": "response.output_item.done", "item": {
+                "type": "compaction", "encrypted_content": "Release authorization checkpoint."
+            }}),
+            ev_completed("authorization-compacted"),
+        ]),
+    )
+    .await;
     initial.codex.submit(Op::Compact).await?;
     wait_for_event(&initial.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -482,6 +500,16 @@ async fn guardian_answers_survive_compaction_and_eviction() -> Result<()> {
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
+    .await;
+    mount_sse_once(
+        &server,
+        sse(vec![
+            json!({"type": "response.output_item.done", "item": {
+                "type": "compaction", "encrypted_content": "Inspection checkpoint."
+            }}),
+            ev_completed("inspection-compacted"),
+        ]),
+    )
     .await;
     test.codex.submit(Op::Compact).await?;
     wait_for_event(&test.codex, |event| {

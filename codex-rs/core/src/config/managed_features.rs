@@ -299,6 +299,11 @@ fn explicit_feature_settings_in_config(cfg: &ConfigToml) -> Vec<(String, Feature
     if let Some(features) = cfg.features.as_ref() {
         for (key, enabled) in features.entries() {
             if let Some(feature) = feature_for_key(&key) {
+                // These legacy activation flags no longer select context policy.
+                // Startup validates the authoritative strategy against managed pins.
+                if matches!(feature, Feature::TokenBudget | Feature::ContextManagement) {
+                    continue;
+                }
                 explicit_settings.push((format!("features.{key}"), feature, enabled));
             }
         }

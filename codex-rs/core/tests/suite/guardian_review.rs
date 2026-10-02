@@ -5,6 +5,7 @@ use anyhow::Result;
 use chrono::DateTime;
 use chrono::Local;
 use chrono::Utc;
+use codex_config::types::ContextStrategy;
 use codex_config::types::McpServerConfig;
 use codex_config::types::OtelExporterKind;
 use codex_core::SleepFuture;
@@ -513,6 +514,8 @@ async fn guardian_review_compacts_with_summary_despite_parent_token_budget() -> 
     let mut builder = test_codex()
         .with_thread_store(store.clone())
         .with_history_mode(codex_protocol::protocol::ThreadHistoryMode::Legacy)
+        .with_context_strategy(ContextStrategy::Notes)
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model_info_override("gpt-5.5", |model| {
             model.auto_review_model_override = Some(model.slug.clone());
             model.supports_experimental_context = true;
@@ -531,6 +534,11 @@ async fn guardian_review_compacts_with_summary_despite_parent_token_budget() -> 
             });
         })
         .with_config(move |config| {
+            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            config.model_provider.base_url = Some(format!(
+                "{}/backend-api/codex",
+                base_url.strip_suffix("/v1").unwrap()
+            ));
             config.model_context_window = Some(100_000);
             config.model_auto_compact_token_limit = Some(50_000);
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);

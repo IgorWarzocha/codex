@@ -3,6 +3,8 @@
 // Note this file should generally be restricted to simple struct/enum
 // definitions that do not contain business logic.
 
+pub use crate::context_strategy::CompactionRetentionTokens;
+pub use crate::context_strategy::ContextStrategy;
 pub use crate::mcp_ema::McpEmaAuthScope;
 pub use crate::mcp_ema::McpEnterpriseManagedAuthConfig;
 pub use crate::mcp_ema::McpServerIdpOAuthConfig;

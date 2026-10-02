@@ -17,7 +17,15 @@ Scenario: Manual /compact with no prior user turn currently still issues a compa
     MANUAL_EMPTY_SUMMARY
 01:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-02:message/user:
+02:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+03:message/developer:
+    <MULTI_AGENT_MODE>
+04:message/user:
     <ENVIRONMENT_CONTEXT>
-03:message/user:
+05:message/user:
     AFTER_MANUAL_EMPTY_COMPACT

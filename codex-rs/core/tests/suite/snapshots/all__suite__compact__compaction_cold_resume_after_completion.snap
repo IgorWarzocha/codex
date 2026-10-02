@@ -12,8 +12,6 @@ Scenario: Real paginated mid-turn compaction and cold resume from the bounded su
 01:message/developer:
     Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
     Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    `wait_agent`: waits of minutes preferred over busy polling
-
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
@@ -30,8 +28,6 @@ Scenario: Real paginated mid-turn compaction and cold resume from the bounded su
 01:message/developer:
     Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
     Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    `wait_agent`: waits of minutes preferred over busy polling
-
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
@@ -52,8 +48,6 @@ Scenario: Real paginated mid-turn compaction and cold resume from the bounded su
 01:message/developer:
     Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
     Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    `wait_agent`: waits of minutes preferred over busy polling
-
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
