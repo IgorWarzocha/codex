@@ -1,6 +1,7 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -212,6 +213,199 @@ async fn manual_reuses_settled_notes_or_checkpoints_before_reset() -> TestResult
         );
         assert_ne!(window(&requests[0]), window(requests.last().unwrap()));
         assert!(!requests.last().unwrap().body_contains_text("Original work"));
+        test.codex.shutdown_and_wait().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_accepts_a_clean_notes_retry_without_an_extra_checkpoint_turn() -> TestResult {
+    for retry_during_compact in [false, true] {
+        let server = responses::start_mock_server().await;
+        let writes = Arc::new(AtomicUsize::new(0));
+        let backend_writes = Arc::clone(&writes);
+        mock_notes(&server, saved_notes()).await;
+        Mock::given(method("POST"))
+            .and(path("/backend-api/codex/alpha/notes/v2/write_file"))
+            .respond_with(move |_: &wiremock::Request| {
+                if backend_writes.fetch_add(1, Ordering::SeqCst) == 0 {
+                    ResponseTemplate::new(500)
+                } else {
+                    saved_notes()
+                }
+            })
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let mut bodies = Vec::new();
+        if retry_during_compact {
+            bodies.push(reply("prior-work"));
+        }
+        bodies.extend([
+            note_write("failed-save"),
+            note_write("retry-save"),
+            reply("settled-retry"),
+            reply("after"),
+        ]);
+        let requests = responses::mount_sse_sequence(&server, bodies).await;
+        let test = notes_fixture(&server).build(&server).await?;
+        test.submit_text_turn("Work that must survive the checkpoint")
+            .await?;
+        let before_compact = requests.requests().len();
+        test.codex.submit(Op::Compact).await?;
+        let (completion, events) = completed(&test).await;
+        assert!(completion.error.is_none(), "{completion:?}");
+        assert_eq!(reset_count(&events), 1);
+        assert_eq!(writes.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            requests.requests().len() - before_compact,
+            if retry_during_compact { 3 } else { 0 },
+            "reuse a settled retry, or only sample the requested checkpoint"
+        );
+        test.submit_text_turn("Continue after the retry").await?;
+        let requests = requests.requests();
+        assert_ne!(window(&requests[0]), window(requests.last().unwrap()));
+        assert!(
+            !requests
+                .last()
+                .unwrap()
+                .body_contains_text("Work that must survive")
+        );
+        test.codex.shutdown_and_wait().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_refuses_a_partial_notes_batch_even_with_a_successful_sibling() -> TestResult {
+    let server = responses::start_mock_server().await;
+    mock_notes(&server, saved_notes()).await;
+    Mock::given(method("POST"))
+        .and(path("/backend-api/codex/alpha/notes/v2/write_file"))
+        .and(wiremock::matchers::body_partial_json(
+            json!({"path": "failed-note"}),
+        ))
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let partial_batch = responses::sse(vec![
+        responses::ev_function_call_with_namespace(
+            "failed-save",
+            "notes",
+            "write_file",
+            r#"{"path":"failed-note","text":"Part of checkpoint"}"#,
+        ),
+        responses::ev_function_call_with_namespace(
+            "successful-sibling",
+            "notes",
+            "write_file",
+            r#"{"path":"saved-note","text":"Other part of checkpoint"}"#,
+        ),
+        responses::ev_completed("partial-batch"),
+    ]);
+    let requests = responses::mount_sse_sequence(
+        &server,
+        vec![
+            reply("prior"),
+            partial_batch,
+            reply("settled-partial"),
+            reply("after"),
+        ],
+    )
+    .await;
+    let test = notes_fixture(&server).build(&server).await?;
+    test.submit_text_turn("Retain this work").await?;
+    test.codex.submit(Op::Compact).await?;
+    let (completion, events) = completed(&test).await;
+    assert!(completion.error.is_some());
+    assert_eq!(reset_count(&events), 0);
+    test.submit_text_turn("Continue without reset").await?;
+    let requests = requests.requests();
+    assert!(
+        requests
+            .iter()
+            .all(|request| window(request) == window(&requests[0]))
+    );
+    assert!(
+        requests
+            .last()
+            .unwrap()
+            .body_contains_text("Retain this work")
+    );
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_cell_siblings_require_a_clean_retry_in_a_later_response() -> TestResult {
+    for retry in [false, true] {
+        let server = responses::start_mock_server().await;
+        mock_notes(&server, saved_notes()).await;
+        Mock::given(method("POST"))
+            .and(path("/backend-api/codex/alpha/notes/v2/write_file"))
+            .and(wiremock::matchers::body_partial_json(
+                json!({"path": "failed-note"}),
+            ))
+            .respond_with(ResponseTemplate::new(500))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let save_code =
+            r#"await tools.notes__write_file({path: "saved-note", text: "Checkpoint"});"#;
+        let mut bodies = vec![
+            reply("prior"),
+            responses::sse(vec![
+                responses::ev_response_created("sibling-cells"),
+                responses::ev_custom_tool_call(
+                    "failed-cell",
+                    "exec",
+                    r#"try { await tools.notes__write_file({path: "failed-note", text: "Checkpoint"}); } catch {}"#,
+                ),
+                responses::ev_custom_tool_call("successful-sibling-cell", "exec", save_code),
+                responses::ev_completed("sibling-cells"),
+            ]),
+        ];
+        if retry {
+            bodies.push(responses::sse(vec![
+                responses::ev_custom_tool_call("retry-cell", "exec", save_code),
+                responses::ev_completed("retry-cell"),
+            ]));
+        }
+        bodies.extend([reply("settled"), reply("after")]);
+        let requests = responses::mount_sse_sequence(&server, bodies).await;
+        let test = notes_fixture(&server)
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(codex_features::Feature::CodeMode)
+                    .unwrap();
+            })
+            .build(&server)
+            .await?;
+        test.submit_text_turn("Retain this work").await?;
+        test.codex.submit(Op::Compact).await?;
+        let (completion, events) = completed(&test).await;
+        assert_eq!(completion.error.is_none(), retry, "{completion:?}");
+        assert_eq!(reset_count(&events), usize::from(retry));
+        let write_count = server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|request| request.url.path().ends_with("/write_file"))
+            .count();
+        assert_eq!(
+            write_count,
+            if retry { 3 } else { 2 },
+            "both sibling cells must reach the notes executor"
+        );
+        test.submit_text_turn("Continue").await?;
+        let requests = requests.requests();
+        assert_eq!(
+            window(&requests[0]) != window(requests.last().unwrap()),
+            retry
+        );
         test.codex.shutdown_and_wait().await?;
     }
     Ok(())

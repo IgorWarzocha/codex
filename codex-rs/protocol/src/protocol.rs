@@ -2152,6 +2152,11 @@ pub struct ContextCompactedEvent;
 /// Host-authored settlement of the selected run, not a timestamp inferred from a reply.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct NotesCheckpoint {
+    /// Thread whose remote notes were saved. Legacy settlements without an owner
+    /// remain readable but cannot authorize notes reuse after replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub thread_id: Option<ThreadId>,
     pub window_id: String,
     pub settled_at_ms: i64,
     pub fresh: bool,

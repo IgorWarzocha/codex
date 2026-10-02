@@ -286,7 +286,10 @@ impl Session {
                             .error
                             .is_none()
                             .then(|| event.notes_checkpoint.clone())
-                            .flatten();
+                            .flatten()
+                            // Inherited context can retain an ancestor's window identity.
+                            // Only settlement in this thread proves its notes were saved.
+                            .filter(|checkpoint| checkpoint.thread_id == Some(self.thread_id()));
                     }
                     // Reverse replay often sees `TurnComplete` before any turn-scoped metadata.
                     // Capture the turn id early so later `TurnContext` / abort items can match it.

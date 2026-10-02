@@ -1662,7 +1662,8 @@ impl Session {
                     .await;
 
                 // The destination has its own remote notes identity. Parent settlement
-                // does not prove that the child has saved a checkpoint.
+                // does not prove that the child has saved a checkpoint. Replay also checks
+                // the persisted settlement owner so cold resume cannot restore parent credit.
                 self.state.lock().await.notes_checkpoint = None;
 
                 // Seed usage info from the recorded rollout so UIs can show token counts

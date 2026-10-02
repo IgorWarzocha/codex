@@ -64,6 +64,7 @@ impl Session {
             .get::<NotesCheckpointTracker>()
             .is_some_and(|tracker| tracker.has_successful_notes(&turn_context.sub_id));
         NotesCheckpoint {
+            thread_id: Some(self.thread_id()),
             window_id: self
                 .state
                 .lock()
@@ -176,6 +177,7 @@ mod tests {
     #[test]
     fn idle_requires_selected_settled_fresh_notes_and_is_opt_in() {
         let checkpoint = NotesCheckpoint {
+            thread_id: Some(codex_protocol::ThreadId::new()),
             window_id: "window".into(),
             settled_at_ms: 100,
             fresh: true,

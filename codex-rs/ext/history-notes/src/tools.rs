@@ -262,7 +262,12 @@ impl HistoryNotesTool {
             .then(|| {
                 self.checkpoint_tracker
                     .as_ref()
-                    .and_then(|tracker| tracker.begin_write(&call.turn_id))
+                    .and_then(|tracker| match &call.source {
+                        ToolCallSource::Direct => tracker.begin_write(&call.turn_id),
+                        ToolCallSource::CodeMode { cell_id, .. } => {
+                            tracker.begin_cell_write(&call.turn_id, cell_id)
+                        }
+                    })
             })
             .flatten();
         let arguments = call.function_arguments().and_then(|arguments| {

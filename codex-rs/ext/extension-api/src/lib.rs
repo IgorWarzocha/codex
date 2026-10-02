@@ -8,6 +8,7 @@ mod tool_policy;
 mod turn_admission;
 mod user_instructions;
 
+pub use notes_checkpoint::NotesCheckpointBatch;
 pub use notes_checkpoint::NotesCheckpointTracker;
 pub use notes_checkpoint::NotesWriteAttempt;
 pub use session_isolation::IsolatedSessionExtensions;

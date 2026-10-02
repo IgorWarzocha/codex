@@ -1705,6 +1705,15 @@ async fn run_sampling_request(
         .await
         .map_err(CodexErr::InvalidRequest)?;
     let turn_context = Arc::clone(&step_context.turn);
+    if let Some(tracker) = sess
+        .services
+        .thread_extension_data
+        .get::<codex_extension_api::NotesCheckpointTracker>()
+    {
+        // Streaming sibling calls share a checkpoint batch even when one finishes
+        // before the next is dispatched. A later sampling pass is a separate retry.
+        tracker.begin_batch(&turn_context.sub_id);
+    }
     let preempt = step_context.preempt.clone().unwrap_or_default();
     let _input_watch = if let Some(preempt) = &step_context.preempt {
         sess.input_queue

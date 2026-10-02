@@ -81,6 +81,14 @@ impl CodeModeExecuteHandler {
         )
         .map_err(|error| FunctionCallError::Fatal(error.to_string()))?
         .apply_code_mode(&mut enabled_tools);
+        let notes_tracker = exec
+            .session
+            .services
+            .thread_extension_data
+            .get::<codex_extension_api::NotesCheckpointTracker>();
+        let notes_batch = notes_tracker
+            .as_ref()
+            .and_then(|tracker| tracker.capture_batch(&exec.turn.sub_id));
         let started_at = std::time::Instant::now();
         let started_cell = exec
             .session
@@ -99,6 +107,11 @@ impl CodeModeExecuteHandler {
             .await
             .map_err(FunctionCallError::RespondToModel)?;
         let cell_id = started_cell.cell_id.clone();
+        if let (Some(tracker), Some(batch)) = (notes_tracker, notes_batch) {
+            // Bind before opening nested dispatch, including cells whose first write
+            // happens only after yielding to a later sampling request.
+            tracker.register_cell(batch, cell_id.as_str());
+        }
         tracing::Span::current().record("cell.id", trace_id(cell_id.as_str()));
         telemetry.cell_id = Some(cell_id.to_string());
         exec.session
