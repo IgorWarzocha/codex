@@ -78,23 +78,12 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
 
     let server = start_mock_server().await;
 
-    let builder = test_codex();
     let TestCodex {
         codex,
         cwd,
         session_configured,
         ..
-    } = builder
-        .with_config(move |config| {
-            if mode == ModeKind::Default {
-                config
-                    .features
-                    .enable(Feature::DefaultModeRequestUserInput)
-                    .expect("test config should allow feature update");
-            }
-        })
-        .build(&server)
-        .await?;
+    } = test_codex().build(&server).await?;
 
     let call_id = "user-input-call";
     let expected_is_blocking = mode == ModeKind::Plan;
@@ -330,13 +319,20 @@ where
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
     let TestCodex {
         codex,
         cwd,
         session_configured,
         ..
-    } = builder.build(&server).await?;
+    } = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .disable(Feature::DefaultModeRequestUserInput)
+                .expect("test config should allow explicit opt-out");
+        })
+        .build(&server)
+        .await?;
 
     let mode_slug = mode_name.to_lowercase().replace(' ', "-");
     let call_id = format!("user-input-{mode_slug}-call");
@@ -405,7 +401,7 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_user_input_rejected_in_default_mode_by_default() -> anyhow::Result<()> {
+async fn request_user_input_rejected_in_default_mode_when_disabled() -> anyhow::Result<()> {
     assert_request_user_input_rejected("Default", |model| CollaborationMode {
         mode: ModeKind::Default,
         settings: Settings {
@@ -418,6 +414,6 @@ async fn request_user_input_rejected_in_default_mode_by_default() -> anyhow::Res
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_user_input_round_trip_in_default_mode_with_feature() -> anyhow::Result<()> {
+async fn request_user_input_round_trip_in_default_mode_by_default() -> anyhow::Result<()> {
     request_user_input_round_trip_for_mode(ModeKind::Default).await
 }

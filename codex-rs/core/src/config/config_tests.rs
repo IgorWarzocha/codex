@@ -12224,6 +12224,7 @@ async fn approved_toolkit_defaults_and_explicit_overrides() -> std::io::Result<(
                 r#"[features]
 apply_patch_preserve_line_endings = false
 code_mode_prewarm = false
+default_mode_request_user_input = false
 multi_agent_v2_dynamic_tools = false
 [features.multi_agent_v2]
 enabled = false
@@ -12239,6 +12240,7 @@ wait_agent_enabled = true
         for feature in [
             Feature::ApplyPatchPreserveLineEndings,
             Feature::CodeModePrewarm,
+            Feature::DefaultModeRequestUserInput,
             Feature::MultiAgentV2,
             Feature::MultiAgentV2DynamicTools,
         ] {

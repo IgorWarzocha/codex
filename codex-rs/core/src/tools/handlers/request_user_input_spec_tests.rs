@@ -9,9 +9,9 @@ use codex_tools::request_user_input_available_modes;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
-fn default_mode_enabled_available_modes() -> Vec<ModeKind> {
+fn plan_only_available_modes() -> Vec<ModeKind> {
     let mut features = Features::with_defaults();
-    features.enable(Feature::DefaultModeRequestUserInput);
+    features.disable(Feature::DefaultModeRequestUserInput);
     request_user_input_available_modes(&features)
 }
 
@@ -159,14 +159,11 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
         None
     );
     assert_eq!(
-        request_user_input_unavailable_message(ModeKind::Default, &default_available_modes()),
+        request_user_input_unavailable_message(ModeKind::Default, &plan_only_available_modes()),
         Some("request_user_input is unavailable in Default mode".to_string())
     );
     assert_eq!(
-        request_user_input_unavailable_message(
-            ModeKind::Default,
-            &default_mode_enabled_available_modes()
-        ),
+        request_user_input_unavailable_message(ModeKind::Default, &default_available_modes()),
         None
     );
 }
@@ -174,11 +171,11 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
 #[test]
 fn request_user_input_tool_description_mentions_available_modes() {
     assert_eq!(
-        request_user_input_tool_description(&default_available_modes()),
+        request_user_input_tool_description(&plan_only_available_modes()),
         "Ask the user; wait for answers; Plan mode only".to_string()
     );
     assert_eq!(
-        request_user_input_tool_description(&default_mode_enabled_available_modes()),
+        request_user_input_tool_description(&default_available_modes()),
         "Ask the user; wait for answers; Default or Plan mode only".to_string()
     );
     assert_eq!(

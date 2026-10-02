@@ -27,6 +27,7 @@ fn under_development_features_require_fork_approval_to_default_on() {
                 spec.id,
                 Feature::ApplyPatchPreserveLineEndings
                     | Feature::CodeModePrewarm
+                    | Feature::DefaultModeRequestUserInput
                     | Feature::MultiAgentV2DynamicTools
             );
             assert_eq!(
@@ -43,6 +44,7 @@ fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
     let approved = [
         Feature::ApplyPatchPreserveLineEndings,
         Feature::CodeModePrewarm,
+        Feature::DefaultModeRequestUserInput,
         Feature::MultiAgentV2,
         Feature::MultiAgentV2DynamicTools,
     ];
@@ -59,6 +61,7 @@ fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
         r#"
 apply_patch_preserve_line_endings = false
 code_mode_prewarm = false
+default_mode_request_user_input = false
 multi_agent_v2_dynamic_tools = false
 [multi_agent_v2]
 enabled = false
@@ -164,6 +167,7 @@ fn default_enabled_features_are_stable_or_fork_approved() {
                         spec.id,
                         Feature::ApplyPatchPreserveLineEndings
                             | Feature::CodeModePrewarm
+                            | Feature::DefaultModeRequestUserInput
                             | Feature::MultiAgentV2DynamicTools
                     ),
                 "feature `{}` is enabled by default but is not stable or fork-approved ({:?})",
