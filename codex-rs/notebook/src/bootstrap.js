@@ -1,13 +1,57 @@
 // This closure holds the bridge credential and the session store, not user bindings.
-((endpoint, credential) => {
+await (async (endpoint, credential) => {
+  const { AsyncLocalStorage } = await import("node:async_hooks");
+  const hookScope = new AsyncLocalStorage();
+  const state = globalThis.__codexNotebookState;
   const values = new Map();
   const stringify = (value) => typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
-  const unsupported = (name) => { throw new Error(name + " is unsupported by native Deno notebook sessions"); };
+  const unsupported = (name) => {
+    throw new Error(name + " is unsupported by native Deno notebook sessions");
+  };
   let current;
+  const hookFailure = (context, name, error) => {
+    if (current !== context || !context.cellId) return;
+    globalThis.text(
+      "Notebook tool_result hook " + name + " failed: " +
+        String(error instanceof Error ? error.message : error).slice(0, 1000) + "; unpin or set hook:false to disable",
+    );
+  };
+  const dispatchToolResult = async (context, event) => {
+    for (const name of state?.hooks("tool_result") ?? []) {
+      if (current !== context) return;
+      try {
+        await hookScope.run(context, () => state.read(name)(structuredClone(event)));
+      } catch (error) {
+        hookFailure(context, name, error);
+      }
+    }
+  };
+  const runStartupHooks = async () => {
+    for (const name of state?.hooks("startup") ?? []) {
+      try {
+        await hookScope.run(current ?? {}, () => state.read(name)({ type: "startup" }));
+      } catch (error) {
+        throw new Error(
+          "Notebook startup hook " + name + " failed: " + String(error instanceof Error ? error.message : error) +
+            ". Unpin it to recover; external side effects were not rolled back",
+          { cause: error },
+        );
+      }
+    }
+  };
   const begin = (cellId, definitions) => {
-    const context = { cellId, queue: Promise.resolve(), error: undefined };
+    const context = {
+      cellId,
+      queue: Promise.resolve(),
+      error: undefined,
+      tools: new Set(),
+      globals: new Set(Object.getOwnPropertyNames(globalThis)),
+    };
     current = context;
     const rpc = async (body) => {
+      if (!cellId || current !== context) {
+        throw new Error("notebook cell is unknown or closed; helper called outside an active exec cell");
+      }
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Authorization": "Bearer " + credential, "Content-Type": "application/json" },
@@ -17,14 +61,53 @@
       if (!response.ok || !result.ok) throw new Error(result.error ?? "notebook bridge failed");
       return result.value;
     };
+    context.cancelTools = () => rpc({ op: "cancel_tools" });
     const enqueue = (body) => {
-      context.queue = context.queue.then(() => rpc(body)).catch((error) => { context.error ??= error; });
+      if (!cellId || current !== context) {
+        throw new Error("notebook cell is unknown or closed; helper called outside an active exec cell");
+      }
+      context.queue = context.queue.then(() => rpc(body)).catch((error) => {
+        context.error ??= error;
+      });
       return context.queue;
     };
     const output = (item) => enqueue({ op: "output", item });
     const tools = Object.create(null);
     for (const definition of definitions) {
-      const method = (input) => rpc({ op: "tool", name: definition.name, input });
+      const method = (input) => {
+        const scope = hookScope.getStore();
+        if (scope && scope !== context) throw new Error("Notebook hook tool called outside its originating exec cell");
+        let observe = !scope && (state?.hooks("tool_result").length ?? 0) > 0;
+        let eventInput;
+        if (observe) {
+          try {
+            eventInput = structuredClone(input);
+          } catch (error) {
+            observe = false;
+            hookFailure(context, "input snapshot for " + definition.name, error);
+          }
+        }
+        const event = { type: "tool_result", toolName: definition.name, input: eventInput };
+        const promise = rpc({ op: "tool", name: definition.name, input }).then(
+          async (result) => {
+            if (observe) await dispatchToolResult(context, { ...event, status: "success", result });
+            return result;
+          },
+          async (error) => {
+            if (observe) {
+              await dispatchToolResult(context, {
+                ...event,
+                status: "error",
+                error: String(error instanceof Error ? error.message : error),
+              });
+            }
+            throw error;
+          },
+        );
+        context.tools.add(promise);
+        void promise.then(() => context.tools.delete(promise), () => context.tools.delete(promise));
+        return promise;
+      };
       Object.defineProperties(method, {
         description: { value: definition.description },
         usage: { value: definition.input_schema ?? "No input schema supplied" },
@@ -33,8 +116,10 @@
     }
     Object.assign(globalThis, {
       tools: Object.freeze(tools),
-      ALL_TOOLS: Object.freeze(definitions.map(({ name, description }) => Object.freeze({ name, description }))),
-      text: (value) => { output({ type: "input_text", text: stringify(value) }); },
+      ALL_TOOLS: Object.freeze(definitions.map((definition) => Object.freeze({ ...definition }))),
+      text: (value) => {
+        output({ type: "input_text", text: stringify(value) });
+      },
       image: (value, detail) => {
         let imageUrl;
         if (typeof value === "string") imageUrl = value;
@@ -48,11 +133,15 @@
         if (typeof imageUrl !== "string" || !imageUrl.startsWith("data:image/")) {
           throw new Error("image requires a data:image URL or an MCP image block");
         }
-        if (detail != null && !["auto", "low", "high", "original"].includes(detail)) throw new Error("Invalid image detail");
+        if (detail != null && !["auto", "low", "high", "original"].includes(detail)) {
+          throw new Error("Invalid image detail");
+        }
         output({ type: "input_image", image_url: imageUrl, detail: detail ?? "high" });
       },
       generatedImage: (result) => {
-        if (!result || typeof result.image_url !== "string") throw new Error("generatedImage requires { image_url, output_hint? }");
+        if (!result || typeof result.image_url !== "string") {
+          throw new Error("generatedImage requires { image_url, output_hint? }");
+        }
         globalThis.image(result.image_url);
         if (result.output_hint !== undefined) globalThis.text(result.output_hint);
       },
@@ -68,15 +157,36 @@
       },
       notify: (value) => enqueue({ op: "notify", text: stringify(value) }),
       yield_control: () => enqueue({ op: "yield" }),
-      exit: () => unsupported("exit"),
+      exit: () => {
+        const error = new Error("__CodexNotebookExit__");
+        error.name = "CodexNotebookExit";
+        throw error;
+      },
       audio: () => unsupported("audio"),
     });
   };
   const flush = async (cellId) => {
     // A syntax error prevents begin() from running. Never flush the preceding cell.
     if (current?.cellId !== cellId) return;
+    // Awaited calls and their hooks have already settled. Cancel abandoned calls
+    // before joining them, otherwise an unawaited long-running tool blocks the cell.
+    if (current.tools.size) await current.cancelTools();
+    while (current.tools.size) await Promise.allSettled([...current.tools]);
     await current.queue;
     if (current.error) throw current.error;
   };
-  Object.defineProperty(globalThis, "__codexNotebook", { value: Object.freeze({ begin, flush }) });
+  const completed = (cellId) => {
+    if (current?.cellId !== cellId) return;
+    state?.promote(
+      Object.getOwnPropertyNames(globalThis).filter((name) =>
+        !current.globals.has(name) && !name.startsWith("__codex")
+      ),
+    );
+    current = undefined;
+  };
+  // Establish helper names before the host takes its completion baseline.
+  begin(null, []);
+  Object.defineProperty(globalThis, "__codexNotebook", {
+    value: Object.freeze({ begin, flush, completed, end: completed, runStartupHooks }),
+  });
 })(__ENDPOINT__, __CREDENTIAL__);

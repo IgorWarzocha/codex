@@ -4202,14 +4202,18 @@ name = "codex-notebook"
 version = "0.160.0-howaboua.1"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "codex-code-mode-protocol",
  "codex-notebook-kernel",
  "codex-protocol",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "tokio-util",
+ "url",
  "uuid",
 ]
 

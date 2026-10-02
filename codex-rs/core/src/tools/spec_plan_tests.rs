@@ -2581,6 +2581,27 @@ async fn code_mode_only_exposes_code_executor_and_hides_nested_tools() {
 }
 
 #[tokio::test]
+async fn notebook_lifecycle_stays_top_level_and_has_a_nested_read_surface() {
+    let v8 = probe(|turn| {
+        set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
+    })
+    .await;
+    v8.assert_registered_lacks(&["notebook"]);
+    let notebook = probe(|turn| {
+        update_config(turn, |config| {
+            config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
+        });
+    })
+    .await;
+    notebook.assert_visible_contains(&["exec", "wait", "notebook"]);
+    assert_eq!(notebook.exposure("notebook"), ToolExposure::DirectModelOnly);
+    assert_eq!(
+        notebook.code_mode_tool_names.get("notebook"),
+        Some(&ToolName::plain("notebook"))
+    );
+}
+
+#[tokio::test]
 async fn code_mode_config_updates_exec_description() {
     for (configured_yield_time_ms, expected_yield_time_ms) in
         [(None, 30_000), (Some(10_000), 10_000)]

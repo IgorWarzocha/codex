@@ -1,5 +1,11 @@
+mod execution;
+mod provider;
+
+pub(crate) use execution::result_error;
+use execution::run_session;
+pub use provider::DenoNotebookSessionProvider;
+
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -8,8 +14,6 @@ use std::time::Instant;
 use codex_code_mode_protocol::CellId;
 use codex_code_mode_protocol::CodeModeSession;
 use codex_code_mode_protocol::CodeModeSessionDelegate;
-use codex_code_mode_protocol::CodeModeSessionProvider;
-use codex_code_mode_protocol::CodeModeSessionProviderFuture;
 use codex_code_mode_protocol::CodeModeSessionResultFuture;
 use codex_code_mode_protocol::DEFAULT_EXEC_YIELD_TIME_MS;
 use codex_code_mode_protocol::ExecuteRequest;
@@ -18,117 +22,21 @@ use codex_code_mode_protocol::StartedCell;
 use codex_code_mode_protocol::WaitOutcome;
 use codex_code_mode_protocol::WaitRequest;
 use codex_code_mode_protocol::normalize_code_mode_identifier;
-use codex_notebook_kernel::ExecutionResult;
-use codex_notebook_kernel::ExecutionStatus;
-use codex_notebook_kernel::Kernel;
-use codex_notebook_kernel::KernelOptions;
+use serde_json::Value;
+use serde_json::json;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::bridge::Bridge;
 use crate::cell::Cell;
-use crate::cell::text_item;
-
-/// One unsandboxed Deno Jupyter kernel per Codex thread. No TypeScript host controller.
-pub struct DenoNotebookSessionProvider {
-    deno_program: PathBuf,
-    cwd: PathBuf,
-}
-
-impl DenoNotebookSessionProvider {
-    pub fn new(deno_program: PathBuf, cwd: PathBuf) -> Self {
-        Self { deno_program, cwd }
-    }
-}
-
-impl CodeModeSessionProvider for DenoNotebookSessionProvider {
-    fn availability(&self) -> Result<(), String> {
-        let program_exists =
-            if self.deno_program.components().count() > 1 || self.deno_program.is_absolute() {
-                self.deno_program.is_file()
-            } else {
-                std::env::var_os("PATH").is_some_and(|path| {
-                    std::env::split_paths(&path).any(|dir| dir.join(&self.deno_program).is_file())
-                })
-            };
-        if !program_exists {
-            return Err(format!(
-                "Deno program not found: {}",
-                self.deno_program.display()
-            ));
-        }
-        if !self.cwd.is_dir() {
-            return Err(format!(
-                "notebook cwd is not a directory: {}",
-                self.cwd.display()
-            ));
-        }
-        Ok(())
-    }
-
-    fn create_session(&self) -> CodeModeSessionProviderFuture<'_> {
-        Box::pin(async move {
-            self.availability()?;
-            let options = KernelOptions {
-                deno: self.deno_program.clone(),
-                cwd: Some(self.cwd.clone()),
-                // Foreground observation deadlines yield, they do not kill the kernel.
-                execute_timeout: Duration::from_secs(24 * 60 * 60),
-                ..KernelOptions::default()
-            };
-            let mut kernel = Kernel::start(options)
-                .await
-                .map_err(|error| error.to_string())?;
-            let registry = Arc::new(Registry::default());
-            let mut bridge = match Bridge::start(registry.clone()).await {
-                Ok(bridge) => bridge,
-                Err(error) => {
-                    let _ = kernel.shutdown().await;
-                    return Err(error);
-                }
-            };
-            let bootstrap = include_str!("bootstrap.js")
-                .replace(
-                    "__ENDPOINT__",
-                    &serde_json::to_string(&bridge.endpoint).map_err(|e| e.to_string())?,
-                )
-                .replace(
-                    "__CREDENTIAL__",
-                    &serde_json::to_string(&bridge.credential).map_err(|e| e.to_string())?,
-                );
-            let startup = kernel
-                .execute(&bootstrap)
-                .await
-                .map_err(|e| e.to_string())
-                .and_then(|result| match result_error(&result) {
-                    Some(error) => Err(error),
-                    None => Ok(()),
-                });
-            if let Err(error) = startup {
-                let _ = bridge.shutdown().await;
-                let _ = kernel.shutdown().await;
-                return Err(format!("initialize notebook globals: {error}"));
-            }
-            let cancellation = CancellationToken::new();
-            let (commands, incoming) = mpsc::unbounded_channel();
-            let worker_registry = registry.clone();
-            let worker_cancel = cancellation.clone();
-            let worker = tokio::spawn(async move {
-                run_session(kernel, worker_registry, worker_cancel, incoming).await
-            });
-            Ok(Arc::new(Session {
-                registry,
-                commands,
-                resources: Mutex::new(Some(Resources { bridge, worker })),
-                shutdown_gate: Semaphore::new(1),
-                cancellation,
-            }) as Arc<dyn CodeModeSession>)
-        })
-    }
-}
+use crate::control::NotebookControlResult;
+use crate::control::NotebookRequest;
+use crate::lifecycle::Lifecycle;
+use crate::lifecycle::status_result;
 
 #[derive(Default)]
 pub(crate) struct Registry {
@@ -141,9 +49,25 @@ struct SessionState {
     active: Option<CellId>,
     closed: bool,
     broken: bool,
+    managing: bool,
+    status: Value,
+    checkpoint: Value,
+    persistence_error: Option<String>,
+    completed_cells: u64,
 }
 
 impl Registry {
+    fn update(&self, lifecycle: &Lifecycle) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.broken = lifecycle.kernel.is_none();
+        state.status = lifecycle.status.clone();
+        state.status["userCells"] = json!(state.completed_cells);
+        state.checkpoint = lifecycle.checkpoint_details.clone();
+        state.persistence_error = lifecycle.persistence_error.clone();
+    }
     pub(crate) fn running_cell(&self, id: &CellId) -> Result<Arc<Cell>, String> {
         let state = self
             .state
@@ -181,7 +105,7 @@ impl Registry {
 
 struct Session {
     registry: Arc<Registry>,
-    commands: mpsc::UnboundedSender<CellCommand>,
+    commands: mpsc::UnboundedSender<Command>,
     resources: Mutex<Option<Resources>>,
     shutdown_gate: Semaphore,
     cancellation: CancellationToken,
@@ -190,6 +114,82 @@ struct Session {
 struct CellCommand {
     cell: Arc<Cell>,
     source: String,
+    user_source: String,
+}
+
+enum Command {
+    Execute(CellCommand),
+    Control(
+        NotebookRequest,
+        oneshot::Sender<Result<NotebookControlResult, String>>,
+    ),
+}
+
+impl Session {
+    async fn control(&self, request: NotebookRequest) -> Result<NotebookControlResult, String> {
+        let response = {
+            let mut state = self
+                .registry
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.closed {
+                return Err("notebook session is shut down".to_string());
+            }
+            if let NotebookRequest::Status { query } = &request
+                && (state.active.is_some() || state.managing || state.broken)
+            {
+                let mut result = status_result(
+                    &state.status,
+                    &state.checkpoint,
+                    state.persistence_error.as_deref(),
+                    query.as_deref(),
+                    state.active.is_some(),
+                );
+                if state.broken {
+                    result.details["state"] = json!("invalidated");
+                    result
+                        .message
+                        .push_str("\nKernel unavailable. Use notebook restart or reset");
+                }
+                return Ok(result);
+            }
+            if state.managing {
+                return Err("notebook management is already in progress".to_string());
+            }
+            let recovery = matches!(request, NotebookRequest::Restart | NotebookRequest::Reset);
+            if state.active.is_some() && !recovery {
+                return Err(
+                    "cannot mutate notebook while exec is active. Wait or terminate it first"
+                        .to_string(),
+                );
+            }
+            if recovery && let Some(cell) = state.active.as_ref().and_then(|id| state.cells.get(id))
+            {
+                cell.cancellation.cancel();
+            }
+            if state.broken && !recovery && !matches!(request, NotebookRequest::Unpin { .. }) {
+                return Err(
+                    "kernel unavailable. Use notebook restart or reset in this thread".to_string(),
+                );
+            }
+            let (reply, response) = oneshot::channel();
+            state.managing = true;
+            if self
+                .commands
+                .send(Command::Control(request, reply))
+                .is_err()
+            {
+                state.managing = false;
+                state.broken = true;
+                return Err("notebook worker ended unexpectedly".to_string());
+            }
+            response
+        };
+        response
+            .await
+            .map_err(|_| "notebook management worker stopped".to_string())?
+    }
 }
 
 /// Owns the handles even if the caller drops an in-progress shutdown future.
@@ -253,7 +253,7 @@ impl CodeModeSession for Session {
             }
             let id = CellId::new(Uuid::new_v4().to_string());
             let source = format!(
-                "globalThis.__codexNotebook.begin({}, {});\n{}\n;await globalThis.__codexNotebook.flush({});",
+                "await globalThis.__codexNotebook.begin({}, {});\n{}\n;await globalThis.__codexNotebook.flush({});",
                 serde_json::to_string(id.as_str()).map_err(|e| e.to_string())?,
                 serde_json::to_string(&definitions).map_err(|e| e.to_string())?,
                 request.source,
@@ -276,7 +276,10 @@ impl CodeModeSession for Session {
                     return Err("notebook session is shut down".to_string());
                 }
                 if state.broken {
-                    return Err("Deno kernel was terminated. Start a new thread to create a fresh notebook session".to_string());
+                    return Err("Deno kernel was terminated. Use notebook restart or reset to recover in this thread".to_string());
+                }
+                if state.managing {
+                    return Err("notebook management is in progress".to_string());
                 }
                 if state.active.is_some() {
                     return Err(
@@ -295,10 +298,11 @@ impl CodeModeSession for Session {
                 // could leave a reserved cell without a kernel owner.
                 if self
                     .commands
-                    .send(CellCommand {
+                    .send(Command::Execute(CellCommand {
                         cell: cell.clone(),
                         source,
-                    })
+                        user_source: request.source,
+                    }))
                     .is_err()
                 {
                     state.active = None;
@@ -400,136 +404,6 @@ impl Drop for Session {
     fn drop(&mut self) {
         self.cancellation.cancel();
     }
-}
-
-struct WorkerGuard {
-    registry: Arc<Registry>,
-    cancellation: CancellationToken,
-}
-
-impl Drop for WorkerGuard {
-    fn drop(&mut self) {
-        self.cancellation.cancel();
-        let cells = {
-            let mut state = self
-                .registry
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.broken = true;
-            state.active = None;
-            state.cells.values().cloned().collect::<Vec<_>>()
-        };
-        for cell in cells {
-            cell.finish(Some("notebook worker stopped".to_string()));
-        }
-    }
-}
-
-async fn run_session(
-    mut kernel: Kernel,
-    registry: Arc<Registry>,
-    cancellation: CancellationToken,
-    mut commands: mpsc::UnboundedReceiver<CellCommand>,
-) -> Result<(), String> {
-    let _guard = WorkerGuard {
-        registry: registry.clone(),
-        cancellation: cancellation.clone(),
-    };
-    loop {
-        let command = tokio::select! {
-            biased;
-            _ = cancellation.cancelled() => break,
-            command = commands.recv() => match command { Some(command) => command, None => break },
-        };
-        run_cell(&mut kernel, &registry, command.cell, command.source).await;
-        if registry
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .broken
-        {
-            break;
-        }
-    }
-    kernel.shutdown().await.map_err(|error| error.to_string())
-}
-
-async fn run_cell(kernel: &mut Kernel, registry: &Registry, cell: Arc<Cell>, source: String) {
-    let result = kernel
-        .execute_streaming(&source, cell.cancellation.clone(), |output| {
-            cell.push_kernel_output(output)
-        })
-        .await;
-    let mut broken = result.is_err();
-    let mut error = match result {
-        Ok(result) => {
-            if result.output_truncated {
-                cell.push(text_item("[Deno Jupyter output truncated]"));
-            }
-            result_error(&result)
-        }
-        Err(error) => Some(error.to_string()),
-    };
-    // User code is not wrapped in a function or block: Deno's top-level bindings persist.
-    // A separate flush request also drains synchronous text() calls before a JS exception.
-    if !broken && error.is_some() && !cell.cancellation.is_cancelled() {
-        let flush_source = format!(
-            "await globalThis.__codexNotebook.flush({})",
-            serde_json::json!(cell.id.as_str())
-        );
-        match kernel
-            .execute_streaming(&flush_source, cell.cancellation.clone(), |output| {
-                cell.push_kernel_output(output)
-            })
-            .await
-        {
-            Ok(result) => {
-                if let Some(flush_error) = result_error(&result) {
-                    error = Some(format!(
-                        "{}\nOutput flush failed: {flush_error}",
-                        error.unwrap_or_default()
-                    ));
-                }
-            }
-            Err(flush_error) => {
-                broken = true;
-                error = Some(format!(
-                    "{}\nOutput flush failed: {flush_error}",
-                    error.unwrap_or_default()
-                ));
-            }
-        }
-    }
-    if cell.cancellation.is_cancelled() {
-        broken = true;
-    }
-    if broken && let Err(shutdown_error) = kernel.shutdown().await {
-        error = Some(format!(
-            "{}\nKernel cleanup failed: {shutdown_error}",
-            error.unwrap_or_default()
-        ));
-    }
-    {
-        let mut state = registry
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.active = None;
-        state.broken |= broken;
-    }
-    cell.finish(error);
-}
-
-fn result_error(result: &ExecutionResult) -> Option<String> {
-    result
-        .error
-        .as_ref()
-        .map(|error| format!("{}: {}", error.name, error.value))
-        .or_else(|| {
-            (result.status != ExecutionStatus::Ok)
-                .then(|| format!("Deno execution {:?}", result.status))
-        })
 }
 
 fn missing(cell_id: CellId) -> WaitOutcome {

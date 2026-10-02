@@ -1,10 +1,12 @@
 use std::time::Duration;
 
+use jupyter_protocol::CompleteRequest;
 use jupyter_protocol::ExecuteRequest;
 use jupyter_protocol::ExecutionState;
 use jupyter_protocol::JupyterMessage;
 use jupyter_protocol::JupyterMessageContent;
 use jupyter_protocol::KernelInfoRequest;
+use jupyter_protocol::ReplyStatus;
 use jupyter_protocol::ShutdownRequest;
 use jupyter_zmq_client::ClientControlConnection;
 use jupyter_zmq_client::ClientIoPubConnection;
@@ -115,6 +117,73 @@ impl Kernel {
     pub async fn execute(&mut self, source: &str) -> Result<ExecutionResult, KernelError> {
         self.execute_streaming(source, CancellationToken::new(), |_| {})
             .await
+    }
+
+    /// Host management payloads have a separate bound from user-visible cell output.
+    pub async fn execute_with_output_limit(
+        &mut self,
+        source: &str,
+        max_bytes: usize,
+    ) -> Result<ExecutionResult, KernelError> {
+        let previous = self.options.max_output_bytes;
+        self.options.max_output_bytes = max_bytes;
+        let result = self.execute(source).await;
+        self.options.max_output_bytes = previous;
+        result
+    }
+
+    /// Deno's completions expose persistent lexical bindings as well as global properties.
+    pub async fn complete(
+        &mut self,
+        code: &str,
+        cursor_pos: usize,
+    ) -> Result<Vec<String>, KernelError> {
+        if self.state != State::Ready {
+            return Err(KernelError::Closed);
+        }
+        self.state = State::Running;
+        let guard = ExecutionGuard(self);
+        let timeout = guard.0.options.startup_timeout;
+        let request: JupyterMessage = CompleteRequest {
+            code: code.to_owned(),
+            cursor_pos,
+        }
+        .into();
+        let id = request.header.msg_id.clone();
+        let operation = async {
+            let channels = guard.0.channels.as_mut().ok_or(KernelError::Closed)?;
+            channels.shell.send(request).await?;
+            loop {
+                tokio::select! {
+                    message = channels.shell.read() => {
+                        let message = message?;
+                        if !correlated(&message, &id) { continue; }
+                        return match message.content {
+                            JupyterMessageContent::CompleteReply(reply) if reply.status == ReplyStatus::Ok => Ok(reply.matches),
+                            JupyterMessageContent::CompleteReply(reply) => Err(KernelError::UnexpectedReply(
+                                reply.error.map(|e| format!("completion failed: {}: {}", e.ename, e.evalue)).unwrap_or_else(|| format!("completion {:?}", reply.status))
+                            )),
+                            _ => Err(KernelError::UnexpectedReply(message.header.msg_type)),
+                        };
+                    }
+                    exit = guard.0.process.child.wait() => return Err(guard.0.process.exited(exit?)),
+                }
+            }
+        };
+        match tokio::time::timeout(timeout, operation).await {
+            Ok(Ok(names)) => {
+                guard.0.state = State::Ready;
+                Ok(names)
+            }
+            Ok(Err(error)) => {
+                guard.0.force_shutdown().await?;
+                Err(error)
+            }
+            Err(_) => {
+                guard.0.force_shutdown().await?;
+                Err(KernelError::Timeout("completion"))
+            }
+        }
     }
 
     /// Callback runs synchronously on receipt of each retained output. Keep it nonblocking.

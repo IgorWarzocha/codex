@@ -4347,6 +4347,12 @@ impl Session {
                 .render_fragment(),
             );
         }
+        // Complete async work before render_full creates non-Send contextual fragments.
+        let notebook_status = crate::tools::code_mode::notebook::context_status(
+            &self.services.code_mode_service,
+            step_context,
+        )
+        .await;
         // Render the active mode after the usage hint so it can override that hint.
         let mut initial_multi_agent_mode = None;
         let mut managed_developer_instructions = None;
@@ -4430,6 +4436,15 @@ impl Session {
         if let Some(managed_developer_instructions) = managed_developer_instructions
             && let Some(message) = crate::context_manager::updates::build_rendered_message(vec![
                 managed_developer_instructions.render_fragment(),
+            ])
+        {
+            items.push(message);
+        }
+        // Query after session restore, and again when replacement history starts a new window.
+        // Do not emit this on ordinary turn-context diffs or query an unvalidated kernel.
+        if let Some(status) = notebook_status
+            && let Some(message) = crate::context_manager::updates::build_rendered_message(vec![
+                DeveloperInstructions::new(status).render_fragment(),
             ])
         {
             items.push(message);

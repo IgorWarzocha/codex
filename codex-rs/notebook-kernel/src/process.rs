@@ -90,12 +90,13 @@ impl Process {
             flags.push(format!("--max-old-space-size={mib}"));
             command.env("DENO_V8_FLAGS", flags);
         }
+        // Deno cannot inherit these listeners. A small handoff race is unavoidable.
+        // A competing bind causes an explicit startup failure, never unauthenticated reuse.
+        // Release before spawn: the child may bind before the parent is scheduled again.
+        drop(reservations);
         let mut child = command.spawn()?;
         #[cfg(unix)]
         let process_group = child.id();
-        // Deno cannot inherit these listeners. A small handoff race is unavoidable.
-        // A competing bind causes an explicit startup failure, never unauthenticated reuse.
-        drop(reservations);
         let mut reader = child
             .stderr
             .take()

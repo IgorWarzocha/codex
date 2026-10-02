@@ -231,7 +231,7 @@ impl Session {
         }
 
         if self.features().enabled(Feature::CodeModePrewarm)
-            && self.services.code_mode_service.is_available()
+            && self.services.code_mode_service.can_prewarm()
         {
             let session = Arc::clone(self);
             tokio::spawn(async move {

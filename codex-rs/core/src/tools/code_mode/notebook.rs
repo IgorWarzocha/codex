@@ -4,6 +4,31 @@ use codex_protocol::openai_models::ToolMessage;
 
 use crate::session::step_context::StepContext;
 
+use super::CodeModeService;
+
+pub(crate) async fn context_status(
+    service: &CodeModeService,
+    step: &StepContext,
+) -> Option<String> {
+    if step.turn.config.code_mode.runtime != codex_features::CodeModeRuntime::Notebook {
+        return None;
+    }
+    Some(
+        match service
+            .control_notebook(
+                codex_notebook::NotebookRequest::Status {
+                    query: Some("*".to_string()),
+                },
+                step,
+            )
+            .await
+        {
+            Ok(status) => status.message,
+            Err(error) => format!("Notebook status unavailable: {error}"),
+        },
+    )
+}
+
 pub(super) fn validate_access(
     step: &StepContext,
     kernel_cwd: &codex_utils_absolute_path::AbsolutePathBuf,

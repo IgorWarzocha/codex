@@ -22,6 +22,7 @@ pub(crate) struct Cell {
     pub(crate) delegate: Arc<dyn CodeModeSessionDelegate>,
     pub(crate) tools: HashMap<String, ToolDefinition>,
     pub(crate) cancellation: CancellationToken,
+    pub(crate) tool_cancellation: CancellationToken,
     state: Mutex<CellState>,
     changed: Notify,
     observer: Semaphore,
@@ -41,6 +42,9 @@ struct CellState {
     pending_bytes: usize,
     overflow: bool,
     yield_pending: bool,
+    journal_items: Vec<FunctionCallOutputContentItem>,
+    journal_bytes: usize,
+    journal_overflow: bool,
 }
 
 impl Cell {
@@ -56,6 +60,7 @@ impl Cell {
             call_id,
             delegate,
             tools,
+            tool_cancellation: cancellation.child_token(),
             cancellation,
             state: Mutex::new(CellState {
                 phase: Phase::Running,
@@ -63,6 +68,9 @@ impl Cell {
                 pending_bytes: 0,
                 overflow: false,
                 yield_pending: false,
+                journal_items: Vec::new(),
+                journal_bytes: 0,
+                journal_overflow: false,
             }),
             changed: Notify::new(),
             observer: Semaphore::new(1),
@@ -88,12 +96,30 @@ impl Cell {
         if !matches!(state.phase, Phase::Running) {
             return;
         }
+        if state.journal_bytes.saturating_add(size) <= MAX_PENDING_BYTES {
+            state.journal_bytes += size;
+            state.journal_items.push(item.clone());
+        } else {
+            state.journal_overflow = true;
+        }
         if state.pending_bytes.saturating_add(size) > MAX_PENDING_BYTES {
             state.overflow = true;
         } else {
             state.pending_bytes += size;
             state.pending.push(item);
         }
+    }
+
+    pub(crate) fn journal_items(&self) -> Vec<FunctionCallOutputContentItem> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut items = state.journal_items.clone();
+        if state.journal_overflow {
+            items.push(text_item("[Notebook journal output truncated]"));
+        }
+        items
     }
 
     pub(crate) fn push_kernel_output(&self, output: &Output) {

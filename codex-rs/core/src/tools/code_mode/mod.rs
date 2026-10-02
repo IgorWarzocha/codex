@@ -2,6 +2,8 @@ mod delegate;
 mod execute_handler;
 pub(crate) mod execute_spec;
 pub(crate) mod notebook;
+pub(crate) mod notebook_handler;
+mod notebook_spec;
 mod output;
 mod response_adapter;
 mod telemetry;
@@ -74,6 +76,7 @@ pub(crate) struct ExecContext {
 
 pub(crate) struct CodeModeService {
     notebook_cwd: Option<codex_utils_absolute_path::AbsolutePathBuf>,
+    notebook_provider: Option<Arc<codex_notebook::DenoNotebookSessionProvider>>,
     session: OnceCell<Arc<dyn CodeModeSession>>,
     session_provider: Arc<dyn CodeModeSessionProvider>,
     availability: Result<(), String>,
@@ -92,18 +95,26 @@ impl CodeModeService {
     ) -> Self {
         let notebook_cwd = (config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook)
             .then(|| config.cwd.clone());
-        let session_provider = if notebook_cwd.is_some() {
-            Arc::new(codex_notebook::DenoNotebookSessionProvider::new(
-                config.code_mode.deno_program.clone(),
-                config.cwd.to_path_buf(),
-            )) as Arc<dyn CodeModeSessionProvider>
-        } else {
-            session_provider
-        };
+        let notebook_provider = notebook_cwd.as_ref().map(|_| {
+            Arc::new(
+                codex_notebook::DenoNotebookSessionProvider::new_with_identity(
+                    config.code_mode.deno_program.clone(),
+                    config.cwd.to_path_buf(),
+                    config.codex_home.to_path_buf(),
+                    thread_id.to_string(),
+                )
+                .with_ephemeral(config.ephemeral),
+            )
+        });
+        let session_provider = notebook_provider
+            .as_ref()
+            .map(|provider| Arc::clone(provider) as Arc<dyn CodeModeSessionProvider>)
+            .unwrap_or(session_provider);
         let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(thread_id, executed_tool_calls));
         let availability = session_provider.availability();
         Self {
             notebook_cwd,
+            notebook_provider,
             session: OnceCell::new(),
             session_provider,
             availability,
@@ -116,6 +127,12 @@ impl CodeModeService {
 
     pub(crate) fn is_available(&self) -> bool {
         self.availability.is_ok()
+    }
+
+    pub(crate) fn can_prewarm(&self) -> bool {
+        // Notebook startup can restore function source and run hooks. Only a captured,
+        // validated step may initialize it, never the capability-free startup warmup.
+        self.notebook_provider.is_none() && self.is_available()
     }
 
     pub(crate) fn take_unavailable_warning(&self, tool_mode: ToolMode) -> Option<String> {
@@ -175,6 +192,44 @@ impl CodeModeService {
             return Err(error);
         }
         Ok(())
+    }
+
+    pub(crate) async fn control_notebook(
+        &self,
+        request: codex_notebook::NotebookRequest,
+        step: &StepContext,
+    ) -> Result<codex_notebook::NotebookControlResult, String> {
+        self.validate_notebook_access(step).await?;
+        let provider = self
+            .notebook_provider
+            .as_ref()
+            .ok_or_else(|| "The notebook tool requires the Notebook runtime".to_string())?;
+        if self.shutdown_token.is_cancelled() {
+            return Err("notebook session is shut down".to_string());
+        }
+        // Disk-only reads must not replay a failing startup hook just to inspect
+        // saved history or profiles. They still have the same access validation.
+        if matches!(
+            &request,
+            codex_notebook::NotebookRequest::Diagnostics
+                | codex_notebook::NotebookRequest::List { .. }
+        ) {
+            return provider.control(request).await;
+        }
+        // Initialization may restore bindings. Access must be checked before even creating it.
+        if let Err(error) = self.session().await
+            && (self.shutdown_token.is_cancelled()
+                || !matches!(
+                    &request,
+                    codex_notebook::NotebookRequest::Unpin { .. }
+                        | codex_notebook::NotebookRequest::Reset
+                ))
+        {
+            return Err(error);
+        }
+        // A corrupt snapshot or pinned startup hook can prevent session creation. The
+        // concrete provider owns disk-only unpin/reset recovery even without a kernel.
+        provider.control(request).await
     }
 
     pub(crate) async fn wait(
@@ -506,6 +561,30 @@ mod tests {
     use codex_protocol::openai_models::ToolMode;
     use codex_tools::ToolName;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn notebook_control_checks_access_before_session_initialization() {
+        let (session, mut turn) = make_session_and_context().await;
+        let mut config = (*turn.config).clone();
+        config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
+        // Even an unusable runtime must report the permission boundary first.
+        config.code_mode.deno_program = std::path::PathBuf::from("/nonexistent/notebook-deno");
+        turn.config = Arc::new(config);
+        let service = super::CodeModeService::new(
+            codex_protocol::ThreadId::new(),
+            Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
+            &turn.config,
+            session.services.executed_tool_calls.clone(),
+        );
+        let step = StepContext::for_test(Arc::new(turn));
+        assert!(!service.can_prewarm());
+        let error = service
+            .control_notebook(codex_notebook::NotebookRequest::Reset, &step)
+            .await
+            .expect_err("restricted control must fail");
+        assert!(error.contains("danger-full-access"), "{error}");
+        assert!(service.session.get().is_none());
+    }
 
     #[tokio::test]
     async fn turn_worker_uses_step_router_mode_instead_of_admitted_turn() {

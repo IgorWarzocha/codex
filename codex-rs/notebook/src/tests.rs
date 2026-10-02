@@ -1,6 +1,8 @@
 use super::*;
+use crate::cell::text_item;
 use codex_code_mode_protocol::CodeModeNestedToolCall;
 use codex_code_mode_protocol::CodeModeSessionCellExecutionLimits;
+use codex_code_mode_protocol::CodeModeSessionProvider;
 use codex_code_mode_protocol::CodeModeToolKind;
 use codex_code_mode_protocol::FunctionCallOutputContentItem;
 use codex_code_mode_protocol::NotificationFuture;
@@ -8,6 +10,7 @@ use codex_code_mode_protocol::ToolDefinition;
 use codex_code_mode_protocol::ToolInvocationFuture;
 use codex_protocol::ToolName;
 use serde_json::json;
+use std::path::PathBuf;
 
 #[derive(Default)]
 struct Delegate {
@@ -193,6 +196,41 @@ async fn pending_byte_limit_preserves_output_below_the_limit() {
 }
 
 #[tokio::test]
+async fn active_status_never_queues_and_mutations_require_settled_execution() {
+    let registry = Arc::new(Registry::default());
+    {
+        let mut state = registry.state.lock().unwrap();
+        state.active = Some(CellId::new("running".into()));
+        state.status = json!({"bindings":[{"name":"Foo","type":"number"}]});
+    }
+    let (commands, mut incoming) = mpsc::unbounded_channel();
+    let session = Session {
+        registry,
+        commands,
+        resources: Mutex::new(None),
+        shutdown_gate: Semaphore::new(1),
+        cancellation: CancellationToken::new(),
+    };
+    let result = session
+        .control(NotebookRequest::Status {
+            query: Some("f*".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.details["state"], "running");
+    assert_eq!(result.details["matches"][0]["name"], "Foo");
+    assert!(incoming.try_recv().is_err());
+    assert!(
+        session
+            .control(NotebookRequest::Checkpoint)
+            .await
+            .unwrap_err()
+            .contains("exec is active")
+    );
+    assert!(incoming.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn unsupported_resource_limits_are_rejected() {
     let result = provider()
         .create_session_with_limits(CodeModeSessionCellExecutionLimits {
@@ -366,6 +404,62 @@ async fn deno_preemption_and_termination_are_bounded() {
             .is_err()
     );
     assert_eq!(delegate.closed.lock().unwrap().len(), 1);
+    session.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
+async fn unpin_runtime_only_replacement_preserves_project_value_without_repinning() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let provider = DenoNotebookSessionProvider::new_with_identity(
+        provider().deno_program,
+        project.path().to_path_buf(),
+        home.path().to_path_buf(),
+        "unpin".into(),
+    );
+    let session = provider.create_session().await.unwrap();
+    let delegate = Arc::new(Delegate::default());
+    assert_ok(&execute(&session, "let promotedLexical = 42;", delegate.clone()).await);
+    provider
+        .control(NotebookRequest::Pin {
+            names: vec!["promotedLexical".into()],
+            hook: None,
+        })
+        .await
+        .unwrap();
+    assert_ok(
+        &execute(
+            &session,
+            "promotedLexical = Promise.resolve(7);",
+            delegate.clone(),
+        )
+        .await,
+    );
+    provider
+        .control(NotebookRequest::Unpin {
+            names: vec!["promotedLexical".into()],
+        })
+        .await
+        .unwrap();
+    provider.control(NotebookRequest::Restart).await.unwrap();
+    let status = provider
+        .control(NotebookRequest::Status {
+            query: Some("promotedLexical".into()),
+        })
+        .await
+        .unwrap();
+    assert_ne!(status.details["matches"][0]["pinned"], true);
+    assert_eq!(
+        texts(&execute(&session, "text(promotedLexical);", delegate).await),
+        ["42"]
+    );
+    provider
+        .control(NotebookRequest::Release {
+            names: vec!["promotedLexical".into()],
+        })
+        .await
+        .unwrap();
     session.shutdown().await.unwrap();
 }
 

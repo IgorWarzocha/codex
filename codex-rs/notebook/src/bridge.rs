@@ -47,6 +47,7 @@ struct Request {
 enum Operation {
     Output { item: FunctionCallOutputContentItem },
     Tool { name: String, input: Option<Value> },
+    CancelTools,
     Notify { text: String },
     Yield,
 }
@@ -158,6 +159,12 @@ async fn dispatch(registry: &Registry, request: Request) -> Result<Value, String
             cell.yield_now();
             Ok(Value::Null)
         }
+        Operation::CancelTools => {
+            // Closing nested work must not cancel the kernel or its output flush.
+            // Late requests also see the cancelled token, closing the HTTP arrival race.
+            cell.tool_cancellation.cancel();
+            Ok(Value::Null)
+        }
         Operation::Notify { text } => {
             tokio::select! {
                 biased;
@@ -179,8 +186,8 @@ async fn dispatch(registry: &Registry, request: Request) -> Result<Value, String
             };
             tokio::select! {
                 biased;
-                _ = cell.cancellation.cancelled() => Err("notebook cell closed".to_string()),
-                result = cell.delegate.invoke_tool(invocation, cell.cancellation.child_token()) => result,
+                _ = cell.tool_cancellation.cancelled() => Err("notebook cell finished before the tool was awaited".to_string()),
+                result = cell.delegate.invoke_tool(invocation, cell.tool_cancellation.child_token()) => result,
             }
         }
     }

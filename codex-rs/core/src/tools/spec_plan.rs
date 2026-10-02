@@ -827,6 +827,12 @@ fn register_code_mode_executors(
         return BTreeMap::new();
     }
 
+    let notebook_runtime =
+        turn_context.config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook;
+    if notebook_runtime {
+        registry.add(crate::tools::code_mode::notebook_handler::NotebookHandler);
+    }
+
     let mut code_mode_tool_names = BTreeMap::new();
     let mut code_mode_nested_tool_specs = Vec::new();
     let mut exec_prompt_tool_specs = Vec::new();
@@ -835,11 +841,15 @@ fn register_code_mode_executors(
     let deferred_tools_guidance_enabled = search_tool_enabled(turn_context, model_info);
     for tool in registry.entries() {
         let exposure = tool.exposure;
-        if !exposure.is_available_in_code_mode() {
+        let tool_name = tool.runtime.tool_name();
+        // The same handler exposes read-only nested control while retaining the top-level
+        // lifecycle tool. Its source check rejects mutations before reaching the provider.
+        let notebook_control =
+            notebook_runtime && tool_name.is_default_namespace() && tool_name.name == "notebook";
+        if !exposure.is_available_in_code_mode() && !notebook_control {
             continue;
         }
 
-        let tool_name = tool.runtime.tool_name();
         if is_excluded_from_code_mode(turn_context, &tool_name) {
             continue;
         }

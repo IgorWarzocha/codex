@@ -31,15 +31,29 @@ Keep the same Cargo profile and build flags between runs to reuse incremental ar
 
 The workspace has a distinct prerelease version. Keep a real version rather than upstream's `0.0.0` development placeholder: Codex sends its compiled version during model discovery and requests. In live validation, `0.0.0` rejected GPT-6 Luna while the versioned fork accepted it with the same account.
 
-## Current scope
+## Retained state
 
 - A separate persistent Deno kernel belongs to each running Codex thread.
-- JavaScript and TypeScript bindings survive cells and context rollover while the process remains alive.
+- JavaScript and TypeScript bindings survive cells and live context rollover. Resuming the same thread restores its last saved serializable state.
+- New threads restore durable project bindings, including explicitly pinned helpers. Existing live threads remain private and do not receive another thread's changes.
+- Checkpoints and named profiles restore values and function definitions. They never replay cells. Functions must be self-contained or use retained global dependencies. Open handles, imports, promises and other unsupported values are reported as skipped.
 - Nested tools use Codex's existing dispatcher and tool approvals.
 - Cells can yield and continue through `wait`. Only one cell runs per kernel at a time.
-- Ordinary JavaScript errors retain the kernel. Cancellation and terminal kernel failures invalidate its state rather than silently starting an empty replacement.
+- Ordinary JavaScript errors retain the kernel. Cancellation and terminal kernel failures invalidate its in-memory state. Ask the agent to restart the notebook from its checkpoint, or reset it to durable project state. Neither operation replays failed work or reverses external side effects.
 
-Resuming after process exit and forking a thread start fresh kernels. Disk checkpoints, project pins, profiles and Pi extension compatibility are not implemented. Native notebook code has full host access even though nested Codex tools retain their own approval checks. Windows startup is rejected until the controller can own and terminate the kernel's subprocess tree.
+The agent's `notebook` tool manages status, checkpoints, profiles and pins. Ask it to inspect retained bindings, pin a reusable helper, save a named profile, or prune unpinned temporary state. Pinned functions can run after startup or nested tool results. These hooks run with the same full host access as notebook cells.
+
+Historical cells are saved as bounded `.ipynb` journals. Diagnostics checks that history with Deno's language server, separately from the current kernel's health. Journals are not a recovery script.
+
+State lives under `$CODEX_HOME/notebook`, outside the working tree. These private files contain code and serialized values, not encrypted data. Project state is shared by directories within the same Git repository. Session checkpoints remain thread-private. `--ephemeral` keeps checkpoints in memory and disables disk profiles and journals.
+
+## Boundaries
+
+This is a native Codex implementation of the Pi Notebook workflow, not a Pi extension host. Pi custom extensions and ChatGPT desktop plugin packaging are not included. Native notebook code has full host access even though nested Codex tools retain their own approval checks. Windows startup is rejected until the controller can own and terminate the kernel's subprocess tree.
+
+Retained functions do not preserve lexical closures. Recreate live connections and imported dependencies in a pinned startup function. A failed startup hook blocks execution until the hook is repaired or unpinned. Profile loading rejects name collisions instead of overwriting live bindings.
+
+Each checkpoint captures at most 32 MiB of serialized values. Values that cannot fit are reported as skipped. Releasing lexical bindings may require rebuilding the kernel from retained values, so runtime-only handles must be recreated.
 
 ## Implementation
 
