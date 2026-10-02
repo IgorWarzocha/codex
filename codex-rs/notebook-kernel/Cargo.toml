@@ -18,8 +18,11 @@ tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "proce
 tokio-util = { workspace = true, features = ["rt"] }
 uuid = { workspace = true, features = ["v4"] }
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(any(unix, windows))'.dependencies]
 codex-utils-pty.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [lib]
 doctest = false

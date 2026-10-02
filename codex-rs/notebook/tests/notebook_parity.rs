@@ -381,3 +381,86 @@ async fn ephemeral_notebooks_never_create_durable_state() {
     session.shutdown().await.unwrap();
     assert!(!home.path().join("notebook").exists());
 }
+
+#[tokio::test]
+#[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
+async fn successful_cell_import_inventory_survives_new_threads_and_reset() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let notebook = provider(home.path(), project.path(), "imports-a");
+    let session = notebook.create_session().await.unwrap();
+    let initial = control(&notebook, json!({"action":"status"})).await;
+    assert!(
+        initial
+            .message
+            .contains("Available npm imports in this notebook: none. Ask before adding another")
+    );
+    // Pi inventories source literals, not module resolution or user consent. Dead
+    // branches test that contract without network access or installing packages.
+    // Deno eagerly resolves quoted import specifiers, but not static template literals.
+    execute(
+        &session,
+        "if (false) await import(`npm:known@1.2.3`);",
+        Arc::new(Echo::default()),
+    )
+    .await;
+    let failed = session
+        .execute(
+            request("if (false) await import(`npm:failed@2.0.0`); throw new Error('failed');"),
+            Arc::new(Echo::default()),
+            None,
+        )
+        .await
+        .unwrap()
+        .initial_response()
+        .await
+        .unwrap();
+    assert!(matches!(
+        failed,
+        RuntimeResponse::Result {
+            error_text: Some(_),
+            ..
+        }
+    ));
+    let status = control(&notebook, json!({"action":"status"})).await;
+    assert!(status.message.contains("npm:known@1.2.3"));
+    assert!(!status.message.contains("npm:failed@2.0.0"));
+    let mut pending =
+        request("if (false) await import(`npm:terminated@3.0.0`); await new Promise(() => {});");
+    pending.yield_time_ms = Some(1);
+    let started = session
+        .execute(pending, Arc::new(Echo::default()), None)
+        .await
+        .unwrap();
+    let cell_id = started.cell_id.clone();
+    assert!(matches!(
+        started.initial_response().await.unwrap(),
+        RuntimeResponse::Yielded { .. }
+    ));
+    session.terminate(cell_id).await.unwrap();
+    control(&notebook, json!({"action":"restart"})).await;
+    assert!(
+        !control(&notebook, json!({"action":"status"}))
+            .await
+            .message
+            .contains("npm:terminated@3.0.0")
+    );
+    control(&notebook, json!({"action":"reset"})).await;
+    assert!(
+        control(&notebook, json!({"action":"status"}))
+            .await
+            .message
+            .contains("npm:known@1.2.3")
+    );
+    session.shutdown().await.unwrap();
+    let next = provider(home.path(), project.path(), "imports-b");
+    let next_session = next.create_session().await.unwrap();
+    let startup = control(&next, json!({"action":"status"})).await;
+    assert!(
+        startup
+            .message
+            .contains("npm:known@1.2.3. Ask before adding another")
+    );
+    assert!(!startup.message.contains("npm:failed@2.0.0"));
+    next_session.shutdown().await.unwrap();
+}

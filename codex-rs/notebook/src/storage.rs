@@ -1,7 +1,7 @@
 //! Host-owned by-value persistence. Kernels only capture and restore snapshots.
 //! Project writes merge private forks under an OS lock, never into live kernels.
 
-mod files;
+pub(crate) mod files;
 mod format;
 #[cfg(test)]
 mod tests;
@@ -19,6 +19,7 @@ use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
 
+use crate::persistence::PersistenceBudget;
 use files::Paths;
 use format::Snapshot;
 
@@ -29,6 +30,7 @@ pub(crate) struct Store {
 struct State {
     paths: Paths,
     baseline: Option<Snapshot>,
+    budget: PersistenceBudget,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -59,10 +61,26 @@ struct Profile {
 
 impl Store {
     pub(crate) fn new(codex_home: PathBuf, cwd: &Path, thread_id: &str) -> Result<Self, String> {
+        // Cold profile listing and metadata recovery must not depend on a live heap.
+        Self::with_budget(
+            codex_home,
+            cwd,
+            thread_id,
+            PersistenceBudget::from_heap_mib(None),
+        )
+    }
+
+    pub(crate) fn with_budget(
+        codex_home: PathBuf,
+        cwd: &Path,
+        thread_id: &str,
+        budget: PersistenceBudget,
+    ) -> Result<Self, String> {
         Ok(Self {
             state: Arc::new(Mutex::new(State {
                 paths: Paths::new(codex_home, cwd, thread_id)?,
                 baseline: None,
+                budget,
             })),
         })
     }
@@ -87,11 +105,11 @@ impl Store {
     pub(crate) async fn load_project(&self) -> Result<Option<Value>, String> {
         self.run(|state| {
             let _lock = files::lock(&state.paths.directory)?;
-            let project = read_project(&state.paths)?;
+            let project = read_project(&state.paths, state.budget)?;
             if state.baseline.is_none() {
                 // A restarted private fork retains its own observed candidate,
                 // even when the shared project advanced while it was stopped.
-                state.baseline = read_session(&state.paths)?
+                state.baseline = read_session(&state.paths, state.budget)?
                     .map(|session| session.baseline)
                     .or_else(|| project.as_ref().map(|project| project.snapshot.clone()));
             }
@@ -103,7 +121,7 @@ impl Store {
     pub(crate) async fn load_session(&self) -> Result<Option<Value>, String> {
         self.run(|state| {
             let _lock = files::lock(&state.paths.directory)?;
-            read_session(&state.paths)?
+            read_session(&state.paths, state.budget)?
                 .map(|session| session.snapshot.value())
                 .transpose()
         })
@@ -118,11 +136,11 @@ impl Store {
         let snapshot = snapshot.clone();
         let project_snapshot = project_snapshot.clone();
         self.run(move |state| {
-            let snapshot = Snapshot::parse(&snapshot)?;
-            let candidate = Snapshot::parse(&project_snapshot)?;
+            let snapshot = Snapshot::parse(&snapshot, state.budget)?;
+            let candidate = Snapshot::parse(&project_snapshot, state.budget)?;
             let _lock = files::lock(&state.paths.directory)?;
-            let current = read_project(&state.paths)?;
-            let session = read_session(&state.paths)?;
+            let current = read_project(&state.paths, state.budget)?;
+            let session = read_session(&state.paths, state.budget)?;
             if state.baseline.is_none() {
                 state.baseline = session.map(|session| session.baseline);
             }
@@ -130,6 +148,7 @@ impl Store {
                 state.baseline.as_ref(),
                 current.as_ref().map(|project| &project.snapshot),
                 &candidate,
+                state.budget,
             )?;
             let details = json!({
                 "conflicts": merged.conflicts,
@@ -144,12 +163,12 @@ impl Store {
                 schema: 1,
                 project: state.paths.project.clone(),
                 snapshot: merged.snapshot,
-            })?;
+            }, state.budget.file_bytes())?;
             let session_bytes = files::encode(&Session {
                 schema: 1,
                 snapshot,
                 baseline: merged.baseline.clone(),
-            })?;
+            }, state.budget.file_bytes())?;
             // Project first: if the private write fails, a retry can re-merge.
             // Advancing a durable candidate baseline before the project commit
             // would instead permanently lose an unapplied change.
@@ -177,6 +196,17 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn import_history(
+        &self,
+    ) -> Result<crate::import_history::ImportHistory, String> {
+        self.run(|state| {
+            Ok(crate::import_history::ImportHistory::new(
+                state.paths.clone(),
+            ))
+        })
+        .await
+    }
+
     /// Metadata-only recovery, including when a startup hook prevents capture.
     pub(crate) async fn unpin(&mut self, names: &[String]) -> Result<Value, String> {
         let names: BTreeSet<_> = names.iter().cloned().collect();
@@ -185,8 +215,8 @@ impl Store {
                 return Err("Unpin requires valid notebook binding names".into());
             }
             let _lock = files::lock(&state.paths.directory)?;
-            let mut project = read_project(&state.paths)?;
-            let mut session = read_session(&state.paths)?;
+            let mut project = read_project(&state.paths, state.budget)?;
+            let mut session = read_session(&state.paths, state.budget)?;
             let mut found = BTreeSet::new();
             if let Some(project) = &mut project {
                 found.extend(project.snapshot.unpin(&names));
@@ -196,8 +226,8 @@ impl Store {
                 session.baseline.unpin(&names);
             }
             let missing: Vec<_> = names.difference(&found).cloned().collect();
-            let project_bytes = project.as_ref().map(files::encode).transpose()?;
-            let session_bytes = session.as_ref().map(files::encode).transpose()?;
+            let project_bytes = project.as_ref().map(|value| files::encode(value, state.budget.file_bytes())).transpose()?;
+            let session_bytes = session.as_ref().map(|value| files::encode(value, state.budget.file_bytes())).transpose()?;
             if let Some(project) = &project_bytes {
                 files::atomic_write_bytes(&state.paths.directory.join("project.json"), project)
                     .map_err(|error| format!("Notebook project unpin failed and may have committed: {error}. Restart before further mutations."))?;
@@ -219,7 +249,7 @@ impl Store {
         let name = name.to_owned();
         let snapshot = snapshot.clone();
         self.run(move |state| {
-            let snapshot = Snapshot::parse(&snapshot)?;
+            let snapshot = Snapshot::parse(&snapshot, state.budget)?;
             let path = state.paths.profiles.join(&name);
             files::directory(&path)?;
             let _lock = files::lock(&path)?;
@@ -235,7 +265,11 @@ impl Store {
                 source_project: state.paths.project.clone(),
                 snapshot,
             };
-            files::atomic_write(&path.join("profile.json"), &profile)?;
+            files::atomic_write(
+                &path.join("profile.json"),
+                &profile,
+                state.budget.file_bytes(),
+            )?;
             Ok(profile.summary())
         })
         .await
@@ -250,7 +284,7 @@ impl Store {
                 return Err(format!("Notebook profile not found: {name}"));
             }
             let _lock = files::lock(&path)?;
-            read_profile(&path, &name)?
+            read_profile(&path, &name, state.budget)?
                 .ok_or_else(|| format!("Notebook profile not found: {name}"))?
                 .snapshot
                 .value()
@@ -277,7 +311,7 @@ impl Store {
                     continue;
                 }
                 let _lock = files::lock(&entry.path())?;
-                if let Some(profile) = read_profile(&entry.path(), &name)? {
+                if let Some(profile) = read_profile(&entry.path(), &name, state.budget)? {
                     profiles.push(profile.summary());
                 }
             }
@@ -288,36 +322,42 @@ impl Store {
     }
 }
 
-fn read_project(paths: &Paths) -> Result<Option<Project>, String> {
-    let mut project: Option<Project> = files::read(&paths.directory.join("project.json"))?;
+fn read_project(paths: &Paths, budget: PersistenceBudget) -> Result<Option<Project>, String> {
+    let mut project: Option<Project> =
+        files::read(&paths.directory.join("project.json"), budget.file_bytes())?;
     if let Some(project) = &mut project {
         if project.schema != 1 || project.project != paths.project {
             return Err("Notebook project schema or identity mismatch".into());
         }
-        project.snapshot.validate()?;
+        project.snapshot.validate(budget)?;
     }
     Ok(project)
 }
 
-fn read_session(paths: &Paths) -> Result<Option<Session>, String> {
-    let mut session: Option<Session> = files::read(&paths.session)?;
+fn read_session(paths: &Paths, budget: PersistenceBudget) -> Result<Option<Session>, String> {
+    let mut session: Option<Session> = files::read(&paths.session, budget.file_bytes())?;
     if let Some(session) = &mut session {
         if session.schema != 1 {
             return Err("Notebook session schema mismatch".into());
         }
-        session.snapshot.validate()?;
-        session.baseline.validate()?;
+        session.snapshot.validate(budget)?;
+        session.baseline.validate(budget)?;
     }
     Ok(session)
 }
 
-fn read_profile(path: &Path, name: &str) -> Result<Option<Profile>, String> {
-    let mut profile: Option<Profile> = files::read(&path.join("profile.json"))?;
+fn read_profile(
+    path: &Path,
+    name: &str,
+    budget: PersistenceBudget,
+) -> Result<Option<Profile>, String> {
+    let mut profile: Option<Profile> =
+        files::read(&path.join("profile.json"), budget.file_bytes())?;
     if let Some(profile) = &mut profile {
         if profile.schema != 1 || profile.name != name {
             return Err("Notebook profile schema or identity mismatch".into());
         }
-        profile.snapshot.validate()?;
+        profile.snapshot.validate(budget)?;
     }
     Ok(profile)
 }

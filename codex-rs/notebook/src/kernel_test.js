@@ -6,9 +6,9 @@ const stateSource = await Deno.readTextFile(new URL("./kernel-state.js", import.
 const bootstrapSource = await Deno.readTextFile(new URL("./bootstrap.js", import.meta.url));
 const inject = (source) => `await import(${JSON.stringify("data:text/javascript;base64," + btoa(source))});`;
 
-async function repl(cells) {
+async function repl(cells, maxHeapMiB) {
   const child = new Deno.Command(Deno.execPath(), {
-    args: ["repl", "--quiet", "--allow-all"],
+    args: ["repl", "--quiet", "--allow-all", ...(maxHeapMiB ? ["--v8-flags=--max-old-space-size=" + maxHeapMiB] : [])],
     stdin: "piped",
     stdout: "piped",
     stderr: "piped",
@@ -77,6 +77,17 @@ Deno.test("pins protect release, lexical release requires restart, disposal is a
     '__codexNotebookState.configurePins([]); assert.deepEqual((await __codexNotebookState.release(["hook"])).released,["hook"]);',
     "assert.ok(__codexNotebookState.status([]).memory.heapLimitBytes > 0);",
   ]);
+});
+
+Deno.test("checkpoint budgets skip oversized values and continue after aggregate overflow", async () => {
+  await repl([
+    "globalThis.aLarge = new Uint8Array(64); globalThis.bLarge = new Uint8Array(64); globalThis.cTiny = 1;",
+    'const largeBytes = __codexNotebookState.capture(["aLarge"], 1024).entries[0].length; const tinyBytes = __codexNotebookState.capture(["cTiny"], 1024).entries[0].length;',
+    'assert.equal(__codexNotebookState.capture(["aLarge"], largeBytes - 1).skipped[0].reason, "exceeds per-variable checkpoint cap");',
+    'const bounded = __codexNotebookState.capture(["aLarge", "bLarge", "cTiny"], largeBytes + tinyBytes); assert.deepEqual(bounded.entries.map(x => x.name), ["aLarge", "cTiny"]); assert.equal(bounded.skipped[0].reason, "exceeds total checkpoint cap");',
+    "assert.throws(() => __codexNotebookState.capture([], 256 * 1024 * 1024 + 1), /invalid notebook checkpoint budget/);",
+    'const heap = (await import("node:v8")).getHeapStatistics().heap_size_limit; const budget = Math.min(256 * 1024 * 1024, Math.max(8 * 1024 * 1024, Math.floor(heap / 8))); globalThis.oversized = new Uint8Array(budget + 1); assert.equal(__codexNotebookState.capture(["oversized"]).skipped[0].reason, "exceeds per-variable checkpoint cap");',
+  ], 128);
 });
 
 Deno.test("tool hooks suppress only their async context, retain tool values, and drain unawaited hooks", async () => {

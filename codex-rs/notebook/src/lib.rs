@@ -5,8 +5,10 @@ mod bridge;
 mod cell;
 mod control;
 mod diagnostics;
+mod import_history;
 mod journal;
 mod lifecycle;
+mod persistence;
 mod session;
 mod storage;
 

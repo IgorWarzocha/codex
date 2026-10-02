@@ -8,6 +8,7 @@ use jupyter_protocol::connection_info::Transport;
 use tempfile::TempDir;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+#[cfg(not(windows))]
 use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task::JoinHandle;
@@ -17,6 +18,11 @@ use crate::KernelError;
 use crate::KernelOptions;
 
 const STDERR_BYTES: usize = 16 * 1024;
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows::OwnedChild as Child;
 
 pub(crate) struct Process {
     pub(crate) child: Child,
@@ -94,6 +100,11 @@ impl Process {
         // A competing bind causes an explicit startup failure, never unauthenticated reuse.
         // Release before spawn: the child may bind before the parent is scheduled again.
         drop(reservations);
+        #[cfg(windows)]
+        let job = codex_utils_pty::JobObject::create_without_breakaway()?;
+        #[cfg(windows)]
+        let mut child = job.spawn_contained(&mut command)?;
+        #[cfg(not(windows))]
         let mut child = command.spawn()?;
         #[cfg(unix)]
         let process_group = child.id();
@@ -101,6 +112,8 @@ impl Process {
             .stderr
             .take()
             .ok_or(KernelError::InvalidOptions("missing stderr pipe"))?;
+        #[cfg(windows)]
+        let child = Child::new(child, job);
         let stderr = Arc::new(Mutex::new(Vec::<u8>::new()));
         let captured = Arc::clone(&stderr);
         let stderr_task = tokio::spawn(async move {

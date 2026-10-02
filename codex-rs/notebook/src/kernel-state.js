@@ -83,12 +83,22 @@ await (async () => {
     }
     return btoa(binary);
   };
-  const capture = (names, maxBytes = 64 * 1024 * 1024) => {
-    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new TypeError("invalid notebook checkpoint budget");
+  const capture = (
+    names,
+    maxBytes = Math.min(
+      256 * 1024 * 1024,
+      Math.max(8 * 1024 * 1024, Math.floor(getHeapStatistics().heap_size_limit / 8)),
+    ),
+  ) => {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > 256 * 1024 * 1024) {
+      throw new TypeError("invalid notebook checkpoint budget");
+    }
+    const candidates = [...new Set(names)].sort();
+    if (candidates.length > 10000) throw new Error("Notebook checkpoint exceeds 10000 top-level values");
     const entries = [];
     const skipped = [];
     let total = 0;
-    for (const name of [...new Set(names)].sort()) {
+    for (const name of candidates) {
       try {
         const value = read(name);
         let captured = value;

@@ -7,8 +7,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
-pub(super) const MAX_FILE_BYTES: u64 = 192 * 1024 * 1024;
-const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
+use crate::persistence::PersistenceBudget;
+
 const MAX_ENTRIES: usize = 10_000;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -59,14 +59,14 @@ pub(super) struct Skipped {
 }
 
 impl Snapshot {
-    pub fn parse(value: &Value) -> Result<Self, String> {
+    pub fn parse(value: &Value, budget: PersistenceBudget) -> Result<Self, String> {
         let mut snapshot: Self = serde_json::from_value(value.clone())
             .map_err(|error| format!("Invalid notebook snapshot: {error}"))?;
-        snapshot.validate()?;
+        snapshot.validate(budget)?;
         Ok(snapshot)
     }
 
-    pub fn validate(&mut self) -> Result<(), String> {
+    pub fn validate(&mut self, budget: PersistenceBudget) -> Result<(), String> {
         if self.deno.is_empty()
             || self.deno.len() > 256
             || self.v8.is_empty()
@@ -89,8 +89,13 @@ impl Snapshot {
             length = length
                 .checked_add(entry.length)
                 .ok_or("Notebook snapshot payload length overflow")?;
-            if length > MAX_PAYLOAD_BYTES || entry.data.len() as u64 > MAX_FILE_BYTES {
-                return Err("Notebook snapshot exceeds 64 MiB serialized payload".into());
+            if length > budget.payload_bytes() as u64
+                || entry.data.len() > budget.snapshot_json_bytes()
+            {
+                return Err(format!(
+                    "Notebook snapshot exceeds the {} byte persistence budget",
+                    budget.payload_bytes()
+                ));
             }
             let bytes = STANDARD
                 .decode(&entry.data)
@@ -202,6 +207,7 @@ pub(super) fn merge(
     base: Option<&Snapshot>,
     current: Option<&Snapshot>,
     candidate: &Snapshot,
+    budget: PersistenceBudget,
 ) -> Result<Merge, String> {
     let entries = |snapshot: Option<&Snapshot>| -> BTreeMap<String, Entry> {
         snapshot
@@ -265,8 +271,8 @@ pub(super) fn merge(
             baseline.entries.push(entry.clone());
         }
     }
-    snapshot.validate()?;
-    baseline.validate()?;
+    snapshot.validate(budget)?;
+    baseline.validate(budget)?;
     Ok(Merge {
         snapshot,
         baseline,

@@ -1,8 +1,8 @@
 use super::*;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use crate::ExecutionStatus;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn stdout(result: &ExecutionResult) -> String {
     result
         .outputs
@@ -15,6 +15,32 @@ fn stdout(result: &ExecutionResult) -> String {
             _ => None,
         })
         .collect()
+}
+
+#[cfg(windows)]
+fn child_source(directory: &std::path::Path, awaited: bool) -> Result<String, serde_json::Error> {
+    let release = directory
+        .join("release")
+        .to_string_lossy()
+        .replace('\'', "''");
+    let late_write = directory
+        .join("late_write")
+        .to_string_lossy()
+        .replace('\'', "''");
+    let script = format!(
+        "while (-not (Test-Path -LiteralPath '{release}')) {{ Start-Sleep -Milliseconds 20 }}; Set-Content -LiteralPath '{late_write}' -Value survived"
+    );
+    let args = serde_json::to_string(&[
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        &script,
+    ])?;
+    Ok(format!(
+        "{{ const child = new Deno.Command('powershell.exe', {{ args: {args}, stdout: 'null', stderr: 'null' }}).spawn(); console.log(child.pid); {} }}",
+        if awaited { "await child.status;" } else { "" }
+    ))
 }
 
 #[cfg(unix)]
@@ -71,8 +97,37 @@ async fn assert_child_stopped(
     Ok(())
 }
 
+#[cfg(windows)]
+async fn assert_child_stopped(
+    pid: u32,
+    directory: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stopped = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let status = tokio::process::Command::new("powershell.exe")
+                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+                .arg(format!("if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"))
+                .status()
+                .await?;
+            if status.code() == Some(1) {
+                return Ok::<_, std::io::Error>(());
+            }
+            assert!(status.success(), "process probe failed: {status}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }).await;
+    std::fs::write(directory.join("release"), "")?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !directory.join("late_write").exists(),
+        "Deno descendant survived cleanup"
+    );
+    stopped??;
+    Ok(())
+}
+
 /// Real protocol and process lifecycle oracle. No Python, Jupyter installation, or model.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 #[ignore = "requires a Deno executable (DENO_KERNEL_TEST_BIN or deno on PATH)"]
 async fn real_deno_state_isolation_errors_and_bounded_cleanup()
@@ -241,7 +296,7 @@ async fn real_deno_state_isolation_errors_and_bounded_cleanup()
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 #[tokio::test]
 async fn unsupported_platform_does_not_spawn() {
     assert!(matches!(

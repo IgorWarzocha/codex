@@ -14,7 +14,8 @@ use sha2::Digest;
 use sha2::Sha256;
 use uuid::Uuid;
 
-pub(crate) const DEFAULT_MAX_BYTES: usize = 32 * 1024 * 1024;
+use crate::persistence::PersistenceBudget;
+
 const OUTPUT_RESERVE: usize = 4096;
 
 #[derive(Clone)]
@@ -34,7 +35,14 @@ pub(crate) struct CodeCell {
 
 impl Journal {
     pub(crate) fn new(codex_home: &Path, cwd: &Path, thread_id: &str) -> Result<Self, String> {
-        Self::with_budget(codex_home, cwd, thread_id, DEFAULT_MAX_BYTES)
+        // Cold historical readers can inspect journals from larger-heap sessions.
+        // Live writers receive the configured heap budget explicitly.
+        Self::with_budget(
+            codex_home,
+            cwd,
+            thread_id,
+            PersistenceBudget::from_heap_mib(None).payload_bytes(),
+        )
     }
 
     pub(crate) fn with_budget(

@@ -47,9 +47,7 @@ impl Default for KernelOptions {
 
 #[derive(Debug, thiserror::Error)]
 pub enum KernelError {
-    #[error(
-        "Deno notebook kernels require Unix process-group cleanup; Windows job-object ownership is not implemented"
-    )]
+    #[error("Deno notebook kernels require Unix process groups or Windows job objects")]
     UnsupportedPlatform,
     #[error("Deno kernel I/O failed: {0}")]
     Io(#[from] std::io::Error),

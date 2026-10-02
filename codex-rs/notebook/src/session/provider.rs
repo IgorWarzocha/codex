@@ -22,6 +22,7 @@ use crate::control::NotebookControlResult;
 use crate::control::NotebookRequest;
 use crate::journal::Journal;
 use crate::lifecycle::Lifecycle;
+use crate::persistence::PersistenceBudget;
 use crate::storage::Store;
 
 /// One unsandboxed Deno Jupyter kernel per Codex thread. No TypeScript host controller.
@@ -72,6 +73,15 @@ impl DenoNotebookSessionProvider {
     pub fn with_ephemeral(mut self, ephemeral: bool) -> Self {
         self.ephemeral = ephemeral;
         self
+    }
+
+    fn resolved_deno(&self) -> Result<PathBuf, String> {
+        which::which_in(&self.deno_program, std::env::var_os("PATH"), &self.cwd).map_err(|error| {
+            format!(
+                "Deno program unavailable: {}: {error}",
+                self.deno_program.display()
+            )
+        })
     }
 
     pub async fn control(&self, request: NotebookRequest) -> Result<NotebookControlResult, String> {
@@ -134,7 +144,7 @@ impl DenoNotebookSessionProvider {
             return match self.identity.as_ref().filter(|_| !self.ephemeral) {
                 Some(identity) => {
                     crate::diagnostics::diagnostics_with_runtime(
-                        &self.deno_program,
+                        &self.resolved_deno()?,
                         &self.cwd,
                         &identity.codex_home,
                         &identity.thread_id,
@@ -177,26 +187,13 @@ impl DenoNotebookSessionProvider {
 
 impl CodeModeSessionProvider for DenoNotebookSessionProvider {
     fn availability(&self) -> Result<(), String> {
-        let program_exists =
-            if self.deno_program.components().count() > 1 || self.deno_program.is_absolute() {
-                self.deno_program.is_file()
-            } else {
-                std::env::var_os("PATH").is_some_and(|path| {
-                    std::env::split_paths(&path).any(|dir| dir.join(&self.deno_program).is_file())
-                })
-            };
-        if !program_exists {
-            return Err(format!(
-                "Deno program not found: {}",
-                self.deno_program.display()
-            ));
-        }
         if !self.cwd.is_dir() {
             return Err(format!(
                 "notebook cwd is not a directory: {}",
                 self.cwd.display()
             ));
         }
+        self.resolved_deno()?;
         Ok(())
     }
 
@@ -225,20 +222,33 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
             }
             self.availability()?;
             let options = KernelOptions {
-                deno: self.deno_program.clone(),
+                deno: self.resolved_deno()?,
                 cwd: Some(self.cwd.clone()),
                 // Foreground observation deadlines yield, they do not kill the kernel.
                 execute_timeout: Duration::from_secs(24 * 60 * 60),
                 ..KernelOptions::default()
             };
             let identity = self.identity.as_ref().filter(|_| !self.ephemeral);
+            let budget = PersistenceBudget::from_heap_mib(options.max_heap_mib);
             let store = identity
                 .map(|identity| {
-                    Store::new(identity.codex_home.clone(), &self.cwd, &identity.thread_id)
+                    Store::with_budget(
+                        identity.codex_home.clone(),
+                        &self.cwd,
+                        &identity.thread_id,
+                        budget,
+                    )
                 })
                 .transpose()?;
             let journal = identity
-                .map(|identity| Journal::new(&identity.codex_home, &self.cwd, &identity.thread_id))
+                .map(|identity| {
+                    Journal::with_budget(
+                        &identity.codex_home,
+                        &self.cwd,
+                        &identity.thread_id,
+                        budget.payload_bytes(),
+                    )
+                })
                 .transpose()?;
             let registry = Arc::new(Registry::default());
             let mut bridge = Bridge::start(registry.clone()).await?;

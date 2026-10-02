@@ -13,6 +13,8 @@ use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
+use crate::persistence::PersistenceBudget;
+
 use super::Store;
 use super::files;
 
@@ -57,6 +59,42 @@ fn binding<'a>(snapshot: &'a Value, name: &str) -> Option<&'a Value> {
         .as_array()?
         .iter()
         .find(|entry| entry["name"] == name)
+}
+
+#[tokio::test]
+async fn heap_budget_bounds_capture_restore_and_merged_projects_without_partial_writes()
+-> TestResult {
+    let disk = Disk::new()?;
+    let small = PersistenceBudget::from_heap_mib(Some(64));
+    let large = PersistenceBudget::from_heap_mib(Some(128));
+    let mut owner = Store::with_budget(disk.home.clone(), &disk.project, "owner", small)?;
+    let full = snapshot(vec![entry("full", &"x".repeat(small.payload_bytes()))]);
+    owner.checkpoint(&full, &full).await?;
+    assert_eq!(owner.load_session().await?, Some(full.clone()));
+    owner.save_profile("bounded", &full).await?;
+
+    let overflow = snapshot(vec![entry("full", &"x".repeat(small.payload_bytes() + 1))]);
+    assert!(owner.checkpoint(&overflow, &overflow).await.is_err());
+    assert!(owner.save_profile("bounded", &overflow).await.is_err());
+    assert_eq!(owner.load_profile("bounded").await?, full);
+
+    // Each candidate fits, but concurrent additions cannot produce an oversized project.
+    let mut other = Store::with_budget(disk.home.clone(), &disk.project, "other", small)?;
+    let addition = snapshot(vec![entry("addition", "extra")]);
+    assert!(other.checkpoint(&addition, &addition).await.is_err());
+    assert!(other.load_session().await?.is_none());
+    assert_eq!(owner.load_project().await?, Some(full));
+
+    // A larger heap can write it. A smaller heap fails restore explicitly, not by
+    // dropping values, while cold metadata access remains bounded by the ceiling.
+    let mut expanded = Store::with_budget(disk.home.clone(), &disk.project, "expanded", large)?;
+    expanded.load_project().await?;
+    expanded.checkpoint(&overflow, &overflow).await?;
+    expanded.save_profile("larger", &overflow).await?;
+    assert!(owner.load_project().await.is_err());
+    assert!(owner.load_profile("larger").await.is_err());
+    assert_eq!(disk.store("cold")?.load_project().await?, Some(overflow));
+    Ok(())
 }
 
 #[tokio::test]

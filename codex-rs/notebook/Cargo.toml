@@ -12,6 +12,7 @@ axum = { workspace = true, features = ["http1", "tokio", "json"] }
 base64.workspace = true
 codex-code-mode-protocol = { workspace = true }
 codex-notebook-kernel = { path = "../notebook-kernel" }
+regex.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2.workspace = true
@@ -19,6 +20,7 @@ tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 url.workspace = true
 uuid = { workspace = true, features = ["v4"] }
+which = { workspace = true }
 
 [dev-dependencies]
 codex-protocol = { workspace = true }

@@ -4,7 +4,7 @@ This fork adds an opt-in persistent JavaScript and TypeScript runtime to Codex's
 
 ## Run
 
-On Linux or macOS, install Deno and build the fork's CLI from `codex-rs`:
+Install Deno and build the fork's CLI from `codex-rs`. On Linux or macOS:
 
 ```sh
 CARGO_PROFILE_DEV_DEBUG=0 cargo build -p codex-cli --bin codex
@@ -12,6 +12,14 @@ CARGO_PROFILE_DEV_DEBUG=0 cargo build -p codex-cli --bin codex
   -c 'features.code_mode.runtime="notebook"' \
   -m gpt-6-luna -c 'model_reasoning_effort="low"' \
   --sandbox danger-full-access
+```
+
+On Windows, use PowerShell:
+
+```powershell
+$env:CARGO_PROFILE_DEV_DEBUG = "0"
+cargo build -p codex-cli --bin codex
+.\target\debug\codex.exe -c 'features.code_mode.runtime="notebook"' -m gpt-6-luna -c 'model_reasoning_effort="low"' --sandbox danger-full-access
 ```
 
 Use this only in a trusted local working directory. Deno Jupyter always has full filesystem, network and subprocess access. Notebook refuses restricted permissions, managed network proxies and remote or multiple execution environments. The fork does not change your global Codex configuration.
@@ -45,15 +53,19 @@ The agent's `notebook` tool manages status, checkpoints, profiles and pins. Ask 
 
 Historical cells are saved as bounded `.ipynb` journals. Diagnostics checks that history with Deno's language server, separately from the current kernel's health. Journals are not a recovery script.
 
+Startup context and notebook status list exact-version npm imports found in successful project cells. The agent must ask before using an unlisted package. This inventory is guidance, not a package sandbox or proof of prior approval. Imports are not restored as live modules. Recreate them explicitly or in a pinned startup helper.
+
 State lives under `$CODEX_HOME/notebook`, outside the working tree. These private files contain code and serialized values, not encrypted data. Project state is shared by directories within the same Git repository. Session checkpoints remain thread-private. `--ephemeral` keeps checkpoints in memory and disables disk profiles and journals.
 
 ## Boundaries
 
-This is a native Codex implementation of the Pi Notebook workflow, not a Pi extension host. Pi custom extensions and ChatGPT desktop plugin packaging are not included. Native notebook code has full host access even though nested Codex tools retain their own approval checks. Windows startup is rejected until the controller can own and terminate the kernel's subprocess tree.
+This is a native Codex implementation of the Pi Notebook workflow, not a Pi extension host. Pi custom extensions and ChatGPT desktop plugin packaging are not included. Native notebook code has full host access even though nested Codex tools retain their own approval checks.
+
+On Unix, the controller owns the kernel's process group. On Windows, it assigns the suspended kernel to a non-breakaway Job Object before allowing it to run. Failure to establish ownership rejects startup. Kernel shutdown terminates owned descendants. The Windows path has not yet been exercised on a Windows machine.
 
 Retained functions do not preserve lexical closures. Recreate live connections and imported dependencies in a pinned startup function. A failed startup hook blocks execution until the hook is repaired or unpinned. Profile loading rejects name collisions instead of overwriting live bindings.
 
-Each checkpoint captures at most 32 MiB of serialized values. Values that cannot fit are reported as skipped. Releasing lexical bindings may require rebuilding the kernel from retained values, so runtime-only handles must be recreated.
+Checkpoint and journal budgets follow the configured kernel heap: one eighth of the heap, clamped between 8 MiB and 256 MiB. The default 512 MiB heap gives a 64 MiB persistence budget. Values that cannot fit are reported as skipped. Releasing lexical bindings may require rebuilding the kernel from retained values, so runtime-only handles must be recreated.
 
 ## Implementation
 

@@ -52,7 +52,7 @@ impl Kernel {
         options: KernelOptions,
         cancellation: CancellationToken,
     ) -> Result<Self, KernelError> {
-        if !cfg!(unix) {
+        if !cfg!(any(unix, windows)) {
             return Err(KernelError::UnsupportedPlatform);
         }
         if options.max_heap_mib == Some(0)

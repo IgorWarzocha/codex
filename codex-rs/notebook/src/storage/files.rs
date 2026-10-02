@@ -14,10 +14,8 @@ use sha2::Digest;
 use sha2::Sha256;
 use uuid::Uuid;
 
-use super::format::MAX_FILE_BYTES;
-
 #[derive(Clone)]
-pub(super) struct Paths {
+pub(crate) struct Paths {
     pub project: PathBuf,
     pub directory: PathBuf,
     pub session: PathBuf,
@@ -66,7 +64,7 @@ fn key(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-pub(super) fn directory(path: &Path) -> Result<(), String> {
+pub(crate) fn directory(path: &Path) -> Result<(), String> {
     if !path.exists() {
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
@@ -99,7 +97,7 @@ fn verify_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn regular_file(path: &Path) -> Result<bool, String> {
+pub(crate) fn regular_file(path: &Path) -> Result<bool, String> {
     if let Some(parent) = path.parent() {
         verify_directory(parent)?;
     }
@@ -114,17 +112,20 @@ fn regular_file(path: &Path) -> Result<bool, String> {
     }
 }
 
-pub(super) fn read<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
+pub(crate) fn read<T: DeserializeOwned>(
+    path: &Path,
+    max_bytes: usize,
+) -> Result<Option<T>, String> {
     if !regular_file(path)? {
         return Ok(None);
     }
     let mut bytes = Vec::new();
     File::open(path)
         .map_err(|error| error.to_string())?
-        .take(MAX_FILE_BYTES + 1)
+        .take(max_bytes as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
+    if bytes.len() > max_bytes {
         return Err(format!("Notebook state is too large: {}", path.display()));
     }
     serde_json::from_slice(&bytes)
@@ -143,19 +144,23 @@ fn options() -> OpenOptions {
     options
 }
 
-pub(super) fn atomic_write<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    atomic_write_bytes(path, &encode(value)?)
+pub(crate) fn atomic_write<T: Serialize>(
+    path: &Path,
+    value: &T,
+    max_bytes: usize,
+) -> Result<(), String> {
+    atomic_write_bytes(path, &encode(value, max_bytes)?)
 }
 
-pub(super) fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
+pub(crate) fn encode<T: Serialize>(value: &T, max_bytes: usize) -> Result<Vec<u8>, String> {
     let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
+    if bytes.len() > max_bytes {
         return Err("Notebook state file exceeds storage limit".into());
     }
     Ok(bytes)
 }
 
-pub(super) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     regular_file(path)?;
     let parent = path
         .parent()
@@ -178,7 +183,7 @@ pub(super) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String
     result
 }
 
-pub(super) fn remove(path: &Path) -> Result<(), String> {
+pub(crate) fn remove(path: &Path) -> Result<(), String> {
     if regular_file(path)? {
         fs::remove_file(path).map_err(|error| error.to_string())?;
         if let Some(parent) = path.parent() {
@@ -200,7 +205,7 @@ fn sync_directory(path: &Path) -> Result<(), String> {
 
 // A persistent inode carries the OS lock. Never unlink it: replacing a lock file
 // would let two processes hold locks on different inodes for the same project.
-pub(super) fn lock(directory_path: &Path) -> Result<File, String> {
+pub(crate) fn lock(directory_path: &Path) -> Result<File, String> {
     directory(directory_path)?;
     let path = directory_path.join("write.lock");
     regular_file(&path)?;

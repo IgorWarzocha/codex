@@ -12,10 +12,11 @@ use crate::control::NotebookControlResult;
 use crate::control::NotebookHook;
 use crate::control::NotebookRequest;
 use crate::control::matches;
+use crate::import_history;
+use crate::import_history::ImportHistory;
+use crate::persistence::PersistenceBudget;
 use crate::session::result_error;
 use crate::storage::Store;
-
-const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
 
 /// The worker exclusively owns the kernel, discovery baseline, and durable transactions.
 pub(crate) struct Lifecycle {
@@ -24,6 +25,9 @@ pub(crate) struct Lifecycle {
     bootstrap: String,
     baseline: HashSet<String>,
     store: Option<Store>,
+    import_history: Option<ImportHistory>,
+    imports: Vec<String>,
+    imports_error: Option<String>,
     snapshot: Value,
     pub(crate) status: Value,
     pub(crate) checkpoint_details: Value,
@@ -36,11 +40,18 @@ impl Lifecycle {
         bootstrap: String,
         store: Option<Store>,
     ) -> Result<Self, String> {
+        let import_history = match &store {
+            Some(store) => Some(store.import_history().await?),
+            None => None,
+        };
         let mut lifecycle = Self {
             kernel: None,
             options,
             bootstrap,
             store,
+            import_history,
+            imports: Vec::new(),
+            imports_error: None,
             baseline: HashSet::new(),
             snapshot: json!({"entries":[],"skipped":[]}),
             status: json!({}),
@@ -53,6 +64,15 @@ impl Lifecycle {
 
     async fn restore(&mut self, reset: bool) -> Result<(), String> {
         self.shutdown().await?;
+        if let Some(history) = &self.import_history {
+            match history.read().await {
+                Ok(imports) => {
+                    self.imports = imports;
+                    self.imports_error = None;
+                }
+                Err(error) => self.imports_error = Some(error),
+            }
+        }
         if reset && let Some(store) = &mut self.store {
             store.reset_session().await?;
         }
@@ -216,7 +236,10 @@ impl Lifecycle {
         let kernel = self.kernel.as_mut().ok_or_else(recovery_error)?;
         let result = tokio::time::timeout(
             Duration::from_secs(20),
-            kernel.execute_with_output_limit(&source, 48 * 1024 * 1024),
+            kernel.execute_with_output_limit(
+                &source,
+                PersistenceBudget::from_heap_mib(self.options.max_heap_mib).snapshot_json_bytes(),
+            ),
         )
         .await;
         let result = match result {
@@ -281,7 +304,15 @@ impl Lifecycle {
             .filter(|n| !excluded.contains(n))
             .collect();
         let snapshot = self
-            .rpc("capture", vec![json!(names), json!(MAX_CAPTURE_BYTES)])
+            .rpc(
+                "capture",
+                vec![
+                    json!(names),
+                    json!(
+                        PersistenceBudget::from_heap_mib(self.options.max_heap_mib).payload_bytes()
+                    ),
+                ],
+            )
             .await?;
         let project_names: Vec<String> =
             serde_json::from_value(self.rpc("projectBindings", vec![]).await?)
@@ -319,9 +350,50 @@ impl Lifecycle {
         Ok(details)
     }
 
+    /// An inventory failure is visible but does not turn successful code into a failed cell.
+    pub(crate) async fn record_imports(&mut self, source: &str) -> Result<(), String> {
+        let result = match &self.import_history {
+            Some(history) => history.record(source).await,
+            None => {
+                let source = source.to_owned();
+                let current = self.imports.clone();
+                tokio::task::spawn_blocking(move || {
+                    let mut imports = import_history::extract(&source)?;
+                    imports.extend(current);
+                    if imports.len() > import_history::MAX_IMPORTS {
+                        return Err(format!(
+                            "Notebook npm inventory exceeds {} imports",
+                            import_history::MAX_IMPORTS
+                        ));
+                    }
+                    Ok(Some(imports.into_iter().collect()))
+                })
+                .await
+                .map_err(|error| format!("Notebook npm inventory task failed: {error}"))
+                .and_then(|result| result)
+            }
+        };
+        match result {
+            Ok(Some(imports)) => {
+                self.imports = imports;
+                self.imports_error = None;
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(error) => {
+                self.imports_error = Some(error.clone());
+                Err(error)
+            }
+        }
+    }
+
     async fn refresh_status(&mut self) -> Result<(), String> {
         let names = self.names().await?;
         self.status = self.rpc("status", vec![json!(names)]).await?;
+        self.status["npmImportsNotice"] = json!(import_history::notice(&self.imports));
+        if let Some(error) = &self.imports_error {
+            self.status["npmImportsError"] = json!(bound_text(error, 1024));
+        }
         let retained = entries(&self.snapshot);
         self.status["retainedBindings"] = json!(retained.len());
         self.status["retainedBytes"] = json!(
@@ -466,7 +538,15 @@ impl Lifecycle {
         self.validate_names(&names).await?;
         let all_names = self.names().await?;
         let captured = self
-            .rpc("capture", vec![json!(all_names), json!(MAX_CAPTURE_BYTES)])
+            .rpc(
+                "capture",
+                vec![
+                    json!(all_names),
+                    json!(
+                        PersistenceBudget::from_heap_mib(self.options.max_heap_mib).payload_bytes()
+                    ),
+                ],
+            )
             .await?;
         for name in &names {
             let entry = entries(&captured)
@@ -703,15 +783,24 @@ pub(crate) fn status_result(
             .map_or(0, |bindings| bindings.iter().filter(|b| pinned(b)).count())
     );
     details["bindings"] = json!(bindings);
+    let npm_notice = status["npmImportsNotice"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| import_history::notice(&[]));
     NotebookControlResult {
         message: format!(
-            "Notebook {} · {total} top-level binding(s){}{}",
+            "{}\nNotebook {} · {total} top-level binding(s){}{}{}",
+            npm_notice,
             if active { "running (cached)" } else { "idle" },
             query
                 .map(|_| format!("\n{}", details["matches"]))
                 .unwrap_or_default(),
             persistence_error
                 .map(|e| format!("\nPersistence failed: {}", bound_text(e, 1024)))
+                .unwrap_or_default(),
+            status["npmImportsError"]
+                .as_str()
+                .map(|e| format!("\nNotebook npm inventory was not updated: {e}"))
                 .unwrap_or_default()
         ),
         details,

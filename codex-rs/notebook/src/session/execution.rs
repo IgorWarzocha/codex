@@ -162,6 +162,16 @@ async fn run_cell(
     if cell.cancellation.is_cancelled() {
         broken = true;
     }
+    // Import literals in failed or interrupted cells are not added to the known inventory.
+    // This records use, not user consent, and never authorizes or blocks an import.
+    if !broken
+        && error.is_none()
+        && let Err(inventory_error) = lifecycle.record_imports(&user_source).await
+    {
+        cell.push(text_item(format!(
+            "Notebook npm inventory was not updated: {inventory_error}"
+        )));
+    }
     if broken {
         if let Err(shutdown_error) = lifecycle.shutdown().await {
             append_error(

@@ -4206,6 +4206,7 @@ dependencies = [
  "codex-code-mode-protocol",
  "codex-notebook-kernel",
  "codex-protocol",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4215,6 +4216,7 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
+ "which 8.0.0",
 ]
 
 [[package]]
@@ -4231,6 +4233,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
