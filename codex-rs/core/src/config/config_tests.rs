@@ -641,6 +641,8 @@ enabled = true
 runtime = "notebook"
 deno_program = "deno-notebook"
 notebook_profile = "daily"
+notebook_max_heap_mib = 768
+notebook_plain_command_output = true
 default_exec_yield_time_ms = 10000
 experimental_show_cell_overhead = true
 tool_input_schema_max_bytes = 36000
@@ -669,6 +671,8 @@ disable_in_process_fallback = true
         Some(PathBuf::from("deno-notebook"))
     );
     assert_eq!(config.code_mode.notebook_profile.as_deref(), Some("daily"));
+    assert_eq!(config.code_mode.notebook_max_heap_mib, 768);
+    assert!(config.code_mode.notebook_plain_command_output);
     assert_eq!(config.code_mode.default_exec_yield_time_ms, 10_000);
     assert!(config.code_mode.experimental_show_cell_overhead);
     assert_eq!(config.code_mode.tool_input_schema_max_bytes, Some(36_000));
@@ -683,10 +687,64 @@ disable_in_process_fallback = true
     assert!(config.code_mode.disable_in_process_fallback);
     assert!(config.features.enabled(Feature::CodeMode));
     assert!(config.features.enabled(Feature::CodeModeHost));
-    let defaults = resolve_code_mode_config(&ConfigToml::default());
+    let defaults = resolve_code_mode_config(&ConfigToml::default())?;
     assert_eq!(defaults.deno_program, None);
     assert_eq!(defaults.notebook_profile, None);
+    assert_eq!(defaults.notebook_max_heap_mib, 4096);
+    assert!(!defaults.notebook_plain_command_output);
+    assert_eq!(
+        defaults.notebook_max_heap_mib,
+        CodeModeConfig::default().notebook_max_heap_mib
+    );
     Ok(())
+}
+
+#[tokio::test]
+async fn notebook_heap_config_rejects_invalid_limits_instead_of_defaulting() {
+    let codex_home = tempdir().unwrap();
+    for value in ["-1", "1.5", "\"4096\"", "4294967296"] {
+        assert!(
+            toml::from_str::<ConfigToml>(&format!(
+                "[features.code_mode]\nnotebook_max_heap_mib = {value}"
+            ))
+            .is_err(),
+            "invalid heap value {value} was accepted"
+        );
+    }
+    for value in [0, 255, 65_537, u32::MAX] {
+        // Reject invalid values even when Notebook is not currently selected.
+        let toml: ConfigToml = toml::from_str(&format!(
+            "[features.code_mode]\nenabled = false\nnotebook_max_heap_mib = {value}"
+        ))
+        .unwrap();
+        let error = Config::load_from_base_config_with_overrides(
+            toml,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await
+        .err()
+        .expect("invalid heap limit must fail config loading");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(
+            error
+                .to_string()
+                .contains("features.code_mode.notebook_max_heap_mib")
+        );
+        assert!(error.to_string().contains("256 through 65536"));
+    }
+    for value in [256, 4096, 65_536] {
+        let toml: ConfigToml = toml::from_str(&format!(
+            "[features.code_mode]\nnotebook_max_heap_mib = {value}"
+        ))
+        .unwrap();
+        assert_eq!(
+            resolve_code_mode_config(&toml)
+                .unwrap()
+                .notebook_max_heap_mib,
+            value
+        );
+    }
 }
 
 #[tokio::test]

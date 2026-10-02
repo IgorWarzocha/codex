@@ -8,6 +8,8 @@ pub(crate) mod notebook_handler;
 mod notebook_spec;
 mod output;
 mod response_adapter;
+#[cfg(test)]
+mod shutdown_tests;
 mod telemetry;
 mod wait_handler;
 pub(crate) mod wait_spec;
@@ -109,6 +111,8 @@ impl CodeModeService {
                     thread_id.to_string(),
                 )
                 .with_ephemeral(config.ephemeral)
+                .with_max_heap_mib(config.code_mode.notebook_max_heap_mib)
+                .with_plain_command_output(config.code_mode.notebook_plain_command_output)
                 .with_default_profile(config.code_mode.notebook_profile.clone()),
             )
         });
@@ -195,7 +199,8 @@ impl CodeModeService {
             _ => Err("Start a new thread to change the Code Mode runtime".to_string()),
         };
         if let Err(error) = result {
-            self.shutdown().await?;
+            self.shutdown_with_mode(ShutdownMode::WithoutCleanup)
+                .await?;
             return Err(error);
         }
         Ok(())
@@ -263,6 +268,10 @@ impl CodeModeService {
     }
 
     pub(crate) async fn shutdown(&self) -> Result<(), String> {
+        self.shutdown_with_mode(ShutdownMode::Graceful).await
+    }
+
+    async fn shutdown_with_mode(&self, mode: ShutdownMode) -> Result<(), String> {
         self.shutdown_token.cancel();
         // Join any initialization already in progress without initializing an unused service.
         match self
@@ -274,7 +283,10 @@ impl CodeModeService {
             })
             .await
         {
-            Ok(session) => session.shutdown().await,
+            Ok(session) => match mode {
+                ShutdownMode::Graceful => session.shutdown().await,
+                ShutdownMode::WithoutCleanup => session.shutdown_without_cleanup().await,
+            },
             Err(_) => Ok(()),
         }
     }
@@ -334,7 +346,7 @@ impl CodeModeService {
                         .create_session() => session?,
                 };
                 if self.shutdown_token.is_cancelled() {
-                    let _ = session.shutdown().await;
+                    let _ = session.shutdown_without_cleanup().await;
                     return Err("code mode session is shutting down".to_string());
                 }
                 Ok(session)
@@ -342,6 +354,11 @@ impl CodeModeService {
             .await
             .map(Arc::clone)
     }
+}
+
+enum ShutdownMode {
+    Graceful,
+    WithoutCleanup,
 }
 
 fn handle_runtime_response(

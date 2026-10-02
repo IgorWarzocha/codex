@@ -14,6 +14,7 @@ use sha2::Digest;
 use sha2::Sha256;
 use uuid::Uuid;
 
+#[cfg(test)]
 use crate::persistence::PersistenceBudget;
 
 const OUTPUT_RESERVE: usize = 4096;
@@ -34,9 +35,10 @@ pub(crate) struct CodeCell {
 }
 
 impl Journal {
+    #[cfg(test)]
     pub(crate) fn new(codex_home: &Path, cwd: &Path, thread_id: &str) -> Result<Self, String> {
-        // Cold historical readers can inspect journals from larger-heap sessions.
-        // Live writers receive the configured heap budget explicitly.
+        // Test fixtures use the persistence ceiling. Production readers and writers
+        // receive the configured heap budget explicitly.
         Self::with_budget(
             codex_home,
             cwd,

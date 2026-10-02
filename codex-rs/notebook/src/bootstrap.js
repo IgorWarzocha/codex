@@ -4,7 +4,22 @@ await (async (endpoint, credential) => {
   const hookScope = new AsyncLocalStorage();
   const state = globalThis.__codexNotebookState;
   const values = new Map();
-  const stringify = (value) => typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
+  const commandResults = new WeakSet();
+  const plainCommandOutput = __PLAIN_COMMAND_OUTPUT__;
+  const stringify = (value) => {
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value) ?? String(value); }
+    catch { return String(value); }
+  };
+  const formatCommandOutput = (value) => {
+    const metadata = Object.fromEntries(Object.entries(value).filter(([key]) =>
+      key !== "output" && key !== "chunk_id" && key !== "wall_time_seconds" &&
+      (key !== "original_token_count" || value.truncated)
+    ));
+    return plainCommandOutput
+      ? stringify(metadata) + "\nOutput:\n" + value.output
+      : stringify({ output: value.output, ...metadata });
+  };
   const unsupported = (name) => {
     throw new Error(name + " is unsupported by native Deno notebook sessions");
   };
@@ -74,6 +89,9 @@ await (async (endpoint, credential) => {
     const output = (item) => enqueue({ op: "output", item });
     const tools = Object.create(null);
     for (const definition of definitions) {
+      // Use the original identity, not the exposed alias or a result-shape guess.
+      const commandTool = [null, undefined, "", "functions"].includes(definition.tool_name.namespace) &&
+        ["exec_command", "write_stdin"].includes(definition.tool_name.name);
       const method = (input) => {
         const scope = hookScope.getStore();
         if (scope && scope !== context) throw new Error("Notebook hook tool called outside its originating exec cell");
@@ -90,6 +108,7 @@ await (async (endpoint, credential) => {
         const event = { type: "tool_result", toolName: definition.name, input: eventInput };
         const promise = rpc({ op: "tool", name: definition.name, input }).then(
           async (result) => {
+            if (commandTool && result !== null && typeof result === "object") commandResults.add(result);
             if (observe) await dispatchToolResult(context, { ...event, status: "success", result });
             return result;
           },
@@ -118,7 +137,10 @@ await (async (endpoint, credential) => {
       tools: Object.freeze(tools),
       ALL_TOOLS: Object.freeze(definitions.map((definition) => Object.freeze({ ...definition }))),
       text: (value) => {
-        output({ type: "input_text", text: stringify(value) });
+        output({
+          type: "input_text",
+          text: commandResults.has(value) && typeof value.output === "string" ? formatCommandOutput(value) : stringify(value),
+        });
       },
       image: (value, detail) => {
         let imageUrl;

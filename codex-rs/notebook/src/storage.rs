@@ -60,8 +60,9 @@ struct Profile {
 }
 
 impl Store {
+    #[cfg(test)]
     pub(crate) fn new(codex_home: PathBuf, cwd: &Path, thread_id: &str) -> Result<Self, String> {
-        // Cold profile listing and metadata recovery must not depend on a live heap.
+        // Test fixtures use the ceiling. Production cold controls use the configured budget.
         Self::with_budget(
             codex_home,
             cwd,

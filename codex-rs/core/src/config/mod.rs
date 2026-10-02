@@ -1177,6 +1177,8 @@ pub struct CodeModeConfig {
     pub runtime: codex_features::CodeModeRuntime,
     pub deno_program: Option<PathBuf>,
     pub notebook_profile: Option<String>,
+    pub notebook_max_heap_mib: u32,
+    pub notebook_plain_command_output: bool,
     pub default_exec_yield_time_ms: u64,
     /// Show handler duration, code-mode host duration, and harness overhead
     /// in each code-mode cell response.
@@ -1195,6 +1197,9 @@ impl Default for CodeModeConfig {
             runtime: codex_features::CodeModeRuntime::V8,
             deno_program: None,
             notebook_profile: None,
+            notebook_max_heap_mib:
+                codex_notebook::DenoNotebookSessionProvider::DEFAULT_MAX_HEAP_MIB,
+            notebook_plain_command_output: false,
             default_exec_yield_time_ms: DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS,
             experimental_show_cell_overhead: false,
             tool_input_schema_max_bytes: None,
@@ -2744,7 +2749,7 @@ fn resolve_feature_enabled(feature: Option<&codex_config::config_toml::FeatureTo
     feature.and_then(|feature| feature.enabled).unwrap_or(true)
 }
 
-fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
+fn resolve_code_mode_config(config_toml: &ConfigToml) -> std::io::Result<CodeModeConfig> {
     let base = code_mode_toml_config(config_toml.features.as_ref());
     let host = config_toml
         .features
@@ -2755,10 +2760,25 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
             FeatureToml::Config(config) => Some(config),
         });
 
-    CodeModeConfig {
+    let notebook_max_heap_mib = base
+        .and_then(|config| config.notebook_max_heap_mib)
+        .unwrap_or(codex_notebook::DenoNotebookSessionProvider::DEFAULT_MAX_HEAP_MIB);
+    codex_notebook::DenoNotebookSessionProvider::validate_max_heap_mib(notebook_max_heap_mib)
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("features.code_mode.notebook_max_heap_mib {error}"),
+            )
+        })?;
+
+    Ok(CodeModeConfig {
         runtime: base.and_then(|config| config.runtime).unwrap_or_default(),
         deno_program: base.and_then(|config| config.deno_program.clone()),
         notebook_profile: base.and_then(|config| config.notebook_profile.clone()),
+        notebook_max_heap_mib,
+        notebook_plain_command_output: base
+            .and_then(|config| config.notebook_plain_command_output)
+            .unwrap_or_default(),
         default_exec_yield_time_ms: base
             .and_then(|config| config.default_exec_yield_time_ms)
             .unwrap_or(DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS),
@@ -2781,7 +2801,7 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
         }) || host
             .and_then(|config| config.disable_in_process_fallback)
             .unwrap_or_default(),
-    }
+    })
 }
 
 fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config {
@@ -3814,7 +3834,7 @@ impl Config {
                 .and_then(|config| config.turn_metadata_includes_tool_info)
                 .unwrap_or_default(),
         };
-        let code_mode = resolve_code_mode_config(&cfg);
+        let code_mode = resolve_code_mode_config(&cfg)?;
         let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg);
         let token_budget = resolve_token_budget_config(&cfg, &features)?;
         let rollout_budget = resolve_rollout_budget_config(&cfg, &features)?;

@@ -17,6 +17,8 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
+pub const DEFAULT_MAX_HEAP_MIB: u32 = 4096;
+
 #[derive(Clone, Debug)]
 pub struct KernelOptions {
     pub deno: PathBuf,
@@ -36,7 +38,7 @@ impl Default for KernelOptions {
             deno: PathBuf::from("deno"),
             cwd: None,
             env: BTreeMap::new(),
-            max_heap_mib: Some(512),
+            max_heap_mib: Some(DEFAULT_MAX_HEAP_MIB),
             startup_timeout: Duration::from_secs(30),
             execute_timeout: Duration::from_secs(3600),
             shutdown_timeout: Duration::from_secs(2),

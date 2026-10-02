@@ -602,8 +602,19 @@
           "description": "Show handler duration, code-mode host duration, and harness overhead in each code-mode cell response. Experimental: this option and the response format may change or be removed.",
           "type": "boolean"
         },
+        "notebook_max_heap_mib": {
+          "description": "Notebook V8 heap limit in MiB. Defaults to 4096, allowed range 256 through 65536.",
+          "format": "uint32",
+          "maximum": 65536.0,
+          "minimum": 256.0,
+          "type": "integer"
+        },
+        "notebook_plain_command_output": {
+          "description": "Render Notebook command tool results as metadata followed by plain output text.",
+          "type": "boolean"
+        },
         "notebook_profile": {
-          "description": "Named Notebook profile to seed fresh threads. Restored bindings take precedence.",
+          "description": "Named Notebook profile to load after restoring saved bindings. Collisions preserve restored state.",
           "type": "string"
         },
         "runtime": {

@@ -457,19 +457,25 @@ impl ToolOutput for ExecCommandToolOutput {
             session_id: Option<i32>,
             #[serde(skip_serializing_if = "Option::is_none")]
             original_token_count: Option<usize>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            truncated: Option<bool>,
             output: String,
         }
 
+        let raw_output = String::from_utf8_lossy(&self.raw_output);
+        let output = match self.max_output_tokens {
+            Some(max_tokens) => self.truncated_output(max_tokens),
+            None => raw_output.to_string(),
+        };
+        let truncated = self.output_omitted_bytes.is_some() || output != raw_output;
         let result = UnifiedExecCodeModeResult {
             chunk_id: (!self.chunk_id.is_empty()).then(|| self.chunk_id.clone()),
             wall_time_seconds: self.wall_time.as_secs_f64(),
             exit_code: self.exit_code,
             session_id: self.process_id,
             original_token_count: self.original_token_count,
-            output: match self.max_output_tokens {
-                Some(max_tokens) => self.truncated_output(max_tokens),
-                None => String::from_utf8_lossy(&self.raw_output).to_string(),
-            },
+            truncated: truncated.then_some(true),
+            output,
         };
 
         serde_json::to_value(result).unwrap_or_else(|err| {

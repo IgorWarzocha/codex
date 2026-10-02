@@ -109,9 +109,10 @@ async fn start(
         ..KernelOptions::default()
     };
     let bootstrap = include_str!("../bootstrap.js")
+        .replace("__PLAIN_COMMAND_OUTPUT__", "false")
         .replace("__ENDPOINT__", "\"http://127.0.0.1:1\"")
         .replace("__CREDENTIAL__", "\"test\"");
-    Lifecycle::start(options, bootstrap, store, profile).await
+    Lifecycle::start(options, bootstrap, store, profile, false).await
 }
 
 async fn execute(lifecycle: &mut Lifecycle, source: &str) {
@@ -199,7 +200,7 @@ async fn fresh_seed_is_private_captured_and_never_registers_profile_hooks() {
 
 #[tokio::test]
 #[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
-async fn project_and_bootstrap_win_and_seed_precedes_startup_hooks() {
+async fn any_project_or_bootstrap_collision_rejects_the_entire_profile_before_hooks() {
     let disk = Disk::new();
     disk.save_profile().await;
     // Include a bootstrap collision in an otherwise valid, real captured profile.
@@ -216,7 +217,7 @@ async fn project_and_bootstrap_win_and_seed_precedes_startup_hooks() {
         .push(tools_entry);
     source.save_profile("default", &snapshot).await.unwrap();
     let mut owner = disk.start_at(&disk.project, "owner").await;
-    execute(&mut owner, "globalThis.shared = 'project'; globalThis.onStart = () => { globalThis.observed = [shared, helper(9)]; };").await;
+    execute(&mut owner, "globalThis.shared = 'project'; globalThis.onStart = () => { globalThis.observed = [shared, typeof helper]; };").await;
     owner
         .control(NotebookRequest::Pin {
             names: vec!["shared".into()],
@@ -234,13 +235,17 @@ async fn project_and_bootstrap_win_and_seed_precedes_startup_hooks() {
     owner.shutdown().await.unwrap();
 
     let mut fresh = disk.selected("fresh", "default", false).await.unwrap();
-    assert_eq!(read(&mut fresh, "observed").await, json!(["project", 10]));
+    assert_eq!(
+        read(&mut fresh, "observed").await,
+        json!(["project", "undefined"])
+    );
     assert_eq!(read(&mut fresh, "typeof tools").await, "object");
-    let skipped = fresh.status["defaultProfile"]["skipped"]
+    assert_eq!(fresh.status["defaultProfile"]["applied"], false);
+    let collisions = fresh.status["defaultProfile"]["collisions"]
         .as_array()
         .unwrap();
-    for name in ["shared", "tools", "pending"] {
-        assert!(skipped.iter().any(|e| e["name"] == name));
+    for name in ["shared", "tools"] {
+        assert!(collisions.iter().any(|e| e == name));
     }
     // Hook effects belong to the initial private checkpoint too.
     let private = disk
@@ -255,13 +260,17 @@ async fn project_and_bootstrap_win_and_seed_precedes_startup_hooks() {
 
 #[tokio::test]
 #[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
-async fn resume_ignores_changed_removed_and_invalid_profile_even_with_empty_checkpoint() {
+async fn resume_attempts_changed_removed_and_invalid_profiles_without_overwriting_state() {
     let disk = Disk::new();
     disk.save_profile().await;
     let mut fresh = disk.selected("thread", "default", false).await.unwrap();
     fresh.shutdown().await.unwrap();
     let mut source = disk.start_at(&disk.source, "source").await;
-    execute(&mut source, "shared = 'changed';").await;
+    execute(
+        &mut source,
+        "shared = 'changed'; globalThis.newProfileValue = 7;",
+    )
+    .await;
     source
         .control(NotebookRequest::Save {
             name: "default".into(),
@@ -275,11 +284,27 @@ async fn resume_ignores_changed_removed_and_invalid_profile_even_with_empty_chec
         read(&mut resumed, "[typeof unwantedHook, typeof pending]").await,
         json!(["undefined", "undefined"])
     );
-    assert!(resumed.status.get("defaultProfile").is_none());
+    assert_eq!(
+        read(&mut resumed, "typeof newProfileValue").await,
+        "undefined"
+    );
+    assert_eq!(resumed.status["defaultProfile"]["applied"], false);
+    assert!(
+        resumed.status["defaultProfile"]["collisionCount"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     resumed.shutdown().await.unwrap();
     std::fs::remove_dir_all(disk.profile_file().parent().unwrap()).unwrap();
     let mut resumed = disk.selected("thread", "default", false).await.unwrap();
     assert_eq!(read(&mut resumed, "shared").await, "profile");
+    assert!(
+        resumed.status["defaultProfile"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("not found")
+    );
     resumed
         .control(NotebookRequest::Release {
             names: vec!["shared".into(), "helper".into(), "profileHook".into()],
@@ -288,6 +313,8 @@ async fn resume_ignores_changed_removed_and_invalid_profile_even_with_empty_chec
         .unwrap();
     resumed.shutdown().await.unwrap();
     let mut empty = disk.selected("thread", "../invalid", false).await.unwrap();
+    assert_eq!(empty.status["defaultProfile"]["applied"], false);
+    assert!(empty.status["defaultProfile"]["error"].is_string());
     assert_eq!(
         read(
             &mut empty,
@@ -301,7 +328,7 @@ async fn resume_ignores_changed_removed_and_invalid_profile_even_with_empty_chec
 
 #[tokio::test]
 #[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
-async fn live_restart_release_recovery_and_reset_never_reapply_seed() {
+async fn restart_and_recovery_retry_the_configured_profile_but_reset_skips_it() {
     let disk = Disk::new();
     disk.save_profile().await;
     let mut fresh = disk.selected("fresh", "default", false).await.unwrap();
@@ -313,6 +340,7 @@ async fn live_restart_release_recovery_and_reset_never_reapply_seed() {
         .unwrap();
     fresh.control(NotebookRequest::Restart).await.unwrap();
     assert_eq!(read(&mut fresh, "typeof shared").await, "undefined");
+    assert_eq!(fresh.status["defaultProfile"]["applied"], false);
     // Lexical release forces the internal restore path too.
     execute(&mut fresh, "const lexical = 42;").await;
     let result = fresh
@@ -329,7 +357,13 @@ async fn live_restart_release_recovery_and_reset_never_reapply_seed() {
         json!(["undefined", "undefined"])
     );
     fresh.control(NotebookRequest::Restart).await.unwrap();
-    assert_eq!(read(&mut fresh, "typeof helper").await, "undefined");
+    assert_eq!(read(&mut fresh, "helper(4)").await, 5);
+    assert_eq!(fresh.status["defaultProfile"]["applied"], true);
+    fresh.checkpoint(&[]).await.unwrap();
+    fresh.shutdown().await.unwrap();
+    fresh.ensure().await.unwrap();
+    assert_eq!(read(&mut fresh, "helper(4)").await, 5);
+    assert_eq!(fresh.status["defaultProfile"]["applied"], false);
     fresh.shutdown().await.unwrap();
 }
 
@@ -387,7 +421,7 @@ async fn ephemeral_profile_reads_and_lifecycle_controls_never_change_disk() {
 
 #[tokio::test]
 #[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
-async fn fresh_missing_corrupt_and_invalid_profiles_fail_before_hooks() {
+async fn unreadable_profiles_report_not_loaded_but_invalid_values_fail_before_hooks() {
     let disk = Disk::new();
     disk.save_profile().await;
     let marker = disk.project.join("hook-ran");
@@ -409,26 +443,28 @@ async fn fresh_missing_corrupt_and_invalid_profiles_fail_before_hooks() {
         .unwrap();
     owner.shutdown().await.unwrap();
     for name in ["missing", "../invalid"] {
-        let error = disk.selected(name, name, false).await.err().unwrap();
-        assert!(error.contains("default notebook profile"), "{error}");
-        assert!(!marker.exists());
+        let mut started = disk.selected(name, name, false).await.unwrap();
+        assert_eq!(started.status["defaultProfile"]["applied"], false);
+        assert!(started.status["defaultProfile"]["error"].is_string());
+        assert!(marker.exists());
         assert!(
             disk.store(&disk.project, name)
                 .load_session()
                 .await
                 .unwrap()
-                .is_none()
+                .is_some()
         );
+        started.shutdown().await.unwrap();
+        std::fs::remove_file(&marker).unwrap();
     }
     let bytes = std::fs::read(disk.profile_file()).unwrap();
     std::fs::write(disk.profile_file(), b"not json").unwrap();
-    let error = disk
-        .selected("corrupt", "default", false)
-        .await
-        .err()
-        .unwrap();
+    let mut corrupt = disk.selected("corrupt", "default", false).await.unwrap();
+    let error = corrupt.status["defaultProfile"]["error"].as_str().unwrap();
     assert!(error.contains("Corrupt notebook state"), "{error}");
-    assert!(!marker.exists());
+    assert!(marker.exists());
+    corrupt.shutdown().await.unwrap();
+    std::fs::remove_file(&marker).unwrap();
     let mut invalid: Value = serde_json::from_slice(&bytes).unwrap();
     invalid["snapshot"]["entries"][0]["data"] = json!("anVuaw==");
     invalid["snapshot"]["entries"][0]["length"] = json!(4);

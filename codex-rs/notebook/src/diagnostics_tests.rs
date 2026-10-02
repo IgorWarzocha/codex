@@ -189,6 +189,7 @@ async fn real_deno_reports_notebook_static_errors_without_executing_cells() {
         "thread",
         "ready",
         &[],
+        crate::persistence::PersistenceBudget::from_heap_mib(Some(4096)),
     )
     .await
     .unwrap();

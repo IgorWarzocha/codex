@@ -429,6 +429,9 @@ fn exec_command_tool_output_formats_truncated_response() {
         output.log_output(),
         "Chunk ID: abc123\nWall time: 1.2500 seconds\nProcess exited with code 0\nOriginal token count: 10\nOutput:\ntoken one token two token three token four token five"
     );
+    let nested = output.code_mode_result(&payload);
+    assert_eq!(nested["truncated"], true);
+    assert_eq!(nested["original_token_count"], 10);
     let response = output.to_response_item("call-42", &payload);
 
     match response {
@@ -542,6 +545,12 @@ fn exec_command_tool_output_preserves_omission_metadata_when_truncated() {
         output.log_output(),
         format!("{expected_header}{marker}\nremaining output")
     );
+    output.max_output_tokens = None;
+    assert_eq!(output.code_mode_result(&payload)["truncated"], true);
+    output.output_omitted_bytes = None;
+    let untruncated = output.code_mode_result(&payload);
+    assert!(untruncated.get("truncated").is_none());
+    assert_eq!(untruncated["output"], "remaining output");
 
     let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
         panic!("expected FunctionCallOutput");

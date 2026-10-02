@@ -171,6 +171,11 @@ pub trait CodeModeSession: Send + Sync {
     fn terminate<'a>(&'a self, cell_id: CellId) -> CodeModeSessionResultFuture<'a, WaitOutcome>;
 
     fn shutdown<'a>(&'a self) -> CodeModeSessionResultFuture<'a, ()>;
+
+    /// Stop without executing user cleanup code, for example after permission revocation.
+    fn shutdown_without_cleanup<'a>(&'a self) -> CodeModeSessionResultFuture<'a, ()> {
+        self.shutdown()
+    }
 }
 
 /// Creates code-mode sessions for Codex threads.

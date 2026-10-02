@@ -18,6 +18,7 @@ use crate::KernelError;
 use crate::KernelOptions;
 
 const STDERR_BYTES: usize = 16 * 1024;
+const STDERR_DRAIN_GRACE: Duration = Duration::from_millis(100);
 
 #[cfg(windows)]
 mod windows;
@@ -97,7 +98,7 @@ impl Process {
             command.env("DENO_V8_FLAGS", flags);
         }
         // Deno cannot inherit these listeners. A small handoff race is unavoidable.
-        // A competing bind causes an explicit startup failure, never unauthenticated reuse.
+        // The kernel retries only a verified startup bind failure, never reusing a peer.
         // Release before spawn: the child may bind before the parent is scheduled again.
         drop(reservations);
         #[cfg(windows)]
@@ -144,14 +145,18 @@ impl Process {
     }
 
     pub(crate) fn exited(&self, status: std::process::ExitStatus) -> KernelError {
+        KernelError::Exited {
+            status: status.to_string(),
+            stderr: self.stderr(),
+        }
+    }
+
+    pub(crate) fn stderr(&self) -> String {
         let stderr = self
             .stderr
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        KernelError::Exited {
-            status: status.to_string(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        }
+        String::from_utf8_lossy(&stderr).into_owned()
     }
 
     pub(crate) fn kill(&mut self) -> Result<(), KernelError> {
@@ -190,9 +195,15 @@ impl Process {
         {
             self.process_group = None;
         }
-        self.stderr_task.abort();
-        // Join the owned drainer after abort, then delete credentials only after exit.
-        let _ = (&mut self.stderr_task).await;
+        // Drain the final exit diagnostic before a startup retry is classified.
+        // A descendant holding the pipe cannot extend cleanup indefinitely.
+        if tokio::time::timeout(grace.min(STDERR_DRAIN_GRACE), &mut self.stderr_task)
+            .await
+            .is_err()
+        {
+            self.stderr_task.abort();
+            let _ = (&mut self.stderr_task).await;
+        }
         if let Some(directory) = self.directory.take() {
             directory.close()?;
         }

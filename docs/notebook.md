@@ -33,8 +33,12 @@ For persistent configuration:
 runtime = "notebook"
 # Optional explicit executable. A missing override fails without downloading.
 deno_program = "/absolute/path/to/deno"
-# Optional saved profile for fresh Notebook threads.
+# Optional saved profile, applied after restoring saved bindings.
 notebook_profile = "daily"
+# Heap limit in MiB. Default 4096, allowed range 256 through 65536.
+notebook_max_heap_mib = 4096
+# Print command output below its metadata. Default false uses JSON.
+notebook_plain_command_output = true
 ```
 
 Full-access permissions must still be selected separately. Omit `runtime` or set it to `"v8"` to retain upstream behavior.
@@ -53,17 +57,21 @@ The workspace has a distinct prerelease version. Keep a real version rather than
 - Checkpoints and named profiles restore values and function definitions. They never replay cells. Functions must be self-contained or use retained global dependencies. Open handles, imports, promises and other unsupported values are reported as skipped.
 - Nested tools use Codex's existing dispatcher and tool approvals.
 - Cells can yield and continue through `wait`. Only one cell runs per kernel at a time.
-- Ordinary JavaScript errors retain the kernel. Cancellation and terminal kernel failures invalidate its in-memory state. Ask the agent to restart the notebook from its checkpoint, or reset it to durable project state. Neither operation replays failed work or reverses external side effects.
+- Ordinary JavaScript errors retain the kernel but do not checkpoint the failed cell. Cancellation invalidates live state, and the next execution restores the last completed checkpoint. Terminal kernel failures trigger a bounded recovery attempt. Recovery reports its result and never replays failed work or reverses external side effects. Manual restart and reset remain available if recovery fails.
 
 The agent's `notebook` tool manages status, checkpoints, profiles and pins. Ask it to inspect retained bindings, pin a reusable helper, save a named profile, or prune unpinned temporary state. Pinned functions can run after startup or nested tool results. These hooks run with the same full host access as notebook cells.
 
-To choose a default profile, first save one with `notebook`'s `save` action, then set `features.code_mode.notebook_profile` to its name. Fresh threads load its missing bindings before startup hooks. Existing project bindings win, and status reports loaded and skipped names. Profile bindings remain thread-private unless pinned. A resumed private checkpoint takes precedence over the configured profile, even if that profile has changed or been removed. Restart and reset do not reapply the profile within a running thread. Missing or invalid profiles fail fresh startup visibly. Ephemeral threads may read a default profile without writing state. Explicit `notebook load` retains its stricter collision checks.
+To choose a default profile, first save one with `notebook`'s `save` action, then set `features.code_mode.notebook_profile` to its name. Startup and restart attempt the profile after restoring project and private bindings, before startup hooks. Any name collision leaves the entire profile unapplied and preserves restored bindings. Status reports whether the profile loaded. Unavailable profiles produce a notice, while failures applying a profile abort startup. Profile bindings remain thread-private unless pinned. Reset restores durable project state without applying the profile. Ephemeral threads may read a profile without writing state. Explicit `notebook load` also rejects collisions.
+
+`text(await tools.exec_command(...))` and `text(await tools.write_stdin(...))` omit routine timing and chunk metadata. Set `notebook_plain_command_output = true` to show command output on separate lines instead of inside JSON. Exit codes, running session IDs and truncation information remain visible. The returned JavaScript object is unchanged, so code can still inspect every field.
+
+Normal shutdown checkpoints an idle notebook and runs `Symbol.dispose` and `Symbol.asyncDispose` cleanup with a bounded wait. An interrupted or unavailable kernel is terminated without running cleanup. Permission revocation also skips user cleanup code.
 
 Historical cells are saved as bounded `.ipynb` journals. Diagnostics checks that history with Deno's language server, separately from the current kernel's health. Journals are not a recovery script.
 
 Startup context and notebook status list exact-version npm imports found in successful project cells. The agent must ask before using an unlisted package. This inventory is guidance, not a package sandbox or proof of prior approval. Imports are not restored as live modules. Recreate them explicitly or in a pinned startup helper.
 
-State lives under `$CODEX_HOME/notebook`, outside the working tree. These private files contain code and serialized values, not encrypted data. Project state is shared by directories within the same Git repository. Session checkpoints remain thread-private. `--ephemeral` keeps checkpoints in memory and disables disk profiles and journals.
+State lives under `$CODEX_HOME/notebook`, outside the working tree. These private files contain code and serialized values, not encrypted data. Project state is shared by directories within the same Git repository. Session checkpoints remain thread-private. `--ephemeral` keeps checkpoints in memory and disables profile writes and journals.
 
 ## Remote notes and history
 
@@ -79,7 +87,7 @@ On Unix, the controller owns the kernel's process group. On Windows, it assigns 
 
 Retained functions do not preserve lexical closures. Recreate live connections and imported dependencies in a pinned startup function. A failed startup hook blocks execution until the hook is repaired or unpinned. When the kernel has not started, unpin and reset operate on saved state without running startup hooks. Profile loading rejects name collisions instead of overwriting live bindings.
 
-Checkpoint and journal budgets follow the kernel heap: one eighth of the heap, clamped between 8 MiB and 256 MiB. The default 512 MiB heap gives a 64 MiB persistence budget. Values that cannot fit are reported as skipped. Releasing lexical bindings may require rebuilding the kernel from retained values, so runtime-only handles must be recreated.
+Checkpoint and journal budgets follow the configured kernel heap: one eighth of the heap, clamped between 8 MiB and 256 MiB. The default 4096 MiB heap gives a 256 MiB persistence budget. Values that cannot fit are reported as skipped. Releasing lexical bindings may require rebuilding the kernel from retained values, so runtime-only handles must be recreated.
 
 ## Implementation
 

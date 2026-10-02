@@ -35,6 +35,8 @@ pub(crate) struct Lifecycle {
     imports: Vec<String>,
     imports_error: Option<String>,
     snapshot: Value,
+    configured_profile: Option<(Store, String)>,
+    skip_profile_once: bool,
     default_profile: Option<Value>,
     pub(crate) status: Value,
     pub(crate) checkpoint_details: Value,
@@ -47,6 +49,7 @@ impl Lifecycle {
         bootstrap: String,
         store: Option<Store>,
         default_profile: Option<(Store, String)>,
+        skip_profile_once: bool,
     ) -> Result<Self, String> {
         let import_history = match &store {
             Some(store) => Some(store.import_history().await?),
@@ -62,14 +65,15 @@ impl Lifecycle {
             imports_error: None,
             baseline: HashSet::new(),
             snapshot: json!({"entries":[],"skipped":[]}),
+            configured_profile: default_profile,
+            skip_profile_once,
             default_profile: None,
             status: json!({}),
             checkpoint_details: json!({"state":"not_saved"}),
             persistence_error: None,
         };
-        lifecycle.restore(false, default_profile).await?;
-        // Persist the seed and startup-hook mutations before exposing the fresh
-        // session. A later resume must never need the profile or replay its seed.
+        lifecycle.restore(false).await?;
+        // Persist profile values and startup-hook mutations before exposing the session.
         if lifecycle.default_profile.is_some()
             && let Err(error) = lifecycle.checkpoint(&[]).await
         {
@@ -79,12 +83,10 @@ impl Lifecycle {
         Ok(lifecycle)
     }
 
-    async fn restore(
-        &mut self,
-        reset: bool,
-        default_profile: Option<(Store, String)>,
-    ) -> Result<(), String> {
+    async fn restore(&mut self, reset: bool) -> Result<(), String> {
         self.shutdown().await?;
+        self.default_profile = None;
+        let skip_profile = reset || std::mem::take(&mut self.skip_profile_once);
         if let Some(history) = &self.import_history {
             match history.read().await {
                 Ok(imports) => {
@@ -96,6 +98,11 @@ impl Lifecycle {
         }
         if reset && let Some(store) = &mut self.store {
             store.reset_session().await?;
+        }
+        if reset {
+            // Ephemeral recovery uses this snapshot in lieu of a private file.
+            // Reset must remain authoritative even before another cell succeeds.
+            self.snapshot = json!({"entries":[],"skipped":[]});
         }
         let mut kernel = Kernel::start(self.options.clone())
             .await
@@ -127,7 +134,11 @@ impl Lifecycle {
         };
         self.baseline = names.into_iter().collect();
         self.kernel = Some(kernel);
-        let restored = self.restore_values(reset, default_profile).await;
+        let restored = async {
+            self.restore_values(reset, skip_profile).await?;
+            self.refresh_status().await
+        }
+        .await;
         if let Err(error) = restored {
             let cleanup = self.shutdown().await;
             return Err(format!(
@@ -138,15 +149,19 @@ impl Lifecycle {
                     .unwrap_or_default()
             ));
         }
-        self.refresh_status().await?;
         Ok(())
     }
 
-    async fn restore_values(
-        &mut self,
-        reset: bool,
-        default_profile: Option<(Store, String)>,
-    ) -> Result<(), String> {
+    /// Restore values and hooks, never journaled source or failed work.
+    pub(crate) async fn ensure(&mut self) -> Result<bool, String> {
+        if self.kernel.is_some() {
+            return Ok(false);
+        }
+        self.restore(false).await?;
+        Ok(true)
+    }
+
+    async fn restore_values(&mut self, reset: bool, skip_profile: bool) -> Result<(), String> {
         let (project, private) = match &mut self.store {
             Some(store) => (
                 store.load_project().await?,
@@ -200,23 +215,34 @@ impl Lifecycle {
             )
             .await?;
         }
-        // The source exists only on the initial start. An empty durable private
-        // checkpoint is still authoritative, including bindings already released.
-        if !(self.store.is_some() && private.is_some())
-            && let Some((source, name)) = default_profile
-        {
-            self.seed_default_profile(&source, &name).await?;
+        // Each startup attempts the configured profile after restoring retained
+        // state. Collisions reject the entire profile. Reset deliberately skips it.
+        if !skip_profile {
+            self.seed_default_profile().await?;
         }
         self.rpc_expression("await globalThis.__codexNotebook.runStartupHooks()")
             .await?;
         Ok(())
     }
 
-    async fn seed_default_profile(&mut self, source: &Store, name: &str) -> Result<(), String> {
-        let mut snapshot = source
-            .load_profile(name)
-            .await
-            .map_err(|error| format!("default notebook profile {name}: {error}"))?;
+    async fn seed_default_profile(&mut self) -> Result<(), String> {
+        let Some((source, name)) = &self.configured_profile else {
+            return Ok(());
+        };
+        let name = name.clone();
+        let mut snapshot = match source.load_profile(&name).await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let notice = format!(
+                    "Notebook profile {name} was not loaded: {}",
+                    bound_text(&error, 2048)
+                );
+                self.default_profile = Some(
+                    json!({"name":name,"applied":false,"loadedBindings":0,"error":bound_text(&error, 2048),"notice":notice}),
+                );
+                return Ok(());
+            }
+        };
         let available: HashSet<_> = self
             .kernel
             .as_mut()
@@ -226,16 +252,28 @@ impl Lifecycle {
             .map_err(|error| error.to_string())?
             .into_iter()
             .collect();
-        let mut skipped = snapshot["skipped"].as_array().cloned().unwrap_or_default();
+        let collisions: Vec<_> = entries(&snapshot)
+            .into_iter()
+            .filter_map(|entry| {
+                entry["name"]
+                    .as_str()
+                    .filter(|name| available.contains(*name))
+                    .map(str::to_owned)
+            })
+            .collect();
+        if !collisions.is_empty() {
+            let notice = format!(
+                "Notebook profile {name} was not loaded because {} binding collision(s) already exist",
+                collisions.len()
+            );
+            self.default_profile = Some(
+                json!({"name":name,"applied":false,"loadedBindings":0,"collisionCount":collisions.len(),"collisions":bounded_bindings(collisions.into_iter().map(Value::String).collect(), 2048),"notice":notice}),
+            );
+            return Ok(());
+        }
+        let skipped = snapshot["skipped"].as_array().cloned().unwrap_or_default();
         let mut selected = Vec::new();
         for mut entry in entries(&snapshot) {
-            if entry["name"]
-                .as_str()
-                .is_some_and(|n| available.contains(n))
-            {
-                skipped.push(json!({"name":entry["name"],"reason":"existing binding"}));
-                continue;
-            }
             // Profile values cannot introduce pin or startup-hook registrations.
             if let Some(entry) = entry.as_object_mut() {
                 entry.remove("pinned");
@@ -254,6 +292,7 @@ impl Lifecycle {
         let skipped = bounded_bindings(skipped, 4096);
         self.default_profile = Some(json!({
             "name":name,
+            "applied":true,
             "loadedBindings":loaded_count,
             "skippedBindings":skipped_count,
             "omittedLoaded":loaded_count - loaded.len(),
@@ -306,7 +345,7 @@ impl Lifecycle {
             .collect::<Vec<_>>()
             .join(",");
         self.rpc_expression(&format!(
-            "await globalThis.__codexNotebookState.{method}({arguments})"
+            "await (async () => {{ if (typeof globalThis.__codexNotebookState?.{method} !== 'function') throw new Error('Notebook runtime bootstrap unavailable: __codexNotebookState.{method}'); return await globalThis.__codexNotebookState.{method}({arguments}); }})()"
         ))
         .await
     }
@@ -344,6 +383,16 @@ impl Lifecycle {
             }
         };
         if let Some(error) = result_error(&result) {
+            if bootstrap_failure(&error) {
+                let cleanup = self.shutdown().await;
+                return Err(format!(
+                    "{error}. {RECOVERY_NOTICE}{}",
+                    cleanup
+                        .err()
+                        .map(|e| format!("; cleanup: {e}"))
+                        .unwrap_or_default()
+                ));
+            }
             return Err(error);
         }
         if result.output_truncated {
@@ -506,6 +555,29 @@ impl Lifecycle {
         &mut self,
         request: NotebookRequest,
     ) -> Result<NotebookControlResult, String> {
+        // Recovery controls must remain usable after a failed startup hook.
+        // In particular, cold unpin/reset never retry the offending hook.
+        if self.kernel.is_none() && matches!(request, NotebookRequest::Reset) {
+            if let Some(store) = &mut self.store {
+                store.reset_session().await?;
+            }
+            self.snapshot = json!({"entries":[],"skipped":[]});
+            self.skip_profile_once = true;
+            self.checkpoint_details = json!({"state":"reset"});
+            self.persistence_error = None;
+            return Ok(NotebookControlResult::with_details(
+                "Notebook private checkpoint reset",
+                json!({"reset":true,"projectPreserved":true}),
+            ));
+        }
+        let recovered = if matches!(
+            request,
+            NotebookRequest::Unpin { .. } | NotebookRequest::Reset | NotebookRequest::Restart
+        ) {
+            false
+        } else {
+            self.ensure().await?
+        };
         let label = match &request {
             NotebookRequest::Status { .. } => "Notebook status",
             NotebookRequest::Checkpoint => "Notebook checkpoint",
@@ -524,22 +596,27 @@ impl Lifecycle {
         let details = match request {
             NotebookRequest::Status { query } => {
                 self.refresh_status().await?;
-                return Ok(status_result(
+                let mut result = status_result(
                     &self.status,
                     &self.checkpoint_details,
                     self.persistence_error.as_deref(),
                     query.as_deref(),
                     false,
-                ));
+                );
+                if recovered {
+                    result.message.push_str(&format!("\n{RESTORED_NOTICE}"));
+                }
+                return Ok(result);
             }
             NotebookRequest::Checkpoint => self.checkpoint(&[]).await?,
             NotebookRequest::Restart => {
+                self.skip_profile_once = false;
                 let mut disposal = Value::Null;
                 if self.kernel.is_some() {
                     self.checkpoint(&[]).await?;
                     disposal = self.dispose_all().await?;
                 }
-                self.restore(false, None).await?;
+                self.restore(false).await?;
                 json!({"restarted":true,"checkpoint":self.checkpoint_details,"disposal":disposal})
             }
             NotebookRequest::Reset => {
@@ -547,7 +624,7 @@ impl Lifecycle {
                 if self.kernel.is_some() {
                     disposal = self.dispose_all().await?;
                 }
-                self.restore(true, None).await?;
+                self.restore(true).await?;
                 self.checkpoint_details = json!({"state":"reset"});
                 self.persistence_error = None;
                 json!({"reset":true,"projectPreserved":true,"disposal":disposal})
@@ -592,7 +669,7 @@ impl Lifecycle {
                     ));
                 }
                 if let Err(error) = self.rpc("restore", vec![snapshot]).await {
-                    self.restore(false, None).await?;
+                    self.restore(false).await?;
                     return Err(error);
                 }
                 self.checkpoint(&[]).await?;
@@ -615,7 +692,11 @@ impl Lifecycle {
                 return Err("read-only request was not routed by provider".to_string());
             }
         };
-        Ok(NotebookControlResult::with_details(label, details))
+        let mut result = NotebookControlResult::with_details(label, details);
+        if recovered {
+            result.message.push_str(&format!("\n{RESTORED_NOTICE}"));
+        }
+        Ok(result)
     }
 
     fn pinned_names(&self) -> HashSet<String> {
@@ -789,7 +870,7 @@ impl Lifecycle {
             self.checkpoint(&names).await?;
             let checkpoint = self.checkpoint_details.clone();
             let disposal = self.dispose_all().await?;
-            self.restore(false, None).await?;
+            self.restore(false).await?;
             // A concurrent project pin can defeat the checkpoint deletion. Report
             // the restored inventory, not merely the requested exclusions.
             let remaining = self.names().await?;
@@ -817,6 +898,49 @@ impl Lifecycle {
         self.rpc("dispose", vec![json!(names)]).await
     }
 
+    /// Only a viable idle kernel may execute exit cleanup. Each phase is bounded;
+    /// a dropped execute kills its process group through the kernel's guard.
+    pub(crate) async fn finish(&mut self) -> Result<(), String> {
+        let mut errors = Vec::new();
+        if self.kernel.is_some() {
+            match tokio::time::timeout(Duration::from_millis(1500), self.checkpoint(&[])).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => errors.push(format!("Notebook exit checkpoint failed: {error}")),
+                Err(_) => {
+                    errors.push("Notebook exit checkpoint timed out".to_string());
+                    if let Err(error) = self.shutdown().await {
+                        errors.push(error);
+                    }
+                }
+            }
+        }
+        if self.kernel.is_some() {
+            match tokio::time::timeout(Duration::from_millis(1500), self.dispose_all()).await {
+                Ok(Ok(result)) => {
+                    if result["failures"]
+                        .as_array()
+                        .is_some_and(|failures| !failures.is_empty())
+                    {
+                        errors.push(format!(
+                            "Notebook exit disposal failed: {}",
+                            format_details(&result["failures"], 4096)
+                        ));
+                    }
+                }
+                Ok(Err(error)) => errors.push(format!("Notebook exit disposal failed: {error}")),
+                Err(_) => errors.push("Notebook exit disposal timed out".to_string()),
+            }
+        }
+        if let Err(error) = self.shutdown().await {
+            errors.push(error);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        }
+    }
+
     pub(crate) async fn shutdown(&mut self) -> Result<(), String> {
         match self.kernel.take() {
             Some(mut kernel) => kernel.shutdown().await.map_err(|e| e.to_string()),
@@ -835,8 +959,13 @@ fn entries(snapshot: &Value) -> Vec<Value> {
     snapshot["entries"].as_array().cloned().unwrap_or_default()
 }
 fn recovery_error() -> String {
-    "notebook kernel is unavailable. Use notebook restart or reset to recover in this thread"
+    "notebook kernel is unavailable. The next operation will restore the last completed checkpoint"
         .to_string()
+}
+pub(crate) const RECOVERY_NOTICE: &str = "Kernel discarded. The next operation will restore the last completed checkpoint. Failed work will not be replayed; external side effects were not rolled back";
+pub(crate) const RESTORED_NOTICE: &str = "Notebook restored from the last completed checkpoint. Startup hooks ran again; cells were not replayed and external side effects were not rolled back";
+pub(crate) fn bootstrap_failure(error: &str) -> bool {
+    error.contains("Notebook runtime bootstrap unavailable: __codexNotebook")
 }
 pub(crate) fn status_result(
     status: &Value,

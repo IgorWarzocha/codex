@@ -411,6 +411,7 @@ async fn managed_download_kernel() {
         "managed-test",
         "not_started",
         &[],
+        crate::persistence::PersistenceBudget::from_heap_mib(Some(4096)),
     )
     .await
     .unwrap();

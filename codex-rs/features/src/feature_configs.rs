@@ -44,9 +44,16 @@ pub struct CodeModeConfigToml {
     /// Explicit Deno executable. Otherwise use PATH or install the pinned Notebook runtime.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deno_program: Option<std::path::PathBuf>,
-    /// Named Notebook profile to seed fresh threads. Restored bindings take precedence.
+    /// Named Notebook profile to load after restoring saved bindings. Collisions preserve restored state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notebook_profile: Option<String>,
+    /// Notebook V8 heap limit in MiB. Defaults to 4096, allowed range 256 through 65536.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 256, max = 65536))]
+    pub notebook_max_heap_mib: Option<u32>,
+    /// Render Notebook command tool results as metadata followed by plain output text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notebook_plain_command_output: Option<bool>,
     /// Default yield timeout for code-mode exec calls, in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_exec_yield_time_ms: Option<u64>,

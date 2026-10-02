@@ -223,7 +223,7 @@ await Deno.writeTextFile("effect.txt", "once", { append: true });
 
 #[tokio::test]
 #[ignore = "requires a Deno Jupyter executable, DENO_PROGRAM defaults to deno"]
-async fn hooks_restore_without_recursion_and_cancelled_cells_require_explicit_recovery() {
+async fn hooks_restore_without_recursion_and_cancelled_cells_recover_on_the_next_operation() {
     let home = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let notebook = provider(home.path(), project.path(), "hooks");
@@ -284,13 +284,9 @@ function initialize() { globalThis.starts = (globalThis.starts ?? 0) + 1; }
         "{status:?}"
     );
     session.terminate(cell_id).await.unwrap();
-    assert!(
-        session
-            .execute(request("text('unexpected');"), echo.clone(), None)
-            .await
-            .is_err()
-    );
-    control(&notebook, json!({"action":"restart"})).await;
+    // A management operation restores the completed checkpoint after interruption.
+    let restored = control(&notebook, json!({"action":"status"})).await;
+    assert!(restored.message.contains("Notebook restored"));
     assert_eq!(
         execute(
             &session,

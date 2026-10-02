@@ -20,6 +20,7 @@ use crate::control::NotebookControlResult;
 use crate::journal::CodeCell;
 use crate::journal::Journal;
 use crate::journal::bound_text;
+use crate::persistence::PersistenceBudget;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 const RESPONSE_BUDGET: usize = 16 * 1024;
@@ -46,6 +47,7 @@ pub(crate) async fn diagnostics_with_runtime(
     thread_id: &str,
     runtime_health: &str,
     runtime_bindings: &[String],
+    budget: PersistenceBudget,
 ) -> Result<NotebookControlResult, String> {
     if !matches!(
         runtime_health,
@@ -53,7 +55,7 @@ pub(crate) async fn diagnostics_with_runtime(
     ) {
         return Err("invalid notebook runtime health".into());
     }
-    let journal = Journal::new(codex_home, cwd, thread_id)?;
+    let journal = Journal::with_budget(codex_home, cwd, thread_id, budget.payload_bytes())?;
     let journal_path = journal.path.clone();
     let path = bound_text(&journal.path.display().to_string(), TEXT_BUDGET);
     let cells = match tokio::task::spawn_blocking(move || journal.code_cells())

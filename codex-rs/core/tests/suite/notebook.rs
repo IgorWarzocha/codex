@@ -100,3 +100,74 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }
+
+#[test_case::test_case(false; "json")]
+#[test_case::test_case(true; "plain")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires a local Deno executable and Unix shell"]
+#[cfg(unix)]
+async fn notebook_command_output_projects_only_the_displayed_result(plain: bool) -> Result<()> {
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("command-response"),
+                ev_custom_tool_call(
+                    "command-output",
+                    "exec",
+                    r#"var commandResult = await tools.exec_command({cmd: "printf 'first\\nsecond\\n'; exit 7", login: false});
+text(commandResult);
+text({...commandResult});
+text(commandResult.output);"#,
+                ),
+                ev_completed("command-response"),
+            ]),
+            sse(vec![ev_assistant_message("done", "done"), ev_completed("done")]),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(move |config| {
+            config.code_mode.runtime = CodeModeRuntime::Notebook;
+            config.code_mode.deno_program = Some(
+                std::env::var_os("DENO_PROGRAM")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| "deno".into()),
+            );
+            config.code_mode.notebook_plain_command_output = plain;
+            config.ephemeral = true;
+            config.features.enable(Feature::CodeModeOnly).unwrap();
+        })
+        .build(&server)
+        .await?;
+    test.submit_turn("Run the command and inspect the returned object")
+        .await?;
+    let requests = responses.requests();
+    let result = requests[1].custom_tool_call_output("command-output");
+    let items = result["output"].as_array().expect("three text emissions");
+    assert_eq!(items.len(), 3, "{result}");
+    let projected = items[0]["text"].as_str().unwrap();
+    let projected_metadata: serde_json::Value = serde_json::from_str(if plain {
+        let (metadata, output) = projected.split_once("\nOutput:\n").unwrap();
+        assert_eq!(output, "first\nsecond\n");
+        metadata
+    } else {
+        projected
+    })?;
+    assert_eq!(projected_metadata["exit_code"], 7);
+    for key in ["chunk_id", "wall_time_seconds", "original_token_count"] {
+        assert!(projected_metadata.get(key).is_none(), "{projected}");
+    }
+    if !plain {
+        assert_eq!(projected_metadata["output"], "first\nsecond\n");
+    }
+    let raw: serde_json::Value = serde_json::from_str(items[1]["text"].as_str().unwrap())?;
+    assert_eq!(raw["exit_code"], 7);
+    assert_eq!(raw["output"], "first\nsecond\n");
+    assert!(raw.get("chunk_id").is_some(), "{raw}");
+    assert!(raw.get("wall_time_seconds").is_some(), "{raw}");
+    assert_eq!(items[2]["text"], "first\nsecond\n");
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}

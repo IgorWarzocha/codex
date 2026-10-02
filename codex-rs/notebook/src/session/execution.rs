@@ -12,6 +12,9 @@ use super::Registry;
 use crate::cell::text_item;
 use crate::journal::Journal;
 use crate::lifecycle::Lifecycle;
+use crate::lifecycle::RECOVERY_NOTICE;
+use crate::lifecycle::RESTORED_NOTICE;
+use crate::lifecycle::bootstrap_failure;
 
 struct WorkerGuard {
     registry: Arc<Registry>,
@@ -56,10 +59,24 @@ pub(super) async fn run_session(
         };
         match command {
             Command::Execute(command) => {
-                run_cell(&mut lifecycle, journal.as_ref(), &registry, command).await
+                run_cell(
+                    &mut lifecycle,
+                    journal.as_ref(),
+                    &registry,
+                    &cancellation,
+                    command,
+                )
+                .await
             }
             Command::Control(request, reply) => {
-                let result = lifecycle.control(request).await;
+                let result = tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => {
+                        let _ = lifecycle.shutdown().await;
+                        Err("notebook session is shut down".to_string())
+                    }
+                    result = lifecycle.control(request) => result,
+                };
                 registry.update(&lifecycle);
                 registry
                     .state
@@ -70,13 +87,28 @@ pub(super) async fn run_session(
             }
         }
     }
-    lifecycle.shutdown().await
+    let graceful = registry
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .shutdown_mode
+        == super::ShutdownMode::Graceful;
+    if graceful {
+        tokio::select! {
+            biased;
+            _ = registry.no_cleanup.cancelled() => lifecycle.shutdown().await,
+            result = lifecycle.finish() => result,
+        }
+    } else {
+        lifecycle.shutdown().await
+    }
 }
 
 async fn run_cell(
     lifecycle: &mut Lifecycle,
     journal: Option<&Journal>,
     registry: &Registry,
+    session_cancellation: &CancellationToken,
     command: CellCommand,
 ) {
     let CellCommand {
@@ -84,6 +116,26 @@ async fn run_cell(
         source,
         user_source,
     } = command;
+    let ready = tokio::select! {
+        biased;
+        _ = cell.cancellation.cancelled() => Err("notebook execution cancelled before startup".to_string()),
+        result = lifecycle.ensure() => result,
+    };
+    match ready {
+        Ok(true) => cell.push(text_item(RESTORED_NOTICE)),
+        Ok(false) => {}
+        Err(error) => {
+            let _ = lifecycle.shutdown().await;
+            registry.update(lifecycle);
+            registry
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .active = None;
+            cell.finish(Some(error));
+            return;
+        }
+    }
     if let Some(journal) = journal {
         let journal = journal.clone();
         let (id, source) = (cell.id.as_str().to_string(), user_source.clone());
@@ -109,9 +161,7 @@ async fn run_cell(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .active = None;
-        cell.finish(Some(
-            "kernel unavailable. Use notebook restart or reset".to_string(),
-        ));
+        cell.finish(Some(RECOVERY_NOTICE.to_string()));
         return;
     };
     let result = kernel
@@ -133,7 +183,7 @@ async fn run_cell(
     // A separate flush request also drains synchronous text() calls before a JS exception.
     if !broken && !cell.cancellation.is_cancelled() {
         let flush_source = format!(
-            "try {{ await globalThis.__codexNotebook.flush({0}); }} finally {{ globalThis.__codexNotebook.completed({0}); }}",
+            "if (typeof globalThis.__codexNotebook?.flush !== 'function' || typeof globalThis.__codexNotebook?.completed !== 'function') throw new Error('Notebook runtime bootstrap unavailable: __codexNotebook.finish'); try {{ await globalThis.__codexNotebook.flush({0}); }} finally {{ globalThis.__codexNotebook.completed({0}); }}",
             serde_json::json!(cell.id.as_str())
         );
         match kernel
@@ -162,6 +212,8 @@ async fn run_cell(
     if cell.cancellation.is_cancelled() {
         broken = true;
     }
+    let bootstrap_lost = error.as_deref().is_some_and(bootstrap_failure);
+    broken |= bootstrap_lost;
     // Import literals in failed or interrupted cells are not added to the known inventory.
     // This records use, not user consent, and never authorizes or blocks an import.
     if !broken
@@ -179,7 +231,32 @@ async fn run_cell(
                 format!("Kernel cleanup failed: {shutdown_error}"),
             );
         }
-    } else {
+        if !cell.cancellation.is_cancelled()
+            && !session_cancellation.is_cancelled()
+            && !bootstrap_lost
+        {
+            let recovered = tokio::select! {
+                biased;
+                _ = cell.cancellation.cancelled() => Err("notebook recovery cancelled".to_string()),
+                result = lifecycle.ensure() => result,
+            };
+            match recovered {
+                Ok(_) => append_error(&mut error, RESTORED_NOTICE.to_string()),
+                Err(recovery_error) => {
+                    let _ = lifecycle.shutdown().await;
+                    append_error(
+                        &mut error,
+                        format!("Notebook recovery failed: {recovery_error}. {RECOVERY_NOTICE}"),
+                    );
+                }
+            }
+        } else {
+            cell.push(text_item(RECOVERY_NOTICE));
+        }
+    } else if error.is_none() {
+        // Automatic checkpoints belong only to successful completed cells.
+        // JS exceptions retain live mutations, but never promote failed work
+        // into the checkpoint used for interruption/fatal recovery.
         let checkpoint = tokio::select! {
             biased;
             _ = cell.cancellation.cancelled() => Err("checkpoint interrupted by notebook cancellation".to_string()),

@@ -41,6 +41,7 @@ use crate::lifecycle::status_result;
 #[derive(Default)]
 pub(crate) struct Registry {
     state: Mutex<SessionState>,
+    no_cleanup: CancellationToken,
 }
 
 #[derive(Default)]
@@ -48,12 +49,20 @@ struct SessionState {
     cells: HashMap<CellId, Arc<Cell>>,
     active: Option<CellId>,
     closed: bool,
+    shutdown_mode: ShutdownMode,
     broken: bool,
     managing: bool,
     status: Value,
     checkpoint: Value,
     persistence_error: Option<String>,
     completed_cells: u64,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ShutdownMode {
+    #[default]
+    Immediate,
+    Graceful,
 }
 
 impl Registry {
@@ -137,7 +146,7 @@ impl Session {
                 return Err("notebook session is shut down".to_string());
             }
             if let NotebookRequest::Status { query } = &request
-                && (state.active.is_some() || state.managing || state.broken)
+                && (state.active.is_some() || state.managing)
             {
                 let mut result = status_result(
                     &state.status,
@@ -150,7 +159,7 @@ impl Session {
                     result.details["state"] = json!("invalidated");
                     result
                         .message
-                        .push_str("\nKernel unavailable. Use notebook restart or reset");
+                        .push_str("\nKernel unavailable. The next operation will restore the last completed checkpoint");
                 }
                 return Ok(result);
             }
@@ -168,11 +177,6 @@ impl Session {
             {
                 cell.cancellation.cancel();
             }
-            if state.broken && !recovery && !matches!(request, NotebookRequest::Unpin { .. }) {
-                return Err(
-                    "kernel unavailable. Use notebook restart or reset in this thread".to_string(),
-                );
-            }
             let (reply, response) = oneshot::channel();
             state.managing = true;
             if self
@@ -189,6 +193,42 @@ impl Session {
         response
             .await
             .map_err(|_| "notebook management worker stopped".to_string())?
+    }
+}
+
+impl Session {
+    async fn shutdown_inner(&self, mode: ShutdownMode) -> Result<(), String> {
+        if mode == ShutdownMode::Immediate {
+            self.registry.no_cleanup.cancel();
+        }
+        {
+            let mut state = self
+                .registry
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !state.closed {
+                state.shutdown_mode = mode;
+                state.closed = true;
+            }
+        }
+        // Close admission before cancellation. The worker must never restore a
+        // runtime once the session has begun shutting down.
+        self.cancellation.cancel();
+        let _shutdown = self
+            .shutdown_gate
+            .acquire()
+            .await
+            .map_err(|e| e.to_string())?;
+        let resources = self
+            .resources
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        match resources {
+            Some(resources) => resources.shutdown().await,
+            None => Ok(()),
+        }
     }
 }
 
@@ -253,7 +293,7 @@ impl CodeModeSession for Session {
             }
             let id = CellId::new(Uuid::new_v4().to_string());
             let source = format!(
-                "await globalThis.__codexNotebook.begin({}, {});\n{}\n;await globalThis.__codexNotebook.flush({});",
+                "if (typeof globalThis.__codexNotebook?.begin !== 'function') throw new Error('Notebook runtime bootstrap unavailable: __codexNotebook.begin');\nawait globalThis.__codexNotebook.begin({}, {});\n{}\n;if (typeof globalThis.__codexNotebook?.flush !== 'function') throw new Error('Notebook runtime bootstrap unavailable: __codexNotebook.flush');\nawait globalThis.__codexNotebook.flush({});",
                 serde_json::to_string(id.as_str()).map_err(|e| e.to_string())?,
                 serde_json::to_string(&definitions).map_err(|e| e.to_string())?,
                 request.source,
@@ -274,9 +314,6 @@ impl CodeModeSession for Session {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if state.closed {
                     return Err("notebook session is shut down".to_string());
-                }
-                if state.broken {
-                    return Err("Deno kernel was terminated. Use notebook restart or reset to recover in this thread".to_string());
                 }
                 if state.managing {
                     return Err("notebook management is in progress".to_string());
@@ -375,28 +412,11 @@ impl CodeModeSession for Session {
     }
 
     fn shutdown<'a>(&'a self) -> CodeModeSessionResultFuture<'a, ()> {
-        Box::pin(async move {
-            self.cancellation.cancel();
-            self.registry
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .closed = true;
-            let _shutdown = self
-                .shutdown_gate
-                .acquire()
-                .await
-                .map_err(|e| e.to_string())?;
-            let resources = self
-                .resources
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            match resources {
-                Some(resources) => resources.shutdown().await,
-                None => Ok(()),
-            }
-        })
+        Box::pin(self.shutdown_inner(ShutdownMode::Graceful))
+    }
+
+    fn shutdown_without_cleanup<'a>(&'a self) -> CodeModeSessionResultFuture<'a, ()> {
+        Box::pin(self.shutdown_inner(ShutdownMode::Immediate))
     }
 }
 

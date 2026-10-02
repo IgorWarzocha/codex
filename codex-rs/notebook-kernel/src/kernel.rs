@@ -34,6 +34,8 @@ enum State {
     Closed,
 }
 
+const STARTUP_BIND_ATTEMPTS: usize = 3;
+
 /// One persistent JS/TS isolate. Exclusive mutable execution prevents concurrent cells.
 /// Dropping an in-flight execution future terminates this kernel, as does cancellation.
 pub struct Kernel {
@@ -65,13 +67,40 @@ impl Kernel {
             ));
         }
         let deadline = tokio::time::Instant::now() + options.startup_timeout;
+        let mut attempt = 1;
+        loop {
+            match Self::start_attempt(&options, &cancellation, deadline).await {
+                Ok(kernel) => return Ok(kernel),
+                Err(error) => {
+                    // Only the owned Deno process can prove a bind collision.
+                    // Never retry protocol failures, timeouts, or executed cells.
+                    let collision = matches!(&error, KernelError::Exited { stderr, .. } if stderr.contains("AddrInUse:"));
+                    if !collision
+                        || attempt == STARTUP_BIND_ATTEMPTS
+                        || tokio::time::Instant::now() >= deadline
+                        || cancellation.is_cancelled()
+                    {
+                        return Err(error);
+                    }
+                    tracing::warn!(attempt, max_attempts = STARTUP_BIND_ATTEMPTS, %error, "Deno kernel startup bind collision; retrying with fresh ports and credentials");
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
+    async fn start_attempt(
+        options: &KernelOptions,
+        cancellation: &CancellationToken,
+        deadline: tokio::time::Instant,
+    ) -> Result<Self, KernelError> {
         let (process, info) = tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err(KernelError::Cancelled),
-            result = tokio::time::timeout_at(deadline, Process::spawn(&options)) => result.map_err(|_| KernelError::Timeout("startup"))??,
+            result = tokio::time::timeout_at(deadline, Process::spawn(options)) => result.map_err(|_| KernelError::Timeout("startup"))??,
         };
         let mut kernel = Self {
-            options,
+            options: options.clone(),
             process,
             channels: None,
             state: State::Closed,
@@ -106,8 +135,16 @@ impl Kernel {
             _ = cancellation.cancelled() => Err(KernelError::Cancelled),
             result = tokio::time::timeout_at(deadline, startup) => result.map_err(|_| KernelError::Timeout("startup")).and_then(|r| r),
         };
-        if let Err(error) = result {
+        if let Err(mut error) = result {
             kernel.force_shutdown().await?;
+            // Exit status can arrive before the drainer receives the final stderr
+            // frame. Classify only after cleanup has drained and reaped the owner.
+            if let KernelError::Exited { stderr, .. } = &mut error {
+                *stderr = kernel.process.stderr();
+            }
+            if cancellation.is_cancelled() {
+                return Err(KernelError::Cancelled);
+            }
             return Err(error);
         }
         kernel.state = State::Ready;

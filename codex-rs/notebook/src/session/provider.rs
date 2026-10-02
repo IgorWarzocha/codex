@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use codex_code_mode_protocol::CodeModeSession;
@@ -32,6 +34,9 @@ pub struct DenoNotebookSessionProvider {
     identity: Option<Identity>,
     ephemeral: bool,
     default_profile: Option<String>,
+    max_heap_mib: u32,
+    plain_command_output: bool,
+    skip_profile_once: AtomicBool,
     session: Mutex<Weak<Session>>,
     creation_gate: Semaphore,
     startup_error: Mutex<Option<String>>,
@@ -44,6 +49,17 @@ struct Identity {
 }
 
 impl DenoNotebookSessionProvider {
+    pub const DEFAULT_MAX_HEAP_MIB: u32 = codex_notebook_kernel::DEFAULT_MAX_HEAP_MIB;
+
+    pub fn validate_max_heap_mib(max_heap_mib: u32) -> Result<(), String> {
+        if !(256..=65_536).contains(&max_heap_mib) {
+            return Err(format!(
+                "must be an integer from 256 through 65536 MiB, got {max_heap_mib}"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn new(deno_program: PathBuf, cwd: PathBuf) -> Self {
         Self::without_identity(Some(deno_program), cwd)
     }
@@ -55,6 +71,9 @@ impl DenoNotebookSessionProvider {
             identity: None,
             ephemeral: false,
             default_profile: None,
+            max_heap_mib: Self::DEFAULT_MAX_HEAP_MIB,
+            plain_command_output: false,
+            skip_profile_once: AtomicBool::new(false),
             session: Mutex::new(Weak::new()),
             creation_gate: Semaphore::new(1),
             startup_error: Mutex::new(None),
@@ -96,6 +115,30 @@ impl DenoNotebookSessionProvider {
         self
     }
 
+    /// Invalid limits are reported by availability and session creation, never clamped.
+    pub fn with_max_heap_mib(mut self, max_heap_mib: u32) -> Self {
+        self.max_heap_mib = max_heap_mib;
+        self
+    }
+
+    fn persistence_budget(&self) -> PersistenceBudget {
+        PersistenceBudget::from_heap_mib(Some(self.max_heap_mib))
+    }
+
+    pub fn with_plain_command_output(mut self, plain_command_output: bool) -> Self {
+        self.plain_command_output = plain_command_output;
+        self
+    }
+
+    fn durable_store(&self, identity: &Identity) -> Result<Store, String> {
+        Store::with_budget(
+            identity.codex_home.clone(),
+            &self.cwd,
+            &identity.thread_id,
+            self.persistence_budget(),
+        )
+    }
+
     async fn resolved_deno(&self) -> Result<PathBuf, String> {
         crate::deno::resolve(
             self.deno_program.as_deref(),
@@ -108,10 +151,11 @@ impl DenoNotebookSessionProvider {
     }
 
     pub async fn control(&self, request: NotebookRequest) -> Result<NotebookControlResult, String> {
+        Self::validate_max_heap_mib(self.max_heap_mib)?;
         if let NotebookRequest::List { query } = &request {
             let details = match self.identity.as_ref().filter(|_| !self.ephemeral) {
                 Some(identity) => {
-                    Store::new(identity.codex_home.clone(), &self.cwd, &identity.thread_id)?
+                    self.durable_store(identity)?
                         .list_profiles(query.as_deref())
                         .await?
                 }
@@ -159,11 +203,7 @@ impl DenoNotebookSessionProvider {
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .is_some();
                     let bindings = match self.identity.as_ref().filter(|_| !self.ephemeral) {
-                        Some(identity) => {
-                            Store::new(identity.codex_home.clone(), &self.cwd, &identity.thread_id)?
-                                .binding_names()
-                                .await?
-                        }
+                        Some(identity) => self.durable_store(identity)?.binding_names().await?,
                         None => Vec::new(),
                     };
                     (if failed { "invalidated" } else { "not_started" }, bindings)
@@ -178,6 +218,7 @@ impl DenoNotebookSessionProvider {
                         &identity.thread_id,
                         health,
                         &bindings,
+                        self.persistence_budget(),
                     )
                     .await
                 }
@@ -194,9 +235,7 @@ impl DenoNotebookSessionProvider {
                 .identity
                 .as_ref()
                 .filter(|_| !self.ephemeral)
-                .map(|identity| {
-                    Store::new(identity.codex_home.clone(), &self.cwd, &identity.thread_id)
-                })
+                .map(|identity| self.durable_store(identity))
                 .transpose()?;
             match &request {
                 NotebookRequest::Unpin { names } => {
@@ -220,6 +259,7 @@ impl DenoNotebookSessionProvider {
                     if let Some(store) = &mut store {
                         store.reset_session().await?;
                     }
+                    self.skip_profile_once.store(true, Ordering::Release);
                     return Ok(NotebookControlResult { message: "Notebook private checkpoint reset. Project state and profiles preserved".to_string(), details: json!({"reset":true,"projectPreserved":true}) });
                 }
                 _ => {}
@@ -233,6 +273,7 @@ impl DenoNotebookSessionProvider {
 
 impl CodeModeSessionProvider for DenoNotebookSessionProvider {
     fn availability(&self) -> Result<(), String> {
+        Self::validate_max_heap_mib(self.max_heap_mib)?;
         if !self.cwd.is_dir() {
             return Err(format!(
                 "notebook cwd is not a directory: {}",
@@ -275,12 +316,13 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
             let options = KernelOptions {
                 deno: self.resolved_deno().await?,
                 cwd: Some(self.cwd.clone()),
+                max_heap_mib: Some(self.max_heap_mib),
                 // Foreground observation deadlines yield, they do not kill the kernel.
                 execute_timeout: Duration::from_secs(24 * 60 * 60),
                 ..KernelOptions::default()
             };
             let identity = self.identity.as_ref().filter(|_| !self.ephemeral);
-            let budget = PersistenceBudget::from_heap_mib(options.max_heap_mib);
+            let budget = self.persistence_budget();
             let default_profile = self
                 .default_profile
                 .as_ref()
@@ -299,14 +341,7 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
                 })
                 .transpose()?;
             let store = identity
-                .map(|identity| {
-                    Store::with_budget(
-                        identity.codex_home.clone(),
-                        &self.cwd,
-                        &identity.thread_id,
-                        budget,
-                    )
-                })
+                .map(|identity| self.durable_store(identity))
                 .transpose()?;
             let journal = identity
                 .map(|identity| {
@@ -322,6 +357,14 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
             let mut bridge = Bridge::start(registry.clone()).await?;
             let bootstrap = include_str!("../bootstrap.js")
                 .replace(
+                    "__PLAIN_COMMAND_OUTPUT__",
+                    if self.plain_command_output {
+                        "true"
+                    } else {
+                        "false"
+                    },
+                )
+                .replace(
                     "__ENDPOINT__",
                     &serde_json::to_string(&bridge.endpoint).map_err(|e| e.to_string())?,
                 )
@@ -329,7 +372,14 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
                     "__CREDENTIAL__",
                     &serde_json::to_string(&bridge.credential).map_err(|e| e.to_string())?,
                 );
-            let lifecycle = match Lifecycle::start(options, bootstrap, store, default_profile).await
+            let lifecycle = match Lifecycle::start(
+                options,
+                bootstrap,
+                store,
+                default_profile,
+                self.skip_profile_once.swap(false, Ordering::AcqRel),
+            )
+            .await
             {
                 Ok(lifecycle) => lifecycle,
                 Err(error) => {
@@ -368,3 +418,7 @@ impl CodeModeSessionProvider for DenoNotebookSessionProvider {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "heap_tests.rs"]
+mod heap_tests;

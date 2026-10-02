@@ -12,6 +12,9 @@ use codex_protocol::ToolName;
 use serde_json::json;
 use std::path::PathBuf;
 
+#[path = "session/lifecycle_tests.rs"]
+mod lifecycle_tests;
+
 #[test]
 fn status_message_is_complete_bounded_and_does_not_duplicate_binding_inventory() {
     let mut bindings = vec![
@@ -483,13 +486,10 @@ async fn deno_preemption_and_termination_are_bounded() {
         outcome,
         WaitOutcome::LiveCell(RuntimeResponse::Terminated { .. })
     ));
-    assert!(
-        session
-            .execute(request("text('cannot restart')"), delegate.clone(), None)
-            .await
-            .is_err()
-    );
-    assert_eq!(delegate.closed.lock().unwrap().len(), 1);
+    let recovered = execute(&session, "text('automatically restored')", delegate.clone()).await;
+    assert_ok(&recovered);
+    assert!(texts(&recovered).contains(&"automatically restored"));
+    assert_eq!(delegate.closed.lock().unwrap().len(), 2);
     session.shutdown().await.unwrap();
 }
 
