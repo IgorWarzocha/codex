@@ -32,6 +32,7 @@ Scenario: Pre-sampling compaction on model switch to a smaller context window: c
     before switch
 01:message/user:
     <COMPACTION_SUMMARY>
+
     PRE_SAMPLING_SUMMARY
 02:message/developer[2]:
     [01] <MODEL_SWITCH>

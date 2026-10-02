@@ -22,7 +22,7 @@ None
 # AGENTS.md instructions
 
 <INSTRUCTIONS>
-These AGENTS.md instructions replace all previously provided AGENTS.md instructions.
+Prior AGENTS.md instructions replaced by the following
 
 new instructions
 </INSTRUCTIONS>
@@ -31,14 +31,14 @@ new instructions
 # AGENTS.md instructions
 
 <INSTRUCTIONS>
-The previously provided AGENTS.md instructions no longer apply.
+Prior AGENTS.md instructions no longer applicable
 </INSTRUCTIONS>
 
 Unknown -> {"text":"new instructions"} (role - user)
 # AGENTS.md instructions
 
 <INSTRUCTIONS>
-These AGENTS.md instructions replace all previously provided AGENTS.md instructions.
+Prior AGENTS.md instructions replaced by the following
 
 new instructions
 </INSTRUCTIONS>
@@ -47,5 +47,5 @@ Unknown -> {} (role - user)
 # AGENTS.md instructions
 
 <INSTRUCTIONS>
-The previously provided AGENTS.md instructions no longer apply.
+Prior AGENTS.md instructions no longer applicable
 </INSTRUCTIONS>

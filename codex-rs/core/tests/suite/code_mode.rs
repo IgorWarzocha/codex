@@ -3712,7 +3712,10 @@ if (!tool) {
             })
         })
         .expect("exec description should be present");
-    assert!(exec_description.contains("Inspect ALL_TOOLS entries {name, description}"));
+    assert!(
+        exec_description.contains("Filter ALL_TOOLS by name or description. Print names only.")
+    );
+    assert!(exec_description.contains("Read selected entries' description for help and schemas"));
     assert!(!exec_description.contains("Shared MCP Types:"));
     assert!(!exec_description.contains("calendar_timezone_option_99"));
 
@@ -7770,10 +7773,10 @@ text(JSON.stringify(tool));
         serde_json::json!({
             "name": "view_image",
             "description": format!(
-                "Inspect a local image\n\nexec tool declaration:\n```ts\ndeclare const tools: {{ view_image(args: {{\n  // Local image path\n  path: string;\n}}): Promise<{{\n  // high is resized; original preserves resolution\n  detail: \"high\" | \"original\";\n  // Image data URL\n  image_url: string;\n}}>; }};\n```\n\nInput schema: {}\n\nOutput schema: {}",
+                "Inspect a local image\n\nexec tool declaration:\n```ts\ndeclare const tools: {{ view_image(args: {{\n  path: string;\n}}): Promise<{{\n  // high is resized; original preserves resolution\n  detail: \"high\" | \"original\";\n  // Image data URL\n  image_url: string;\n}}>; }};\n```\n\nInput schema: {}\n\nOutput schema: {}",
                 serde_json::json!({
                     "type": "object",
-                    "properties": {"path": {"type": "string", "description": "Local image path"}},
+                    "properties": {"path": {"type": "string"}},
                     "required": ["path"],
                     "additionalProperties": false
                 }),

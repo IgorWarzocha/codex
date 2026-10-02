@@ -13,8 +13,7 @@ pub const UPDATE_GOAL_TOOL_NAME: &str = "update_goal";
 pub fn create_get_goal_tool() -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: GET_GOAL_TOOL_NAME.to_string(),
-        description: "Get the current goal for this thread, including status, budgets, token and elapsed-time usage, and remaining token budget."
-            .to_string(),
+        description: "Thread goal, status, budgets, usage, remaining tokens".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(BTreeMap::new(), Some(Vec::new()), Some(false.into())),
@@ -24,18 +23,11 @@ pub fn create_get_goal_tool() -> ToolSpec {
 
 pub fn create_create_goal_tool() -> ToolSpec {
     let properties = BTreeMap::from([
-        (
-            "objective".to_string(),
-            JsonSchema::string(Some(
-                "Required. The concrete objective to start pursuing. This starts a new active goal when no goal exists or replaces the current goal when it is complete."
-                    .to_string(),
-            )),
-        ),
+        ("objective".to_string(), JsonSchema::string(None)),
         (
             "token_budget".to_string(),
             JsonSchema::integer(Some(
-                "Positive token budget for the new goal. Omit unless explicitly requested."
-                    .to_string(),
+                "Positive; omit unless explicitly requested".to_string(),
             )),
         ),
     ]);
@@ -43,8 +35,9 @@ pub fn create_create_goal_tool() -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: CREATE_GOAL_TOOL_NAME.to_string(),
         description: format!(
-            r#"Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks.
-Set token_budget only when an explicit token budget is requested. Fails if an unfinished goal exists; use {UPDATE_GOAL_TOOL_NAME} only for status."#
+            r#"Explicit user or system/developer request only; no inferred goals from ordinary tasks
+New active goal or replacement for a completed goal; fails while unfinished
+Status changes via {UPDATE_GOAL_TOOL_NAME}"#
         ),
         strict: false,
         defer_loading: None,
@@ -62,25 +55,17 @@ pub fn create_update_goal_tool() -> ToolSpec {
         "status".to_string(),
         JsonSchema::string_enum(
             vec![json!("complete"), json!("blocked"), json!("paused")],
-            Some(
-                "Required. `paused` requires an explicit user request. Set to `complete` only when the objective is achieved and no required work remains. Set to `blocked` only after the same blocking condition has recurred for at least three consecutive goal turns and the agent is at an impasse. After a previously blocked goal is resumed, the resumed run starts a fresh blocked audit."
-                    .to_string(),
-            ),
+            None,
         ),
     )]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: UPDATE_GOAL_TOOL_NAME.to_string(),
-        description: r#"Update the existing goal.
-Set status to `paused` only at the user's explicit request to pause this goal, never on your own initiative. Ask if unclear; a later resume revokes that request. Report the returned status and stop goal work. Budget limits take precedence over pausing.
-Set status to `complete` only when the objective has actually been achieved and no required work remains.
-Set status to `blocked` only when the same blocking condition has repeated for at least three consecutive goal turns, counting the original/user-triggered turn and any automatic continuations, and the agent cannot make meaningful progress without user input or an external-state change.
-If the user resumes a goal that was previously marked `blocked`, treat the resumed run as a fresh blocked audit. If the same blocking condition then repeats for at least three consecutive resumed goal turns, set status to `blocked` again.
-Once the blocked threshold is satisfied, do not keep reporting that you are still blocked while leaving the goal active; set status to `blocked`.
-Do not use `blocked` merely because the work is hard, slow, uncertain, incomplete, or would benefit from clarification.
-Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work.
-You cannot use this tool to resume, budget-limit, or usage-limit a goal; those status changes are controlled by the user or system.
-When marking a budgeted goal achieved with status `complete`, report the final token usage from the tool result to the user."#
+        description: r#"Existing goal status only; resume, budget-limit and usage-limit controlled by user/system
+paused: explicit user request only; ask if unclear; resume revokes permission; report returned status and stop goal work; budget limits take precedence
+complete: objective achieved, no required work remaining; stopping or low budget insufficient; report final token usage for budgeted goals
+blocked: same blocker for at least three consecutive goal turns, including the original/user turn and automatic continuations; no meaningful progress without user input or external-state change
+Fresh blocked audit after resume; mark blocked once threshold met, not merely for difficulty, slowness, uncertainty, incompleteness or useful clarification"#
             .to_string(),
         strict: false,
         defer_loading: None,

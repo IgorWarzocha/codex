@@ -192,7 +192,7 @@ async fn failed_global_read_keeps_instructions_until_recovery() -> Result<()> {
     test.submit_turn("load recovered instructions").await?;
     let initial = expected_provider_only_instruction_fragment(GLOBAL_INSTRUCTIONS);
     let replacement = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{NEW_GLOBAL_INSTRUCTIONS}"
+        "Prior AGENTS.md instructions replaced by the following\n\n{NEW_GLOBAL_INSTRUCTIONS}"
     ));
     assert_eq!(
         requests
@@ -257,7 +257,7 @@ async fn live_global_removal_preserves_repository_instructions(
     let replacement = expected_instruction_fragment(
         cwd,
         &format!(
-            "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{PROJECT_INSTRUCTIONS}"
+            "Prior AGENTS.md instructions replaced by the following\n\n{PROJECT_INSTRUCTIONS}"
         ),
     );
     assert_eq!(
@@ -338,7 +338,7 @@ async fn global_instructions_refresh_after_a_tool_in_the_same_turn() -> Result<(
     .await;
     let initial = expected_provider_only_instruction_fragment(GLOBAL_INSTRUCTIONS);
     let replacement = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{NEW_GLOBAL_INSTRUCTIONS}"
+        "Prior AGENTS.md instructions replaced by the following\n\n{NEW_GLOBAL_INSTRUCTIONS}"
     ));
     assert_eq!(
         requests

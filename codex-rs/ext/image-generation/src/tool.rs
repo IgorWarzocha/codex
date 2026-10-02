@@ -88,7 +88,7 @@ impl ImageGenerationTool {
 #[serde(deny_unknown_fields)]
 struct ImagegenArgs {
     prompt: String,
-    /// Default false.
+    /// Default false
     #[serde(default)]
     transparent_background: bool,
     #[schemars(length(max = 5))]

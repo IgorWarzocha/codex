@@ -84,6 +84,9 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
     let instructions = requests[0].instructions_text();
     assert!(instructions.starts_with("Keep this explicit base unchanged.\n\n<exec_tools>\n"));
     assert!(instructions.contains("tools.exec_command("));
+    assert!(instructions.contains(
+        "Filter ALL_TOOLS by name or description. Print names only. Read tools.NAME.description for selected tools."
+    ));
     for request in &requests {
         // Repeated samples and context rollover must not accumulate tool catalogs.
         assert_eq!(request.instructions_text(), instructions);

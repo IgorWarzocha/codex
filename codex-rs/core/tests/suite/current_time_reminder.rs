@@ -49,13 +49,13 @@ use serde_json::json;
 use test_case::test_case;
 
 const FIRST_REMINDER: &str =
-    "<current_time_reminder>It is 2026-06-17 17:34:15 UTC.</current_time_reminder>";
+    "<current_time_reminder>2026-06-17 17:34:15 UTC</current_time_reminder>";
 const EARLIER_REMINDER: &str =
-    "<current_time_reminder>It is 2026-06-17 17:33:15 UTC.</current_time_reminder>";
+    "<current_time_reminder>2026-06-17 17:33:15 UTC</current_time_reminder>";
 const SECOND_REMINDER: &str =
-    "<current_time_reminder>It is 2026-06-17 17:35:15 UTC.</current_time_reminder>";
+    "<current_time_reminder>2026-06-17 17:35:15 UTC</current_time_reminder>";
 const THIRD_REMINDER: &str =
-    "<current_time_reminder>It is 2026-06-17 17:36:15 UTC.</current_time_reminder>";
+    "<current_time_reminder>2026-06-17 17:36:15 UTC</current_time_reminder>";
 const CLOCK_UNAVAILABLE: &str =
     "<current_time_unavailable>failed to read current time</current_time_unavailable>";
 const FIRST_TIME_UNIX_SECONDS: i64 = 1_781_717_655;
@@ -438,7 +438,7 @@ async fn system_time_source_adds_current_time_reminder(clock_setup: ClockSetup) 
     let reminders = current_time_reminders(&request);
     assert_eq!(reminders.len(), 1);
     assert_regex_match(
-        r"^<current_time_reminder>It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\.</current_time_reminder>$",
+        r"^<current_time_reminder>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC</current_time_reminder>$",
         &reminders[0],
     );
 
@@ -858,7 +858,7 @@ async fn current_time_tool_returns_the_latest_time() -> Result<()> {
     );
     assert_eq!(
         requests[1].function_call_output_text(CALL_ID),
-        Some("It is 2026-06-17 17:35:15 UTC.".to_string())
+        Some("2026-06-17 17:35:15 UTC".to_string())
     );
 
     Ok(())

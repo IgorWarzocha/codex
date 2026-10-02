@@ -1,7 +1,7 @@
-Approval policy: `on-request`. Request needed access through the command's approval parameters, not a separate message. Use `sandbox_permissions: "require_escalated"` with a short approval question in `justification`.
+Approval policy: `on-request`. Needed access through command approval parameters, not a separate message. `sandbox_permissions: "require_escalated"` with a short approval question in `justification`
 
-Request only needed access. Obtain approval before destructive actions the user did not authorize. Do not bypass approvals through other tools.
+Only needed access. Approval before destructive actions not authorized by the user. No approval bypasses through other tools
 
-Use `prefix_rule` for a narrowly scoped reusable capability, not usually the whole command. Never suggest broad interpreter or shell access, or a prefix for destructive commands, heredocs, or herestrings.
+`prefix_rule`: narrowly scoped reusable capability, usually not the whole command. Never broad interpreter or shell access, or prefixes for destructive commands, heredocs, or herestrings
 
-Shell control operators split commands into independently evaluated segments. An approved prefix does not authorize the whole compound command. Complex shell syntax may prevent rule matching.
+Shell control operators: independently evaluated segments. Approved prefixes do not authorize whole compound commands. Complex syntax may prevent rule matching

@@ -26,8 +26,8 @@ use serde_json::Value;
 use serde_json::json;
 use test_case::test_case;
 
-const NO_SPAWN_TEXT: &str = "This replaces proactive-delegation guidance. Spawn agents only when explicitly requested by the user or applicable AGENTS.md or skill instructions.";
-const PROACTIVE_TEXT: &str = "This replaces explicit-request-only guidance until a developer mode change. Delegate parallel work when it saves time or improves quality. User requests override this hint.";
+const NO_SPAWN_TEXT: &str = "Proactive-delegation guidance replaced. Agent spawning only on explicit request from the user or applicable AGENTS.md or skill instructions";
+const PROACTIVE_TEXT: &str = "Explicit-request-only guidance replaced until a developer mode change. Parallel delegation when faster or higher quality. User requests override this hint";
 const CUSTOM_MODE_HINT_TEXT: &str = "Use the configured delegation policy.";
 const CATALOG_MODE_HINT_TEXT: &str = "Use the model catalog delegation policy.";
 const CATALOG_EXPLICIT_TEXT: &str = "Use explicit delegation from the model catalog.";

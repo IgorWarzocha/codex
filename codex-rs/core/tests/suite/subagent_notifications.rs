@@ -109,8 +109,8 @@ const FULL_HISTORY_SUBAGENT_DEVELOPER_INSTRUCTIONS: &str =
 const FULL_HISTORY_SHARED_USAGE_HINT: &str = "Shared delegation guidance.";
 const FULL_HISTORY_PROACTIVE_PROMPT: &str = "switch to proactive delegation";
 const FULL_HISTORY_EXPLICIT_PROMPT: &str = "restore explicit-only delegation";
-const FULL_HISTORY_PROACTIVE_POLICY: &str = "Proactive multi-agent delegation is active.";
-const FULL_HISTORY_EXPLICIT_POLICY: &str = "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask";
+const FULL_HISTORY_PROACTIVE_POLICY: &str = "Parallel delegation when faster or higher quality";
+const FULL_HISTORY_EXPLICIT_POLICY: &str = "Agent spawning only on explicit request from the user or applicable AGENTS.md or skill instructions";
 
 fn body_contains(req: &wiremock::Request, text: &str) -> bool {
     decoded_body(req)

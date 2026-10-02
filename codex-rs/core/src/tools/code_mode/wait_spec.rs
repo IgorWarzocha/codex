@@ -20,8 +20,7 @@ pub(crate) fn create_wait_tool(
         (
             "terminate".to_string(),
             JsonSchema::boolean(Some(
-                "Stop cell instead of waiting. Notebook cancellation terminates the kernel"
-                    .to_string(),
+                "Stop cell, not wait. Notebook: terminates the kernel".to_string(),
             )),
         ),
     ]);
@@ -66,7 +65,9 @@ mod tests {
     #[test]
     fn create_wait_tool_matches_expected_spec() {
         assert_eq!(
-            create_wait_tool(/*description_override*/ None, /*parameters_override*/ None),
+            create_wait_tool(
+                /*description_override*/ None, /*parameters_override*/ None
+            ),
             ToolSpec::Function(ResponsesApiTool {
                 name: codex_code_mode::WAIT_TOOL_NAME.to_string(),
                 description: codex_code_mode::build_wait_tool_description().to_string(),
@@ -74,30 +75,20 @@ mod tests {
                 defer_loading: None,
                 parameters: JsonSchema::object(
                     BTreeMap::from([
-                        (
-                            "cell_id".to_string(),
-                            JsonSchema::string(None),
-                        ),
+                        ("cell_id".to_string(), JsonSchema::string(None),),
                         (
                             "max_tokens".to_string(),
-                            JsonSchema::number(Some(
-                                "Output tokens, default 10000"
-                                    .to_string(),
-                            )),
+                            JsonSchema::number(Some("Output tokens, default 10000".to_string(),)),
                         ),
                         (
                             "terminate".to_string(),
                             JsonSchema::boolean(Some(
-                                "Stop cell instead of waiting. Notebook cancellation terminates the kernel"
-                                    .to_string(),
+                                "Stop cell, not wait. Notebook: terminates the kernel".to_string(),
                             )),
                         ),
                         (
                             "yield_time_ms".to_string(),
-                            JsonSchema::number(Some(
-                                "Wait ms, default 10000"
-                                    .to_string(),
-                            )),
+                            JsonSchema::number(Some("Wait ms, default 10000".to_string(),)),
                         ),
                     ]),
                     Some(vec!["cell_id".to_string()]),

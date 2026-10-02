@@ -41,7 +41,7 @@ use tokio::time::sleep;
 const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
 const SPAWN_AGENT_TOOL_NAME: &str = "spawn_agent";
-const WAIT_AGENT_GUIDANCE: &str = "Prefer waits of minutes with `wait_agent` to busy polling.";
+const WAIT_AGENT_GUIDANCE: &str = "`wait_agent`: waits of minutes preferred over busy polling";
 
 fn spawn_agent_description(body: &Value, namespace: &str) -> Option<String> {
     namespace_child_tool(body, namespace, SPAWN_AGENT_TOOL_NAME)
@@ -66,7 +66,7 @@ fn resolved_root_usage_hint(config: &Config, request: &ResponsesRequest) -> Stri
         .into_iter()
         .rev()
         .find_map(|group| {
-            (group.len() == 1 && group[0].contains("You are `/root`.")).then(|| group[0].clone())
+            (group.len() == 1 && group[0].contains("Role: `/root`.")).then(|| group[0].clone())
         })
         .expect("resolved root usage hint should be a standalone developer message")
 }
@@ -266,8 +266,13 @@ pub(super) async fn model_catalog_refresh_requests(
         &description
     };
 
+    let expected_model_summary = if model_catalog_in_context {
+        "- `visible-model`: Fast and capable"
+    } else {
+        "- visible-model: Fast and capable"
+    };
     assert!(
-        listing.contains("- `visible-model`: Fast and capable"),
+        listing.contains(expected_model_summary),
         "expected visible model summary in model catalog: {catalog:?}"
     );
     assert_eq!(
@@ -279,31 +284,41 @@ pub(super) async fn model_catalog_refresh_requests(
         model_catalog_in_context
     );
     assert_eq!(
-        description.contains("- `visible-model`: Fast and capable"),
+        description.contains(expected_model_summary),
         !model_catalog_in_context
     );
     let expected_inherited_model_guidance =
         if multi_agent_version == MultiAgentVersion::V2 && model_catalog_in_context {
-            "Inherit your model. Override only at the user's explicit request."
+            "Inherited model; override only at user's explicit request"
         } else {
-            "Inherit your model by default. Override only when explicitly needed."
+            "Default inherited model; override only when explicitly needed"
         };
     assert!(
         description.contains(expected_inherited_model_guidance),
         "expected inherited-model guidance in spawn_agent description: {description:?}"
     );
     assert_eq!(
-        description.contains("Override only at the user's explicit request.")
-            || description.contains("Model overrides require the user's explicit request."),
+        description.contains("override only at user's explicit request")
+            || description.contains("Model overrides only at user's explicit request"),
         multi_agent_version == MultiAgentVersion::V1 || model_catalog_in_context,
         "expected model override usage guidance in spawn_agent description: {description:?}"
     );
+    let expected_reasoning_efforts = if model_catalog_in_context {
+        "Reasoning efforts: low, medium (default), high."
+    } else {
+        "; reasoning efforts: low, medium (default), high"
+    };
     assert!(
-        listing.contains("Reasoning efforts: low, medium (default), high."),
+        listing.contains(expected_reasoning_efforts),
         "expected default reasoning effort in model catalog: {catalog:?}"
     );
+    let expected_service_tiers = if model_catalog_in_context {
+        "Service tiers: priority."
+    } else {
+        "; service tiers: priority"
+    };
     assert!(
-        listing.contains("Service tiers: priority."),
+        listing.contains(expected_service_tiers),
         "expected service tier guidance in model catalog: {catalog:?}"
     );
     assert!(
@@ -312,14 +327,13 @@ pub(super) async fn model_catalog_refresh_requests(
     );
     if multi_agent_version == MultiAgentVersion::V1 {
         assert!(
-        description.contains(
-            "Spawn only when the user or applicable AGENTS.md/skill instructions explicitly request sub-agents, delegation, or parallel agent work."
-        ),
-        "expected explicit authorization rule in spawn_agent description: {description:?}"
-    );
+            description.contains(
+                "Spawn only on explicit user or applicable AGENTS.md/skill request for sub-agents, delegation, or parallel agent work"
+            ),
+            "expected explicit authorization rule in spawn_agent description: {description:?}"
+        );
         assert!(
-            description
-                .contains("Requests for depth, research, or thoroughness are not authorization."),
+            description.contains("depth, research, or thoroughness alone not authorization"),
             "expected delegation authorization boundary in spawn_agent description: {description:?}"
         );
         assert!(

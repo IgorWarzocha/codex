@@ -22,7 +22,7 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
         .unwrap();
 
     assert!(instructions.contains(&format!(
-        "- {}/memory_summary.md is provided below. Do not reread it.",
+        "- {}/memory_summary.md provided below; no reread",
         memories_dir.display()
     )));
     assert_eq!(
@@ -65,7 +65,7 @@ async fn v2_reads_only_its_own_summary_without_falling_back_to_v1()
         .expect("v2 instructions");
     assert!(instructions.contains("new pipeline content"));
     assert!(!instructions.contains("legacy content"));
-    assert!(instructions.contains("do not retrieve history speculatively"));
+    assert!(instructions.contains("no speculative history retrieval"));
     assert!(instructions.contains(&format!("{}/rollout_summaries/", v2.display())));
     let legacy_instructions =
         build_memory_tool_developer_instructions(&codex_home, MemoryVersion::V1)
@@ -73,10 +73,8 @@ async fn v2_reads_only_its_own_summary_without_falling_back_to_v1()
             .expect("v1 instructions");
     assert!(legacy_instructions.contains("legacy content"));
     assert!(!legacy_instructions.contains("new pipeline content"));
-    assert!(
-        legacy_instructions.contains("Use memory unless the request is clearly self-contained")
-    );
-    assert!(legacy_instructions.contains("If relevant memory files informed the answer"));
-    assert!(instructions.contains("When a read rollout summary informs the answer"));
+    assert!(legacy_instructions.contains("Use memory unless clearly self-contained"));
+    assert!(legacy_instructions.contains("Relevant memory informing answer"));
+    assert!(instructions.contains("Read rollout informing answer"));
     Ok(())
 }

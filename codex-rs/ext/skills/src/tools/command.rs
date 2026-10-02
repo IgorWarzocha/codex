@@ -86,11 +86,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SkillsTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Freeform(FreeformTool {
             name: "skills".to_string(),
-            description: "Load skill instructions and references. list [category...] | read <skill> [skill-or-reference...]".to_string(),
+            description: "list [category...] | read <skill> [skill-or-reference...]".to_string(),
             defer_loading: None,
             // The transport requires a format. This catchall leaves command
             // validation to the same parser used by Code Mode and Notebook.
-            format: FreeformToolFormat { r#type: "grammar".to_string(), syntax: "lark".to_string(), definition: "start: command?\ncommand: /[\\s\\S]+/".to_string() },
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: command?\ncommand: /[\\s\\S]+/".to_string(),
+            },
         })
     }
 

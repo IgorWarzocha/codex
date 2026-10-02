@@ -10,13 +10,13 @@ Scenario: Real paginated mid-turn compaction and cold resume from the bounded su
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <COLLABORATION_MODE>
 01:message/developer:
-    You are `/root`, the primary agent. Own the result and coordinate delegated work. Agent messages arrive ... without starting a turn. `followup_task` starts one. [hash=5effd14f65494b2b]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    `wait_agent`: waits of minutes preferred over busy polling
 
-    At most 4 agents may be active, including you.
+    Active-agent limit, including you: 4
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 02:message/developer:
     <MULTI_AGENT_MODE>
 03:message/user:
@@ -28,13 +28,13 @@ Scenario: Real paginated mid-turn compaction and cold resume from the bounded su
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <COLLABORATION_MODE>
 01:message/developer:
-    You are `/root`, the primary agent. Own the result and coordinate delegated work. Agent messages arrive ... without starting a turn. `followup_task` starts one. [hash=5effd14f65494b2b]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    `wait_agent`: waits of minutes preferred over busy polling
 
-    At most 4 agents may be active, including you.
+    Active-agent limit, including you: 4
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 02:message/developer:
     <MULTI_AGENT_MODE>
 03:message/user:
@@ -50,19 +50,20 @@ Scenario: Real paginated mid-turn compaction and cold resume from the bounded su
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <COLLABORATION_MODE>
 01:message/developer:
-    You are `/root`, the primary agent. Own the result and coordinate delegated work. Agent messages arrive ... without starting a turn. `followup_task` starts one. [hash=5effd14f65494b2b]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    `wait_agent`: waits of minutes preferred over busy polling
 
-    At most 4 agents may be active, including you.
+    Active-agent limit, including you: 4
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 02:message/developer:
     <MULTI_AGENT_MODE>
 03:message/user:
     function call limit push
 04:message/user:
     <COMPACTION_SUMMARY>
+
     AUTO_SUMMARY
 -- request 4 (turn) --
 05:message/assistant:

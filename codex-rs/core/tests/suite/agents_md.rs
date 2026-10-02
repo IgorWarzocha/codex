@@ -1202,7 +1202,7 @@ async fn thread_provider_composes_and_clears_only_its_instructions() -> Result<(
     let cleared = expected_instruction_fragment(
         cwd,
         &format!(
-            "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{GLOBAL_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}"
+            "Prior AGENTS.md instructions replaced by the following\n\n{GLOBAL_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}"
         ),
     );
     assert_eq!(
@@ -1306,7 +1306,7 @@ async fn thread_provider_refreshes_at_the_next_step_of_an_active_turn() -> Resul
     let updated = expected_instruction_fragment(
         cwd,
         &format!(
-            "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{GLOBAL_INSTRUCTIONS}\n\n{UPDATED_TASK_USER_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}"
+            "Prior AGENTS.md instructions replaced by the following\n\n{GLOBAL_INSTRUCTIONS}\n\n{UPDATED_TASK_USER_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}"
         ),
     );
     assert_eq!(
@@ -1463,7 +1463,7 @@ async fn thread_provider_enforces_its_own_limit_before_startup_and_sampling() ->
     // Changing environments must also remove the previously selected repository docs.
     let host_text = "x".repeat(approx_bytes_for_tokens(/*tokens*/ 10_000));
     let expected = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{GLOBAL_INSTRUCTIONS}\n\n{host_text}"
+        "Prior AGENTS.md instructions replaced by the following\n\n{GLOBAL_INSTRUCTIONS}\n\n{host_text}"
     ));
     fixture.provider.set_instructions(Some(Instructions {
         text: host_text,
@@ -1627,7 +1627,7 @@ async fn fork_preserves_thread_instructions(
         vec![
             initial.clone(),
             expected_provider_only_instruction_fragment(&format!(
-                "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{UPDATED_TASK_USER_INSTRUCTIONS}"
+                "Prior AGENTS.md instructions replaced by the following\n\n{UPDATED_TASK_USER_INSTRUCTIONS}"
             )),
         ]
     } else {
@@ -1727,7 +1727,7 @@ async fn thread_provider_lives_with_its_session_across_resume() -> Result<()> {
     assert_eq!(
         instruction_fragments(&requests[1]).last(),
         Some(&expected_provider_only_instruction_fragment(
-            "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\ncold session instructions",
+            "Prior AGENTS.md instructions replaced by the following\n\ncold session instructions",
         )),
     );
     Ok(())
@@ -1814,7 +1814,7 @@ async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Re
     let updated_fragment = expected_instruction_fragment(
         &test.executor_environment().selection().cwd,
         &format!(
-            "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{NEW_GLOBAL_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}"
+            "Prior AGENTS.md instructions replaced by the following\n\n{NEW_GLOBAL_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}"
         ),
     );
     assert_eq!(
@@ -2037,7 +2037,7 @@ async fn multi_environment_thread_refreshes_global_and_keeps_repository_snapshot
     assert_eq!(requests.len(), 2);
     assert_single_instruction_fragment(&requests[0], &expected);
     let replacement = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{}",
+        "Prior AGENTS.md instructions replaced by the following\n\n{}",
         contents.replace(GLOBAL_INSTRUCTIONS, NEW_GLOBAL_INSTRUCTIONS),
     ));
     assert_eq!(
@@ -2256,7 +2256,7 @@ async fn cold_resume_invalidates_deleted_legacy_agents_md_once() -> Result<()> {
     );
     let initial = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
     let removal = expected_provider_only_instruction_fragment(
-        "The previously provided AGENTS.md instructions no longer apply.",
+        "Prior AGENTS.md instructions no longer applicable",
     );
     assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
     assert_eq!(
@@ -2375,7 +2375,7 @@ async fn fork_injects_changed_agents_md_once() -> Result<()> {
     );
     let initial = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
     let replacement = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{NEW_GLOBAL_INSTRUCTIONS}"
+        "Prior AGENTS.md instructions replaced by the following\n\n{NEW_GLOBAL_INSTRUCTIONS}"
     ));
     assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
     assert_eq!(
@@ -2387,7 +2387,7 @@ async fn fork_injects_changed_agents_md_once() -> Result<()> {
         vec![initial.clone(), replacement.clone()]
     );
     let refreshed = expected_provider_only_instruction_fragment(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\ninstructions changed after fork",
+        "Prior AGENTS.md instructions replaced by the following\n\ninstructions changed after fork",
     );
     assert_eq!(
         instruction_fragments(&requests[3]),
@@ -2529,7 +2529,7 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
     let expected_fragment = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
     assert_single_instruction_fragment(&seed_request, &expected_fragment);
     let replacement = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{NEW_GLOBAL_INSTRUCTIONS}"
+        "Prior AGENTS.md instructions replaced by the following\n\n{NEW_GLOBAL_INSTRUCTIONS}"
     ));
     let inherited_fragments = vec![expected_fragment, replacement];
     assert_eq!(instruction_fragments(&spawn_request), inherited_fragments);
@@ -2600,7 +2600,7 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
         responses::mount_sse_once(&server, responses::sse_completed("parent-refresh")).await;
     test.submit_turn("refresh the parent independently").await?;
     let refreshed = expected_provider_only_instruction_fragment(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\ninstructions changed after child creation",
+        "Prior AGENTS.md instructions replaced by the following\n\ninstructions changed after child creation",
     );
     let mut parent_fragments = instruction_fragments(&spawn_request);
     parent_fragments.push(refreshed);

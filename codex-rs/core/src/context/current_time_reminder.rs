@@ -38,7 +38,7 @@ impl ContextualUserFragment for CurrentTimeReminder {
     }
 
     fn body(&self) -> String {
-        format!("It is {}.", self.formatted_time())
+        format!("{}", self.formatted_time())
     }
 }
 

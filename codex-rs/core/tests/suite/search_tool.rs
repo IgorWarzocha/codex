@@ -189,7 +189,7 @@ async fn search_tool_enabled_by_default_adds_tool_search() -> Result<()> {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Deferred-tool search query"},
+                    "query": {"type": "string"},
                     "limit": {"type": "number", "description": "Result limit, default 8"},
                 },
                 "required": ["query"],
@@ -927,7 +927,7 @@ async fn tool_search_returns_deferred_v1_multi_agent_tools() -> Result<()> {
         .and_then(Value::as_str)
         .expect("spawn_agent description should be present");
     assert!(description.contains(
-        "Spawn only when the user or applicable AGENTS.md/skill instructions explicitly request sub-agents, delegation, or parallel agent work."
+        "Spawn only on explicit user or applicable AGENTS.md/skill request for sub-agents, delegation, or parallel agent work"
     ));
     assert!(description.contains("Avoid duplicate work and overlapping write scopes."));
     assert!(description.contains("Keep immediate blockers local."));

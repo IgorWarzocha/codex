@@ -7,36 +7,26 @@ pub fn create_test_sync_tool() -> ToolSpec {
     let barrier_properties = BTreeMap::from([
         (
             "id".to_string(),
-            JsonSchema::string(Some(
-                "Identifier shared by concurrent calls that should rendezvous".to_string(),
-            )),
+            JsonSchema::string(Some("Shared rendezvous ID".to_string())),
         ),
         (
             "participants".to_string(),
-            JsonSchema::number(Some(
-                "Number of tool calls that must arrive before the barrier opens".to_string(),
-            )),
+            JsonSchema::number(Some("Calls required to open barrier".to_string())),
         ),
         (
             "timeout_ms".to_string(),
-            JsonSchema::number(Some(
-                "Maximum barrier wait in milliseconds. Defaults to 1000.".to_string(),
-            )),
+            JsonSchema::number(Some("Max wait ms, default 1000".to_string())),
         ),
     ]);
 
     let properties = BTreeMap::from([
         (
             "sleep_before_ms".to_string(),
-            JsonSchema::number(Some(
-                "Delay before any other action. Defaults to no delay.".to_string(),
-            )),
+            JsonSchema::number(Some("Delay before actions, default 0".to_string())),
         ),
         (
             "sleep_after_ms".to_string(),
-            JsonSchema::number(Some(
-                "Delay after completing the barrier. Defaults to no delay.".to_string(),
-            )),
+            JsonSchema::number(Some("Delay after barrier, default 0".to_string())),
         ),
         (
             "barrier".to_string(),
@@ -49,15 +39,14 @@ pub fn create_test_sync_tool() -> ToolSpec {
         (
             "wait_for_git_enrichment".to_string(),
             JsonSchema::boolean(Some(
-                "Wait for Git enrichment for the current turn to finish, subject to a timeout."
-                    .to_string(),
+                "Wait for current-turn Git enrichment, subject to timeout".to_string(),
             )),
         ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "test_sync_tool".to_string(),
-        description: "Internal synchronization helper used by Codex integration tests.".to_string(),
+        description: "Internal integration-test synchronization".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(properties, /*required*/ None, Some(false.into())),

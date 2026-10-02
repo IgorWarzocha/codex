@@ -357,7 +357,7 @@ async fn model_change_appends_model_instructions_developer_message() -> Result<(
         .find(|text| text.contains("<model_switch>"))
         .expect("expected model switch message in developer input");
     assert!(
-        model_switch_text.contains("The user was previously using a different model."),
+        model_switch_text.contains("Model changed."),
         "expected model switch preamble, got: {model_switch_text:?}"
     );
 

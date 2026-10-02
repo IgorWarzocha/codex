@@ -1,3 +1,3 @@
-Generate or edit images. Omit both referenced_image_paths and num_last_images_to_include to generate. For edits, choose one selector: local paths for all targets, otherwise the smallest recent-image count covering all targets, up to 5. Inspect unseen local targets with view_image first. Ask for missing targets if neither selector covers them.
-Set transparent_background for transparency, background removal or cutouts. Otherwise leave false. Preserve existing transparency in edits unless asked to change it.
-In code-mode, allow 120 seconds via the first-line @exec directive and subsequent waits. Emit the result with generatedImage(result). Never print the full result or base64 with text() or notify(). Small metadata is safe.
+Generate: omit both selectors; edit: referenced_image_paths for all targets, otherwise smallest num_last_images_to_include covering all targets, up to 5; view_image unseen local targets first; ask for missing targets
+transparent_background for transparency, background removal or cutouts; otherwise false; preserve existing transparency unless asked to change it
+Code-mode: allow 120 seconds via first-line @exec and subsequent waits; emit generatedImage(result); no full result/base64 via text() or notify(); small metadata safe

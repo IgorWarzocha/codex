@@ -5,10 +5,10 @@ use crate::without_update_plan_instructions;
 use codex_context_fragments::ContextualUserFragment;
 use codex_protocol::models::ContentItemKind;
 
-const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Overrides require `fork_turns: \"none\"` or a positive integer string. Omitted or `\"all\"` inherits the parent's model and effort.";
+const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "`model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrides require `fork_turns: \"none\"` or a positive integer string. Omitted or `\"all\"`: parent model and effort inherited";
 const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
-    "Prefer waits of minutes with `wait_agent` to busy polling.";
-const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = "Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working directory. Coordinate edits and preserve others' changes.";
+    "`wait_agent`: waits of minutes preferred over busy polling";
+const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = "Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved";
 
 /// Multi-agent role text and the captured capabilities used to render its context segment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +73,7 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
                 };
                 let shared = DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT;
                 let mut text = format!(
-                    "{base}\n{shared}\n{wait_agent_guidance}At most {max_concurrency} agents may be active, including you."
+                    "{base}\n{shared}\n{wait_agent_guidance}Active-agent limit, including you: {max_concurrency}"
                 );
                 if *expose_model_overrides {
                     text.push_str("\n\n");

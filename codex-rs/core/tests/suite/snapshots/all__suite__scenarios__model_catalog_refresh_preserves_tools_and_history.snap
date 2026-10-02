@@ -15,12 +15,12 @@ Settings:
   store: false
   stream: true
   tool_choice: "auto"
-  tools (6; hash=2f5a62f80c379a73):
-    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=543a068b1a36a66f
-    - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=05560b32cd644162
-    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=ed786867ce26e7c6
-    - function/view_image: Inspect a local image; args=[path]; hash=5f0d2097e3a0550a
-    - namespace/multi_agent_v1: Spawn and manage sub-agents; hash=86a27039250d86b8
+  tools (6; hash=ffe6d7abe2785cf5):
+    - function/exec_command: Run a shell command; output and session ID while running; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=d19c77fa2b71f970
+    - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=a4f2b7cc01e55d69
+    - function/request_user_input: Ask the user; wait for answers; Plan mode only; args=[questions]; hash=8aa27f4c74227619
+    - function/view_image: Inspect a local image; args=[path]; hash=d30bd322b1f7a5f9
+    - namespace/multi_agent_v1: Spawn and manage sub-agents; hash=95436e178ca6b846
       - function/close_agent
       - function/resume_agent
       - function/send_input

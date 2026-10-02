@@ -37,7 +37,7 @@ impl ModelCatalogState {
         // Stabilize the selected choices independently of their picker ordering.
         models.sort_by(|left, right| left.model.cmp(&right.model));
         if models.is_empty() {
-            catalog.push_str("No picker-visible model overrides are currently loaded.\n");
+            catalog.push_str("No picker-visible model overrides loaded\n");
         }
         let (open, close) = Self::type_markers();
         let body_budget = MAX_RENDERED_BYTES - open.len() - close.len() - 2;
@@ -104,7 +104,7 @@ impl ContextualUserFragment for ModelCatalogState {
 
     fn body(&self) -> String {
         if self.catalog.is_empty() {
-            "\nThe previous spawn_agent model catalog no longer applies.\n".to_string()
+            "\nPrior spawn_agent model catalog no longer applicable\n".to_string()
         } else {
             format!("\n{}", self.catalog)
         }

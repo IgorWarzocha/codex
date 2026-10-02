@@ -996,7 +996,7 @@ async fn thread_disabled_plugins_filter_skills_and_tools_without_changing_shared
         // Previously injected instructions remain in history; disabled turns must add none.
         for (role, marker) in [
             ("user", "THREAD_PLUGIN_SKILL_BODY"),
-            ("developer", "Skills from this plugin"),
+            ("developer", "- Skill prefix:"),
         ] {
             assert_eq!(
                 requests[0]
@@ -1814,19 +1814,19 @@ async fn explicit_plugin_mentions_use_apps_for_chatgpt_dual_surface_plugins(
     assert!(
         developer_messages
             .iter()
-            .any(|text| text.contains("Skills from this plugin")),
+            .any(|text| text.contains("- Skill prefix:")),
         "expected plugin skills guidance: {developer_messages:?}"
     );
     assert!(
         !developer_messages
             .iter()
-            .any(|text| text.contains("MCP servers from this plugin")),
+            .any(|text| text.contains("- MCP servers this session:")),
         "expected plugin MCP guidance to be suppressed for ChatGPT auth: {developer_messages:?}"
     );
     assert_eq!(
         developer_messages
             .iter()
-            .any(|text| text.contains("Apps from this plugin")),
+            .any(|text| text.contains("- Apps this session:")),
         app_enabled,
         "plugin app guidance should match app enablement: {developer_messages:?}"
     );
@@ -1901,13 +1901,13 @@ async fn explicit_plugin_mentions_keep_non_conflicting_mcp_for_chatgpt_auth() ->
     assert!(
         developer_messages
             .iter()
-            .any(|text| text.contains("MCP servers from this plugin")),
+            .any(|text| text.contains("- MCP servers this session:")),
         "expected plugin MCP guidance to remain visible for non-conflicting app declaration: {developer_messages:?}"
     );
     assert!(
         developer_messages
             .iter()
-            .any(|text| text.contains("Apps from this plugin")),
+            .any(|text| text.contains("- Apps this session:")),
         "expected plugin app guidance: {developer_messages:?}"
     );
     let (calendar_tool, echo_tool) = searched_plugin_tools(&requests[1]);
@@ -2115,13 +2115,13 @@ async fn explicitly_requested_mcp_waits_for_startup(request: ExplicitMcpRequest)
         assert!(
             developer_messages
                 .iter()
-                .any(|text| text.contains("Skills from this plugin")),
+                .any(|text| text.contains("- Skill prefix:")),
             "expected plugin skills guidance: {developer_messages:?}"
         );
         assert!(
             developer_messages
                 .iter()
-                .any(|text| text.contains("MCP servers from this plugin")),
+                .any(|text| text.contains("- MCP servers this session:")),
             "expected visible plugin MCP guidance: {developer_messages:?}"
         );
     }
@@ -2137,7 +2137,7 @@ async fn explicitly_requested_mcp_waits_for_startup(request: ExplicitMcpRequest)
     assert!(
         !developer_messages
             .iter()
-            .any(|text| text.contains("Apps from this plugin")),
+            .any(|text| text.contains("- Apps this session:")),
         "expected plugin app guidance to be suppressed for API-key auth: {developer_messages:?}"
     );
     assert!(

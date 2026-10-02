@@ -1,1 +1,1 @@
-Approval policy: `unless-trusted`. Commands require approval unless an explicit exec-policy rule allows them.
+Approval policy: `unless-trusted`. Approval required unless an explicit exec-policy rule allows the command

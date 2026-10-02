@@ -10,12 +10,12 @@ None
 
 Absent -> true (role - developer)
 <plugins_instructions>
-Plugins are not called directly. Use their exposed skills, MCP tools, and apps. Prefer a named plugin's capabilities when relevant. If unavailable, say so and use an available alternative. Plugin skills have a `plugin_name:` prefix. MCP provenance identifies plugin tools.
+No direct plugin calls. Exposed skills, MCP tools, and apps only. Named plugin's capabilities preferred when relevant. Unavailable: report and use an available alternative. Plugin skills: `plugin_name:` prefix. Plugin tools: MCP provenance
 </plugins_instructions>
 
 false -> true (role - developer)
 <plugins_instructions>
-Plugins are not called directly. Use their exposed skills, MCP tools, and apps. Prefer a named plugin's capabilities when relevant. If unavailable, say so and use an available alternative. Plugin skills have a `plugin_name:` prefix. MCP provenance identifies plugin tools.
+No direct plugin calls. Exposed skills, MCP tools, and apps only. Named plugin's capabilities preferred when relevant. Unavailable: report and use an available alternative. Plugin skills: `plugin_name:` prefix. Plugin tools: MCP provenance
 </plugins_instructions>
 
 true -> true

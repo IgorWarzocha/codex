@@ -85,10 +85,8 @@ fn default_workflow_shortens_auto_review_prose_without_replacing_policy_or_other
         .on_request_auto_review
         .as_deref()
         .unwrap();
-    assert!(
-        prose.contains("gather evidence establishing authorization or low risk before retrying")
-    );
-    assert!(prose.contains("Complete unaffected work without confirmation"));
+    assert!(prose.contains("evidence establishing authorization or low risk before retrying"));
+    assert!(prose.contains("Unaffected work without confirmation"));
     assert!(prose.contains("explain the auto-review rejection and risk, and ask for approval"));
 
     apply_default_catalog_workflow(&mut messages);

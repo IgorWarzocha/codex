@@ -28,6 +28,6 @@ impl ContextualUserFragment for AvailablePluginsInstructions {
     }
 
     fn body(&self) -> String {
-        "\nPlugins are not called directly. Use their exposed skills, MCP tools, and apps. Prefer a named plugin's capabilities when relevant. If unavailable, say so and use an available alternative. Plugin skills have a `plugin_name:` prefix. MCP provenance identifies plugin tools.\n".to_string()
+        "\nNo direct plugin calls. Exposed skills, MCP tools, and apps only. Named plugin's capabilities preferred when relevant. Unavailable: report and use an available alternative. Plugin skills: `plugin_name:` prefix. Plugin tools: MCP provenance\n".to_string()
     }
 }

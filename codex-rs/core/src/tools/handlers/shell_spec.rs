@@ -28,21 +28,19 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     include_windows_shell_guidance: bool,
 ) -> ToolSpec {
     let yield_time_ms_description = if cfg!(windows) {
-        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately"
+        "Wait ms, default 10000, Windows range 10000-30000; immediate return when finished"
     } else {
-        "Wait before yielding, default 10000 ms, range 250-30000 ms"
+        "Wait ms, default 10000, range 250-30000"
     };
     let mut properties = BTreeMap::from([
         ("cmd".to_string(), JsonSchema::string(None)),
         (
             "workdir".to_string(),
-            JsonSchema::string(Some("Cwd, defaults to turn cwd".to_string())),
+            JsonSchema::string(Some("Default turn cwd".to_string())),
         ),
         (
             "tty".to_string(),
-            JsonSchema::boolean(Some(
-                "Allocate a PTY for stdin interaction; otherwise use pipes".to_string(),
-            )),
+            JsonSchema::boolean(Some("PTY for stdin interaction; default pipes".to_string())),
         ),
         (
             "yield_time_ms".to_string(),
@@ -50,23 +48,19 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         ),
         (
             "max_output_tokens".to_string(),
-            JsonSchema::number(Some(
-                "Output tokens, default 10000, subject to policy caps".to_string(),
-            )),
+            JsonSchema::number(Some("Default 10000, subject to policy caps".to_string())),
         ),
     ]);
     if include_shell_parameter {
         properties.insert(
             "shell".to_string(),
-            JsonSchema::string(Some("Shell binary, defaults to user's shell".to_string())),
+            JsonSchema::string(Some("Default user's shell".to_string())),
         );
     }
     if options.allow_login_shell {
         properties.insert(
             "login".to_string(),
-            JsonSchema::boolean(Some(
-                "Enable -l/-i shell semantics, default true".to_string(),
-            )),
+            JsonSchema::boolean(Some("-l/-i shell semantics, default true".to_string())),
         );
     }
     if include_environment_id {
@@ -85,11 +79,11 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         name: "exec_command".to_string(),
         description: if include_windows_shell_guidance {
             format!(
-                "Run a shell command. Returns output and a session ID while running.\n\n{}",
+                "Run a shell command; output and session ID while running\n\n{}",
                 windows_shell_guidance()
             )
         } else {
-            "Run a shell command. Returns output and a session ID while running.".to_string()
+            "Run a shell command; output and session ID while running".to_string()
         },
         strict: false,
         defer_loading: None,
@@ -111,20 +105,19 @@ pub fn create_write_stdin_tool() -> ToolSpec {
         (
             "chars".to_string(),
             JsonSchema::string(Some(
-                "Stdin bytes, only for tty=true sessions. Empty or omitted polls".to_string(),
+                "Stdin bytes for tty=true sessions; empty or omitted to poll".to_string(),
             )),
         ),
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding. Writes default to 250 ms, cap 30000 ms. Empty polls wait 5000-300000 ms by default".to_string(),
+                "Wait ms; writes default 250, cap 30000; empty polls default 5000-300000"
+                    .to_string(),
             )),
         ),
         (
             "max_output_tokens".to_string(),
-            JsonSchema::number(Some(
-                "Output tokens, default 10000, subject to policy caps".to_string(),
-            )),
+            JsonSchema::number(Some("Default 10000, subject to policy caps".to_string())),
         ),
     ]);
 
@@ -144,10 +137,7 @@ pub fn create_write_stdin_tool() -> ToolSpec {
 
 pub fn create_request_permissions_tool(description: String) -> ToolSpec {
     let properties = BTreeMap::from([
-        (
-            "reason".to_string(),
-            JsonSchema::string(Some("Why additional permissions are needed".to_string())),
-        ),
+        ("reason".to_string(), JsonSchema::string(None)),
         (
             "environment_id".to_string(),
             JsonSchema::string(Some(
@@ -172,7 +162,7 @@ pub fn create_request_permissions_tool(description: String) -> ToolSpec {
 }
 
 pub fn request_permissions_tool_description() -> String {
-    "Request filesystem or network permissions and wait for the client to grant a subset. Relative paths resolve against the selected environment cwd. Grants apply automatically to later shell-like commands this turn, or this session if approved at session scope."
+    "Request filesystem or network permissions; wait for client-approved subset\nRelative paths from selected environment cwd; automatic grants for later shell-like commands this turn, or session if approved at session scope"
         .to_string()
 }
 
@@ -219,9 +209,9 @@ fn create_approval_parameters(
     }
     sandbox_permission_values.push(json!("require_escalated"));
     let sandbox_permissions_description = if exec_permission_approvals_enabled {
-        "Default use_default. with_additional_permissions requires additional_permissions; require_escalated runs unsandboxed"
+        "Default use_default; with_additional_permissions requires additional_permissions; require_escalated unsandboxed"
     } else {
-        "Default use_default. require_escalated runs unsandboxed"
+        "Default use_default; require_escalated unsandboxed"
     };
 
     let mut properties = BTreeMap::from([
@@ -259,61 +249,55 @@ fn create_approval_parameters(
 }
 
 fn permission_profile_schema() -> JsonSchema {
-    let mut schema = JsonSchema::object(
+    JsonSchema::object(
         BTreeMap::from([
             ("network".to_string(), network_permissions_schema()),
             ("file_system".to_string(), file_system_permissions_schema()),
         ]),
         /*required*/ None,
         Some(false.into()),
-    );
-    schema.description = Some("Requested access".to_string());
-    schema
+    )
 }
 
 fn network_permissions_schema() -> JsonSchema {
-    let mut schema = JsonSchema::object(
+    JsonSchema::object(
         BTreeMap::from([(
             "enabled".to_string(),
-            JsonSchema::boolean(Some("Request network access, default false".to_string())),
+            JsonSchema::boolean(Some("Default false".to_string())),
         )]),
         /*required*/ None,
         Some(false.into()),
-    );
-    schema.description = Some("Requested network access".to_string());
-    schema
+    )
 }
 
 fn file_system_permissions_schema() -> JsonSchema {
-    let mut schema = JsonSchema::object(
+    JsonSchema::object(
         BTreeMap::from([
             (
                 "read".to_string(),
                 JsonSchema::array(
                     JsonSchema::string(/*description*/ None),
-                    Some("Absolute paths for read access".to_string()),
+                    Some("Absolute paths".to_string()),
                 ),
             ),
             (
                 "write".to_string(),
                 JsonSchema::array(
                     JsonSchema::string(/*description*/ None),
-                    Some("Absolute paths for write access".to_string()),
+                    Some("Absolute paths".to_string()),
                 ),
             ),
         ]),
         /*required*/ None,
         Some(false.into()),
-    );
-    schema.description = Some("Requested filesystem access".to_string());
-    schema
+    )
 }
 
 fn windows_shell_guidance() -> &'static str {
-    r#"Windows safety rules:
-- Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.
-- Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
-- When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control."#
+    r#"Windows safety:
+- One shell end-to-end for delete or move; no PowerShell paths passed to cmd /c, batch builtins, or another shell; prefer Remove-Item or Move-Item with -LiteralPath, no string-built file-operation commands
+- Before recursive delete or move: verify resolved absolute targets within intended workspace or explicitly named directory, including computed paths
+- Start-Process background helpers or services: -WindowStyle Hidden unless explicitly requested visible; visible only for user-facing interactive tools"#
 }
 
 #[cfg(test)]

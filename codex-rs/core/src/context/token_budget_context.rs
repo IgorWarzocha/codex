@@ -166,9 +166,9 @@ impl ContextualUserFragment for TokenBudgetRemainingContext {
     fn body(&self) -> String {
         match self.tokens_left {
             Some(tokens_left) => {
-                format!("You have {tokens_left} tokens left in this context window.")
+                format!("Context-window budget: {tokens_left} tokens remaining")
             }
-            None => "You have unknown tokens left in this context window.".to_string(),
+            None => "Context-window budget: unknown".to_string(),
         }
     }
 }

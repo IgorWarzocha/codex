@@ -484,8 +484,8 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
         unreachable!("exec_command has a function schema");
     };
     spec.description = spec.description.replacen(
-        "Run a shell command. Returns output and a session ID while running.",
-        "Run a command to completion. Timeout or cancellation terminates it; it cannot be resumed.",
+        "Run a shell command; output and session ID while running",
+        "Run a command to completion; terminated on timeout or cancellation, no resume",
         1,
     );
     let properties = spec.parameters.properties.get_or_insert_default();

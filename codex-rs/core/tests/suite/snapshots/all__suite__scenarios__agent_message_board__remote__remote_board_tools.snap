@@ -10,18 +10,18 @@ Scenario: Remote board tools and active-turn notifications share the existing se
     This turn will be interrupted during notification setup.
 01:message/developer:
     <turn_aborted>
-    The previous turn was interrupted on purpose. Any running unified exec processes may still be running in...mands were aborted, they may have partially executed. [hash=cee256d92b55ad65]
+    Previous turn deliberately interrupted. Unified exec processes may still be running. Aborted tools or commands may have partially executed
     </turn_aborted>
 02:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
 03:message/developer:
-    You are `/root`. Own the result and coordinate delegated work. Agent messages arrive in analysis. `send_...thout starting a turn. `followup_task` starts a turn. [hash=57c7402ce89cae25]
-    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
-    Prefer waits of minutes with `wait_agent` to busy polling.
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    `wait_agent`: waits of minutes preferred over busy polling
 
-    At most 4 agents may be active, including you.
+    Active-agent limit, including you: 4
 
-    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...ed or `"all"` inherits the parent's model and effort. [hash=75b60222a0f8595a]
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 04:message/developer:
     <MULTI_AGENT_MODE>
 05:message/user:

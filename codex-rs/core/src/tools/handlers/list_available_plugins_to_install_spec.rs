@@ -6,7 +6,7 @@ use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolSpec;
 pub(crate) fn create_list_available_plugins_to_install_tool() -> ToolSpec {
     let description = format!(
-        "List install candidates only for a specific unavailable plugin or connector the user explicitly requested, after `{TOOL_SEARCH_TOOL_NAME}` fails to make it callable or is unavailable. Pass candidates to `{REQUEST_PLUGIN_INSTALL_TOOL_NAME}`. Prefer a matching plugin over its connector unless that plugin is already installed."
+        "Install candidates only for explicit user-requested unavailable plugin or connector, after {TOOL_SEARCH_TOOL_NAME} fails to make it callable or is unavailable\nCandidates to {REQUEST_PLUGIN_INSTALL_TOOL_NAME}; matching plugin over connector unless already installed"
     );
 
     ToolSpec::Function(ResponsesApiTool {
@@ -30,7 +30,7 @@ mod tests {
             create_list_available_plugins_to_install_tool(),
             ToolSpec::Function(ResponsesApiTool {
                 name: "list_available_plugins_to_install".to_string(),
-                description: "List install candidates only for a specific unavailable plugin or connector the user explicitly requested, after `tool_search` fails to make it callable or is unavailable. Pass candidates to `request_plugin_install`. Prefer a matching plugin over its connector unless that plugin is already installed.".to_string(),
+                description: "Install candidates only for explicit user-requested unavailable plugin or connector, after tool_search fails to make it callable or is unavailable\nCandidates to request_plugin_install; matching plugin over connector unless already installed".to_string(),
                 strict: false,
                 defer_loading: None,
                 parameters: JsonSchema::object(

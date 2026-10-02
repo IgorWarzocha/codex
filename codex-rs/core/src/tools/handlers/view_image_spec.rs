@@ -14,10 +14,7 @@ pub struct ViewImageToolOptions {
 }
 
 pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
-    let mut properties = BTreeMap::from([(
-        "path".to_string(),
-        JsonSchema::string(Some("Local image path".to_string())),
-    )]);
+    let mut properties = BTreeMap::from([("path".to_string(), JsonSchema::string(None))]);
     if options.can_request_original_image_detail && !options.unified_image_budget {
         properties.insert(
             "detail".to_string(),

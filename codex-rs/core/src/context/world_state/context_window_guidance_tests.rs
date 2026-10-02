@@ -15,7 +15,7 @@ use test_case::test_case;
 #[test_case(
     Some("original guidance"),
     Some("refreshed guidance"),
-    Some("This context-window guidance replaces all previously provided context-window guidance.\n\nrefreshed guidance");
+    Some("Prior context-window guidance replaced by the following\n\nrefreshed guidance");
     "changed guidance"
 )]
 #[test_case(Some("guidance"), None, Some(REMOVAL_NOTICE); "removed guidance")]
@@ -64,7 +64,7 @@ fn guidance_transitions_render_once(
 #[test_case(
     false,
     Some("current guidance"),
-    Some("This context-window guidance replaces all previously provided context-window guidance.\n\ncurrent guidance");
+    Some("Prior context-window guidance replaced by the following\n\ncurrent guidance");
     "legacy history is replaced"
 )]
 #[test_case(false, None, Some(REMOVAL_NOTICE); "legacy history is cleared")]

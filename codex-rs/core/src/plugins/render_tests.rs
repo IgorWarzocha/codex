@@ -18,7 +18,7 @@ fn render_plugins_section_keeps_plugin_usage_guidance_without_listing_plugins() 
     }])
     .expect("plugin section should render");
 
-    let expected = "<plugins_instructions>\nPlugins are not called directly. Use their exposed skills, MCP tools, and apps. Prefer a named plugin's capabilities when relevant. If unavailable, say so and use an available alternative. Plugin skills have a `plugin_name:` prefix. MCP provenance identifies plugin tools.\n</plugins_instructions>";
+    let expected = "<plugins_instructions>\nNo direct plugin calls. Exposed skills, MCP tools, and apps only. Named plugin's capabilities preferred when relevant. Unavailable: report and use an available alternative. Plugin skills: `plugin_name:` prefix. Plugin tools: MCP provenance\n</plugins_instructions>";
 
     assert_eq!(rendered, expected);
 }
@@ -58,10 +58,10 @@ fn explicit_plugin_instructions_search_available_apps_before_fallback() {
 
     assert_eq!(
         rendered,
-        "Capabilities from the `Adobe` plugin:\n\
-         - For this request only, if `tool_search` is available and this plugin's apps \
-         may help, search their tools before using unrelated or built-in tools.\n\
-         - Apps from this plugin available in this session: `Adobe`."
+        "Plugin `Adobe` capabilities:\n\
+         - This request only: if `tool_search` is available and these apps \
+         may help, search their tools before unrelated or built-in tools\n\
+         - Apps this session: `Adobe`"
     );
 }
 
@@ -87,9 +87,9 @@ fn explicit_plugin_instructions_are_bounded() {
     .expect("MCP capability should render");
 
     assert!(rendered.len() <= MAX_EXPLICIT_PLUGIN_INSTRUCTIONS_BYTES);
-    assert!(rendered.contains("For this request only"));
+    assert!(rendered.contains("This request only"));
     assert!(rendered.contains("if `tool_search` is available"));
-    assert!(rendered.contains("Skills from this plugin"));
+    assert!(rendered.contains("- Skill prefix:"));
     assert!(rendered.contains("`app-0`"));
     assert!(rendered.ends_with(TRUNCATED_PLUGIN_INSTRUCTIONS_SUFFIX));
 }

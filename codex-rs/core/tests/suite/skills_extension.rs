@@ -571,7 +571,7 @@ async fn explicit_skill_prompt_precedes_plugin_instructions() -> Result<()> {
             .unwrap_or_else(|| panic!("missing prompt containing `{expected}`: {input:?}"))
     };
     let skill_position = prompt_position("<skill>\n<name>sample:sample-search</name>");
-    let plugin_position = prompt_position("Capabilities from the `sample` plugin:");
+    let plugin_position = prompt_position("Plugin `sample` capabilities:");
     assert!(
         skill_position < plugin_position,
         "host skill prompts should precede plugin instructions: {input:?}"

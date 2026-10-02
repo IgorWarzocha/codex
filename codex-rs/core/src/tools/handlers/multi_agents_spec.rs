@@ -15,14 +15,13 @@ pub const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V1_NAMESPACE_DESCRIPTION: &str = "Spawn and manage sub-agents";
 
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str =
-    "Inherit your model by default. Override only when explicitly needed.";
+    "Default inherited model; override only when explicitly needed";
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE_V2: &str =
-    "Inherit your model. Override only at the user's explicit request.";
+    "Inherited model; override only at user's explicit request";
 const SPAWN_AGENT_MODEL_CATALOG_GUIDANCE: &str = "Choose overrides from the latest <model_catalog>";
 const SPAWN_AGENT_TYPE_OVERRIDE_DESCRIPTION_V1: &str =
     "Omit to inherit the parent type with a full-history fork; otherwise default";
-const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
-    "Model override, omit unless explicitly needed";
+const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str = "Omit unless explicitly needed";
 const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
 #[derive(Debug, Clone)]
@@ -210,7 +209,7 @@ pub fn create_send_message_tool() -> ToolSpec {
         ),
         (
             "message".to_string(),
-            JsonSchema::string(Some("Message".to_string())).with_encrypted(),
+            JsonSchema::string(None).with_encrypted(),
         ),
     ]);
 
@@ -238,13 +237,13 @@ pub fn create_followup_task_tool() -> ToolSpec {
         ),
         (
             "message".to_string(),
-            JsonSchema::string(Some("Follow-up task".to_string())).with_encrypted(),
+            JsonSchema::string(None).with_encrypted(),
         ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "followup_task".to_string(),
-        description: "Assign a follow-up task to a non-root agent. Starts a turn if idle; otherwise delivers at a message boundary or after the pending tool call"
+        description: "Follow-up task for non-root agent; new turn if idle, otherwise delivery at message boundary or after pending tool call"
             .to_string(),
         strict: false,
         defer_loading: None,
@@ -283,7 +282,7 @@ pub fn create_wait_agent_tool_v1(options: WaitAgentTimeoutOptions) -> ToolSpec {
         description: MULTI_AGENT_V1_NAMESPACE_DESCRIPTION.to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: "wait_agent".to_string(),
-            description: "Wait for final status, also delivered by notification. Completed status may include the final answer. Timeout returns empty status"
+            description: "Wait for final status, also notified; possible final answer in completed status; empty status on timeout"
                 .to_string(),
             strict: false,
             defer_loading: None,
@@ -296,7 +295,7 @@ pub fn create_wait_agent_tool_v1(options: WaitAgentTimeoutOptions) -> ToolSpec {
 pub fn create_wait_agent_tool_v2(options: WaitAgentTimeoutOptions) -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: "wait_agent".to_string(),
-        description: "Wait for any live agent's mailbox update or steered user input. Returns an update, interruption, or timeout summary, not message content"
+        description: "Wait for any live agent's mailbox update or steered user input; update, interruption, or timeout summary, no message content"
             .to_string(),
         strict: false,
         defer_loading: None,
@@ -334,7 +333,7 @@ pub fn create_close_agent_tool_v1() -> ToolSpec {
         description: MULTI_AGENT_V1_NAMESPACE_DESCRIPTION.to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: "close_agent".to_string(),
-            description: "Close an agent and its open descendants, returning previous status. Close unneeded agents: completed agents count toward concurrency until closed".to_string(),
+            description: "Close agent and open descendants; previous status returned; close unneeded agents, completed agents count toward concurrency until closed".to_string(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(properties, Some(vec!["target".to_string()]), Some(false.into())),
@@ -356,7 +355,7 @@ pub fn create_interrupt_agent_tool_v2() -> ToolSpec {
 
     ToolSpec::Function(ResponsesApiTool {
         name: "interrupt_agent".to_string(),
-        description: "Interrupt the current turn and return previous status. The agent remains available for messages and follow-up tasks".to_string(),
+        description: "Interrupt current turn; previous status returned; agent still available for messages and follow-up tasks".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(properties, Some(vec!["target".to_string()]), Some(false.into())),
@@ -560,7 +559,7 @@ fn create_collab_input_items_schema() -> JsonSchema {
         (
             "type".to_string(),
             JsonSchema::string(Some(
-                "Input item type: text, image, local_image, audio, local_audio, skill, or mention."
+                "text, image, local_image, audio, local_audio, skill, or mention"
                     .to_string(),
             )),
         ),
@@ -579,7 +578,7 @@ fn create_collab_input_items_schema() -> JsonSchema {
         (
             "path".to_string(),
             JsonSchema::string(Some(
-                "Path for local_image, local_audio, or skill. For mention: app://<connector-id> or plugin://<plugin-name>@<marketplace-name>"
+                "local_image, local_audio, or skill path; mention: app://<connector-id> or plugin://<plugin-name>@<marketplace-name>"
                     .to_string(),
             )),
         ),
@@ -633,33 +632,29 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
     BTreeMap::from([
         (
             "message".to_string(),
-            JsonSchema::string(Some("Initial task".to_string()))
-            .with_encrypted(),
+            JsonSchema::string(None).with_encrypted(),
         ),
         (
             "agent_type".to_string(),
             JsonSchema::string(Some(format!(
-                "Role override only when explicitly asked. Applies regardless of inherited history\n{agent_type_description}"
+                "Role override only when explicitly asked; independent of inherited history\n{agent_type_description}"
             ))),
         ),
         (
             "fork_turns".to_string(),
             JsonSchema::string(Some(
-                "History to inherit: all (default), none, or a positive integer string for recent turns"
+                "History: all (default), none, or positive integer string for recent turns"
                     .to_string(),
             )),
         ),
         (
             "model".to_string(),
-            JsonSchema::string(Some(
-                SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string(),
-            )),
+            JsonSchema::string(Some(SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string())),
         ),
         (
             "reasoning_effort".to_string(),
             JsonSchema::string(Some(
-                "Reasoning effort override, defaults to parent effort"
-                    .to_string(),
+                "Reasoning effort override, defaults to parent effort".to_string(),
             )),
         ),
     ])
@@ -685,25 +680,17 @@ fn spawn_agent_tool_description(
 
     let tool_description = if model_catalog_in_context {
         format!(
-            r#"
-        Spawn a sub-agent for a well-scoped task. {return_value_description} {inherited_model_guidance}
-{model_catalog_guidance}"#
+            "Spawn a sub-agent for a well-scoped task; {return_value_description}\n{inherited_model_guidance}\n{model_catalog_guidance}"
         )
     } else {
         let available_models_description = available_models_description.unwrap_or_default();
         format!(
-            r#"
-        {available_models_description}
-        Spawn a sub-agent for a well-scoped task. {return_value_description} {inherited_model_guidance}"#
+            "{available_models_description}\nSpawn a sub-agent for a well-scoped task; {return_value_description}\n{inherited_model_guidance}"
         )
     };
 
     if let Some(usage_hint_text) = usage_hint_text {
-        return format!(
-            r#"
-        {tool_description}
-{usage_hint_text}"#
-        );
+        return format!("{tool_description}\n{usage_hint_text}");
     }
     let agent_role_usage_hint = if model_catalog_in_context {
         ""
@@ -713,10 +700,7 @@ fn spawn_agent_tool_description(
         "\n"
     };
     format!(
-        r#"
-        {tool_description}
-Spawn only when the user or applicable AGENTS.md/skill instructions explicitly request sub-agents, delegation, or parallel agent work. Requests for depth, research, or thoroughness are not authorization.{agent_role_usage_hint}
-Model overrides require the user's explicit request."#
+        "{tool_description}\nSpawn only on explicit user or applicable AGENTS.md/skill request for sub-agents, delegation, or parallel agent work; depth, research, or thoroughness alone not authorization{agent_role_usage_hint}\nModel overrides only at user's explicit request"
     )
 }
 
@@ -735,31 +719,18 @@ fn spawn_agent_tool_description_v2(
         (String::new(), format!("\n{model_catalog_guidance}"))
     } else {
         let available_models_description = available_models_description.unwrap_or_default();
-        (
-            format!("        {available_models_description}\n"),
-            String::new(),
-        )
+        (format!("{available_models_description}\n"), String::new())
     };
     let tool_description = if let Some(description) = description {
-        format!(
-            r#"
-{catalog_prefix}        {description}
-{inherited_model_guidance}{catalog_suffix}"#
-        )
+        format!("{catalog_prefix}{description}\n{inherited_model_guidance}{catalog_suffix}")
     } else {
         format!(
-            r#"
-{catalog_prefix}        Spawn an agent for the task. Relative task names resolve under your task path; use canonical paths across branches. Agents have your tools, can spawn children, and can message running agents. Final answers arrive automatically.
-{inherited_model_guidance}{catalog_suffix}"#
+            "{catalog_prefix}Spawn an agent for the task; relative task names under your task path, canonical paths across branches\nYour tools, child spawning, messaging running agents; automatic final answers\n{inherited_model_guidance}{catalog_suffix}"
         )
     };
 
     if let Some(usage_hint_text) = usage_hint_text {
-        return format!(
-            r#"
-        {tool_description}
-{usage_hint_text}"#
-        );
+        return format!("{tool_description}\n{usage_hint_text}");
     }
     tool_description
 }
@@ -775,7 +746,7 @@ fn spawn_agent_models_description(
         .take(MAX_SPAWN_AGENT_MODEL_OVERRIDES)
         .collect();
     if visible_models.is_empty() {
-        return "No picker-visible model overrides are currently loaded.".to_string();
+        return "No picker-visible model overrides loaded".to_string();
     }
 
     let model_descriptions = visible_models
@@ -805,7 +776,7 @@ fn spawn_agent_models_description(
             let reasoning_efforts_suffix = if efforts.is_empty() {
                 String::new()
             } else {
-                format!(" Reasoning efforts: {efforts}.")
+                format!("; reasoning efforts: {efforts}")
             };
             let service_tiers = model
                 .service_tiers
@@ -816,19 +787,15 @@ fn spawn_agent_models_description(
             let service_tiers_suffix = if service_tiers.is_empty() {
                 String::new()
             } else {
-                format!(" Service tiers: {service_tiers}.")
+                format!("; service tiers: {service_tiers}")
             };
             let model_slug = &model.model;
             let description = &model.description;
-            format!(
-                "- `{model_slug}`: {description}{reasoning_efforts_suffix}{service_tiers_suffix}"
-            )
+            format!("- {model_slug}: {description}{reasoning_efforts_suffix}{service_tiers_suffix}")
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!(
-        "Available model overrides (optional; inherited parent model is preferred):\n{model_descriptions}"
-    )
+    format!("Available model overrides, inherited parent model preferred:\n{model_descriptions}")
 }
 
 fn wait_agent_tool_parameters_v1(options: WaitAgentTimeoutOptions) -> JsonSchema {
@@ -843,7 +810,7 @@ fn wait_agent_tool_parameters_v1(options: WaitAgentTimeoutOptions) -> JsonSchema
         (
             "timeout_ms".to_string(),
             JsonSchema::number(Some(format!(
-                "Wait ms, default {}, min {}, max {}. Prefer minutes over polling",
+                "Wait ms, default {}, min {}, max {}; minutes over polling",
                 options.default_timeout_ms, options.min_timeout_ms, options.max_timeout_ms,
             ))),
         ),

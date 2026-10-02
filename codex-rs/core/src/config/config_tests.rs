@@ -12266,7 +12266,7 @@ max_concurrent_threads_per_session = 17
     .expect("multi-agent v2 config should parse");
 
     let config = resolve_multi_agent_v2_config(&config_toml);
-    let concurrency_guidance = "At most 17 agents may be active, including you.";
+    let concurrency_guidance = "Active-agent limit, including you: 17";
     let messages = ResolvedModelMessages::bundled().multi_agent();
     assert!(config.wait_agent_enabled);
     for wait_agent_enabled in [true, false] {
@@ -12279,7 +12279,7 @@ max_concurrent_threads_per_session = 17
             let hint = hint.expect("default usage hints should be present").body();
             assert!(hint.contains(concurrency_guidance));
             assert_eq!(
-                hint.contains("Prefer waits of minutes with `wait_agent`"),
+                hint.contains("`wait_agent`: waits of minutes preferred over busy polling"),
                 wait_agent_enabled
             );
         }
@@ -12368,7 +12368,7 @@ fn multi_agent_v2_exposes_model_overrides_by_default() {
             .strip_prefix(hint_without_model_overrides.as_str())
             .expect("model-override guidance should extend the base usage hint");
         for required_fragment in [
-            "inherits the parent's model and effort",
+            "parent model and effort inherited",
             "only when explicitly requested by the user, AGENTS.md, or skills",
             "`fork_turns: \"none\"`",
             "positive integer string",

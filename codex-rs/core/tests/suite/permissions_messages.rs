@@ -347,7 +347,7 @@ async fn empty_catalog_permission_message_preserves_approval_instructions() -> R
     let permissions = permissions_texts(&req.single_request());
     assert_eq!(permissions.len(), 1);
     assert!(permissions[0].contains("Approval policy: `never`"));
-    assert!(!permissions[0].contains("Read files only."));
+    assert!(!permissions[0].contains("Reads only."));
     assert!(!permissions[0].contains("`sandbox_mode`"));
     Ok(())
 }
@@ -788,10 +788,10 @@ async fn permissions_message_includes_writable_roots() -> Result<()> {
         .map(|root| format!("`{}`", root.to_string_lossy()))
         .collect::<Vec<_>>()
         .join(", ");
-    let expected = format!(" The writable roots are {writable_roots}.");
+    let expected = format!(" Writable roots: {writable_roots}");
     let actual = permissions[0]
         .lines()
-        .filter(|line| line.starts_with(" The writable root"))
+        .filter(|line| line.starts_with(" Writable root"))
         .collect::<Vec<_>>();
     assert_eq!(actual, vec![expected.as_str()]);
 

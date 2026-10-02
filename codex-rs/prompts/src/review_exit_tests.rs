@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 fn render_review_exit_success_replaces_results_placeholder() {
     assert_eq!(
         render_review_exit_success("Finding A\nFinding B"),
-        "<user_action>\n  <context>User initiated a review task. Here's the full review output from reviewer model. User may select one or more comments to resolve.</context>\n  <action>review</action>\n  <results>\n  Finding A\nFinding B\n  </results>\n  </user_action>\n"
+        "<user_action>\n  <context>Full reviewer output. User may select comments to resolve.</context>\n  <action>review</action>\n  <results>\n  Finding A\nFinding B\n  </results>\n  </user_action>\n"
     );
 }
 

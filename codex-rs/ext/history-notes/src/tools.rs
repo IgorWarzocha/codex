@@ -25,8 +25,8 @@ use crate::backend::HistoryNotesBackend;
 
 const HISTORY_NAMESPACE: &str = "history";
 const NOTES_NAMESPACE: &str = "notes";
-const HISTORY_DESCRIPTION: &str = "Private conversation recovery. Pass returned window/item IDs unchanged. New items may lag. Keep recovered private state out of user-facing output.";
-const NOTES_DESCRIPTION: &str = "Private remote notes across context windows. Virtual paths: relative uses the current agent; absolute is <agent>/notes/<path>. No shell expansion or empty, '.' or '..' components. Limit 1,000,000 UTF-8 bytes per file. Reads reflect completed writes; search/list may lag. Await dependent writes to the same path. Keep private state out of user-facing output.";
+const HISTORY_DESCRIPTION: &str = "Private conversation recovery; returned window/item IDs unchanged; new items may lag; no private state in user-facing output";
+const NOTES_DESCRIPTION: &str = "Private remote notes across windows; relative paths use current agent, absolute <agent>/notes/<path>; no shell expansion or empty, '.' or '..' components; 1,000,000 UTF-8 bytes/file; reads reflect completed writes, search/list may lag; await dependent same-path writes; no private state in user-facing output";
 const HISTORY_AGENT_NAME_DESCRIPTION: &str =
     "Omit for current agent; absolute or relative agent name";
 
@@ -140,7 +140,7 @@ impl HistoryNotesAction {
                     "agent_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": HISTORY_AGENT_NAME_DESCRIPTION},
                     "tool_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Excludes non-tool messages"},
                     "window_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Full returned ID; omit for all windows"},
-                    "max_chars_per_item": {"type": "integer", "minimum": 1, "description": "Per-item character limit"}
+                    "max_chars_per_item": {"type": "integer", "minimum": 1}
                 }
             }),
             Self::HistoryReadItem => json!({
@@ -149,7 +149,7 @@ impl HistoryNotesAction {
                     "agent_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": HISTORY_AGENT_NAME_DESCRIPTION},
                     "item_id": {"type": "string", "description": "Suffix from the [id: …] marker"},
                     "offset_chars": {"type": "integer", "minimum": 0, "description": "Zero-based"},
-                    "limit_chars": {"type": "integer", "minimum": 1, "description": "Character limit"},
+                    "limit_chars": {"type": "integer", "minimum": 1},
                     "window_id": {"type": "string", "description": "Full returned window ID"}
                 },
                 "required": ["item_id", "window_id"]
@@ -200,7 +200,7 @@ impl HistoryNotesAction {
             Self::NotesAppendToFile => json!({
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "encrypted": true, "description": "Appended exactly"},
+                    "text": {"type": "string", "encrypted": true},
                     "path": {"type": "string"}
                 },
                 "required": ["text", "path"]
@@ -208,7 +208,7 @@ impl HistoryNotesAction {
             Self::NotesWriteFile => json!({
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "encrypted": true, "description": "Replacement text"},
+                    "text": {"type": "string", "encrypted": true},
                     "path": {"type": "string"}
                 },
                 "required": ["text", "path"]

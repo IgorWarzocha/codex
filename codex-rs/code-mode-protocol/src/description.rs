@@ -15,14 +15,15 @@ use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "Additional tools are callable through tools";
-const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"image(dataUrl | { image_url, detail? } | ImageContent, detail?): emit image; detail is auto/low/high/original. Second detail overrides embedded detail, including MCP _meta["codex/imageDetail"]."#;
+const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"image(dataUrl | { image_url, detail? } | ImageContent, detail?): emit image. Detail: auto/low/high/original. Second detail overrides embedded detail, including MCP _meta["codex/imageDetail"]"#;
 const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str =
     "image(dataUrl | { image_url } | ImageContent): emit image";
-const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run fresh restricted JavaScript to compose tools. Source only, no JSON or fences. No console, imports, filesystem, network, Node or browser APIs.
-Await work: the isolate ends when the module finishes, discarding unawaited promises. Timers alone do not keep it alive.
-Optional first line // @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}; defaults {{ default_exec_yield_time_ms }} ms/10000 tokens.
-Call await tools.<normalized_name>(args), or (input) for string tools. Inspect ALL_TOOLS entries {name, description} for full tool help and typed input/output declarations.
-Model-only tool results bypass JS; calls return delivery receipts.
+const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, network, Node or browser APIs
+Await work. Module end discards unawaited promises. Timers alone cannot keep the isolate alive
+Optional first line // @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}; defaults {{ default_exec_yield_time_ms }} ms/10000 tokens
+await tools.<normalized_name>(args), or (input) for string tools
+Filter ALL_TOOLS by name or description. Print names only. Read selected entries' description for help and schemas
+Model-only results bypass JS, return delivery receipts
 Helpers:
 - text(value): emit text, JSON-stringifying non-strings; bare values are discarded
 - {{ image_helper }}
@@ -32,7 +33,7 @@ Helpers:
 - notify(value): emit immediate output; yield_control(): yield output while work continues
 - exit(): finish successfully
 - setTimeout(callback, delayMs?), clearTimeout(id?): schedule/cancel timers
-Forward individual MCP content blocks to image/audio, not whole results."#;
+Forward individual MCP content blocks to image/audio, not whole results"#;
 const WAIT_DESCRIPTION_TEMPLATE: &str = "Resume or terminate a yielded exec cell";
 // Based off of https://modelcontextprotocol.io/specification/draft/schema#calltoolresult
 const MCP_TYPESCRIPT_PREAMBLE: &str = r#"type Role = "user" | "assistant";

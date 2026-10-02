@@ -1233,7 +1233,7 @@ async fn active_model_switch_updates_core_context_from_captured_settings(
         && context_window_model != Some(MODEL_A)
     {
         let replacement_notice = if initial_guidance_expected {
-            "This context-window guidance replaces all previously provided context-window guidance.\n\n"
+            "Prior context-window guidance replaced by the following\n\n"
         } else {
             ""
         };
@@ -1242,7 +1242,7 @@ async fn active_model_switch_updates_core_context_from_captured_settings(
         ));
     } else if initial_guidance_expected {
         expected_guidance.push(format!(
-            "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\nThe previously provided context-window guidance no longer applies.\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
+            "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\nPrior context-window guidance no longer applicable\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
         ));
     }
     for request in &requests[1..] {
@@ -2505,7 +2505,7 @@ async fn persistent_instructions_follow_mid_turn_model_changes() -> Result<()> {
     let initial =
         format!("<persistent_mode>\nPersistent instructions for {MODEL_A}.\n</persistent_mode>");
     let update = format!(
-        "<persistent_mode>\nThese persistent-mode instructions replace all previously provided persistent-mode instructions.\n\nPersistent instructions for {MODEL_B}.\n</persistent_mode>"
+        "<persistent_mode>\nPrior persistent-mode instructions replaced by the following\n\nPersistent instructions for {MODEL_B}.\n</persistent_mode>"
     );
     let requests = response_mock.requests();
     assert_eq!(

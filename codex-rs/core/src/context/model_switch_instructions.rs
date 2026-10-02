@@ -37,7 +37,7 @@ impl ContextualUserFragment for ModelSwitchInstructions {
 
     fn body(&self) -> String {
         format!(
-            "\nThe user was previously using a different model. Please continue the conversation according to the following instructions:\n\n{}\n",
+            "\nModel changed. Continue under these instructions:\n\n{}\n",
             self.model_instructions
         )
     }

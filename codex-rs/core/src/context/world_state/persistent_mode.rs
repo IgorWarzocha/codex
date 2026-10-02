@@ -10,9 +10,8 @@ use codex_protocol::models::ContentItemKind;
 use serde::Deserialize;
 use serde::Serialize;
 
-const REPLACEMENT_NOTICE: &str = "These persistent-mode instructions replace all previously provided persistent-mode instructions.";
-const REMOVAL_NOTICE: &str =
-    "The previously provided persistent-mode instructions no longer apply.";
+const REPLACEMENT_NOTICE: &str = "Prior persistent-mode instructions replaced by the following";
+const REMOVAL_NOTICE: &str = "Prior persistent-mode instructions no longer applicable";
 
 #[derive(Clone, Debug)]
 pub(crate) struct PersistentModeState {

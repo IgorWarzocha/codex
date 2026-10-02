@@ -18,9 +18,8 @@ use crate::GuardianReviewError;
 use crate::GuardianReviewOutcome;
 
 const REVIEW_FAILURE_INSTRUCTIONS: &str = concat!(
-    "The action was not executed because automatic approval review could not be completed. ",
-    "This is a review failure, not a determination that the action is unsafe. ",
-    "Do not bypass the approval check; resolve the error or ask the user for guidance.",
+    "Action not executed: automatic approval review failed, not an unsafe-action determination\n",
+    "No approval bypass; resolve error or ask user for guidance",
 );
 const INPUT_BUDGET_MESSAGE: &str =
     "the complete action and minimum review context exceed the reviewer input budget";

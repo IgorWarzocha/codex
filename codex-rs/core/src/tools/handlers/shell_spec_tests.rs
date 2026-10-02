@@ -22,33 +22,31 @@ fn exec_command_tool_matches_expected_spec() {
 
     let description = if cfg!(windows) {
         format!(
-            "Run a shell command. Returns output and a session ID while running.{}",
+            "Run a shell command; output and session ID while running{}",
             windows_shell_guidance_description()
         )
     } else {
-        "Run a shell command. Returns output and a session ID while running.".to_string()
+        "Run a shell command; output and session ID while running".to_string()
     };
     let yield_time_ms_description = if cfg!(windows) {
-        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately"
+        "Wait ms, default 10000, Windows range 10000-30000; immediate return when finished"
     } else {
-        "Wait before yielding, default 10000 ms, range 250-30000 ms"
+        "Wait ms, default 10000, range 250-30000"
     };
 
     let mut properties = BTreeMap::from([
         ("cmd".to_string(), JsonSchema::string(None)),
         (
             "workdir".to_string(),
-            JsonSchema::string(Some("Cwd, defaults to turn cwd".to_string())),
+            JsonSchema::string(Some("Default turn cwd".to_string())),
         ),
         (
             "shell".to_string(),
-            JsonSchema::string(Some("Shell binary, defaults to user's shell".to_string())),
+            JsonSchema::string(Some("Default user's shell".to_string())),
         ),
         (
             "tty".to_string(),
-            JsonSchema::boolean(Some(
-                "Allocate a PTY for stdin interaction; otherwise use pipes".to_string(),
-            )),
+            JsonSchema::boolean(Some("PTY for stdin interaction; default pipes".to_string())),
         ),
         (
             "yield_time_ms".to_string(),
@@ -56,15 +54,11 @@ fn exec_command_tool_matches_expected_spec() {
         ),
         (
             "max_output_tokens".to_string(),
-            JsonSchema::number(Some(
-                "Output tokens, default 10000, subject to policy caps".to_string(),
-            )),
+            JsonSchema::number(Some("Default 10000, subject to policy caps".to_string())),
         ),
         (
             "login".to_string(),
-            JsonSchema::boolean(Some(
-                "Enable -l/-i shell semantics, default true".to_string(),
-            )),
+            JsonSchema::boolean(Some("-l/-i shell semantics, default true".to_string())),
         ),
     ]);
     properties.extend(create_approval_parameters(
@@ -116,20 +110,19 @@ fn write_stdin_tool_matches_expected_spec() {
         (
             "chars".to_string(),
             JsonSchema::string(Some(
-                "Stdin bytes, only for tty=true sessions. Empty or omitted polls".to_string(),
+                "Stdin bytes for tty=true sessions; empty or omitted to poll".to_string(),
             )),
         ),
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding. Writes default to 250 ms, cap 30000 ms. Empty polls wait 5000-300000 ms by default".to_string(),
+                "Wait ms; writes default 250, cap 30000; empty polls default 5000-300000"
+                    .to_string(),
             )),
         ),
         (
             "max_output_tokens".to_string(),
-            JsonSchema::number(Some(
-                "Output tokens, default 10000, subject to policy caps".to_string(),
-            )),
+            JsonSchema::number(Some("Default 10000, subject to policy caps".to_string())),
         ),
     ]);
 
@@ -156,10 +149,7 @@ fn request_permissions_tool_includes_full_permission_schema() {
         create_request_permissions_tool("Request extra permissions for this turn.".to_string());
 
     let properties = BTreeMap::from([
-        (
-            "reason".to_string(),
-            JsonSchema::string(Some("Why additional permissions are needed".to_string())),
-        ),
+        ("reason".to_string(), JsonSchema::string(None)),
         (
             "environment_id".to_string(),
             JsonSchema::string(Some(

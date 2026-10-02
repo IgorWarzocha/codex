@@ -4,9 +4,8 @@ use super::WorldStateSection;
 use crate::context::ContextWindowGuidance;
 use crate::context::ContextualUserFragment;
 
-const REPLACEMENT_NOTICE: &str =
-    "This context-window guidance replaces all previously provided context-window guidance.";
-const REMOVAL_NOTICE: &str = "The previously provided context-window guidance no longer applies.";
+const REPLACEMENT_NOTICE: &str = "Prior context-window guidance replaced by the following";
+const REMOVAL_NOTICE: &str = "Prior context-window guidance no longer applicable";
 
 /// Model-visible guidance for managing the current context window.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -9,10 +9,11 @@ use codex_code_mode::render_compact_input_type;
 use codex_protocol::openai_models::CodeModeToolMessages;
 use serde_json::Value;
 
-const NOTEBOOK_USAGE: &str = r#"exec is a persistent Deno/TypeScript notebook with console, imports, Deno and Web APIs, with full machine access, not a sandbox. Bindings/imports survive cells and context rollover. Checkpoints restore values without replay; functions restore from source, not closures or live handles. New threads inherit durable project state, not private live bindings.
-Await work: unawaited tool calls are cancelled when a cell ends; timers and direct I/O can outlive cells. Wait on yielded cells before another exec. Cancellation terminates the kernel; the next exec restores its checkpoint without replay.
-Call await tools.NAME(args), or tools.NAME(input) for string tools. Model-only results bypass JS; calls return delivery receipts.
-generatedImage expects {image_url, output_hint?}. store(key,value)/load(key) retain JSON values in this kernel. await notify(value) emits immediately; await yield_control() yields while work continues; exit() succeeds. No audio()."#;
+const NOTEBOOK_USAGE: &str = r#"Persistent Deno/TypeScript notebook: console, imports, Deno and Web APIs. Full machine access, no sandbox
+Bindings/imports survive cells and context rollover. Checkpoints restore values without replay, functions from source without closures or live handles. New threads inherit durable project state only
+Await work. Cell end cancels unawaited tool calls, not timers or direct I/O. Wait on yielded cells before another exec. Cancellation kills the kernel. Next exec restores its checkpoint without replay
+await tools.NAME(args), or tools.NAME(input) for string tools. Model-only results bypass JS, return delivery receipts
+generatedImage({image_url, output_hint?}). store(key,value)/load(key): kernel-local JSON values. await notify(value): immediate output. await yield_control(): yield while work continues. exit(): success. No audio()"#;
 
 /// A usage surface only. Tool definitions and their on-demand help still own
 /// validation, complete schemas, and normalized identities.
@@ -25,7 +26,7 @@ pub(crate) fn build_notebook_tools_prompt(
 ) -> String {
     let mut sections = vec![NOTEBOOK_USAGE.to_string()];
     if nested_notebook_available {
-        sections.push("Inside exec, tools.notebook({action}) supports status without query, list, diagnostics. Other notebook actions use the top-level notebook tool after exec returns.".to_string());
+        sections.push("Inside exec: tools.notebook supports status without query, list, diagnostics. Other actions require top-level notebook after exec returns".to_string());
     }
     if !enabled_tools.is_empty() {
         let mut entries = Vec::new();
@@ -52,14 +53,14 @@ pub(crate) fn build_notebook_tools_prompt(
             entries.push(tool_usage(tool));
         }
         sections.push(format!(
-            "Tools available in exec (common usages show selected fields):\n{}",
+            "Tools in exec (selected fields):\n{}",
             entries.join("\n")
         ));
     }
     if !deferred_tools.is_empty() {
         let guidance = messages
             .and_then(|messages| messages.deferred_nested_tools_guidance.as_deref())
-            .unwrap_or("Additional tools are callable through tools; discover them in ALL_TOOLS.");
+            .unwrap_or("Additional tools in ALL_TOOLS");
         if !guidance.is_empty() {
             sections.push(guidance.to_string());
         }
@@ -76,7 +77,7 @@ pub(crate) fn build_notebook_tools_prompt(
     {
         sections.push(format!("Shared MCP Types:\n```ts\n{preamble}\n```"));
     }
-    sections.push("For full help and schemas, inspect tools.NAME.description and .usage, or filter ALL_TOOLS by name. For entries without argument details, inspect help before calling.".to_string());
+    sections.push("Filter ALL_TOOLS by name or description. Print names only. Read tools.NAME.description for selected tools.".to_string());
     format!("<exec_tools>\n{}\n</exec_tools>", sections.join("\n\n"))
 }
 
@@ -86,12 +87,12 @@ fn tool_usage(tool: &ToolDefinition) -> String {
     if tool.tool_name.is_default_namespace() {
         if tool.tool_name.name == "skills" && tool.kind == CodeModeToolKind::Freeform {
             return format!(
-                r#"- await tools.{name}("list") // or "list <category>...", "read <skill> [skill-or-reference...]"; returns instruction text"#
+                r#"- await tools.{name}("list") // or "list <category>...", "read <skill> [skill-or-reference...]""#
             );
         }
         if tool.tool_name.name == "apply_patch" && tool.kind == CodeModeToolKind::Freeform {
             return format!(
-                "- await tools.{name}(patch) // Raw string: *** Begin Patch / *** End Patch; actions: *** Add File: path (lines prefixed +), *** Update File: path, *** Delete File: path. *** Move to: path immediately follows its Update File header and needs a nonempty hunk (one unchanged context line for a pure move). Update hunks use @@ with exact context and space/+/- line prefixes, in file order; @@ text is context, not a line range."
+                "- await tools.{name}(patch) // Raw string: *** Begin Patch / *** End Patch. Actions: *** Add File: path (+ lines), *** Update File: path, *** Delete File: path. *** Move to: path immediately after Update File, with a nonempty @@ hunk (one unchanged context line for a pure move). Update hunks: @@, exact context, space/+/- prefixes, file order. @@ text: context, not a line range"
             );
         }
         if let Some(fields) = common_fields(&tool.tool_name.name)
@@ -104,13 +105,13 @@ fn tool_usage(tool: &ToolDefinition) -> String {
                     if schema["properties"].get("timeout_ms").is_some()
                         && schema["properties"].get("yield_time_ms").is_none() =>
                 {
-                    "returns {output: string, wall_time_seconds: number, exit_code?: number, truncated?: boolean, ...}; runs to completion; timeout or cancellation terminates it"
+                    "returns {output: string, wall_time_seconds: number, exit_code?: number, truncated?: boolean, ...}. Runs to completion. Timeout or cancellation terminates it"
                 }
                 "exec_command" => {
                     "returns {output: string, wall_time_seconds: number, session_id?: number, exit_code?: number, truncated?: boolean, ...}; poll a running session with write_stdin"
                 }
                 "write_stdin" => {
-                    "returns command output and continuation/exit fields; non-empty chars require an exec_command session started with tty=true; omitted/empty chars poll"
+                    "returns command output and continuation/exit fields. Non-empty chars require tty=true in exec_command. Empty/omitted chars poll"
                 }
                 "view_image" => "returns {image_url, detail?}; pass the result to image(result)",
                 "get_context_remaining" => "returns {tokens_left: number | null}",
@@ -267,7 +268,7 @@ mod tests {
         );
         let usage = tool_usage(&command);
         assert!(usage.contains("timeout_ms?: number"));
-        assert!(usage.contains("timeout or cancellation terminates it"));
+        assert!(usage.contains("Timeout or cancellation terminates it"));
         assert!(!usage.contains("tty?:"));
         assert!(!usage.contains("session_id"));
         assert!(!usage.contains("write_stdin"));
@@ -301,7 +302,7 @@ mod tests {
         };
         let prompt =
             build_notebook_tools_prompt(&[], &[deferred], &BTreeMap::new(), false, Some(&empty));
-        assert!(!prompt.contains("Additional tools are callable"));
+        assert!(!prompt.contains("Additional tools in ALL_TOOLS"));
         assert!(!prompt.contains("Shared MCP Types"));
         let prompt =
             build_notebook_tools_prompt(&[], &[], &BTreeMap::new(), false, Some(&messages));

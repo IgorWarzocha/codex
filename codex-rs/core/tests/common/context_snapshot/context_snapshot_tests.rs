@@ -322,20 +322,19 @@ fn portable_tool_schema_keeps_non_platform_changes_visible() {
     let mut unix = json!({
         "type": "function",
         "name": "exec_command",
-        "description": "Run a shell command. Returns output and a session ID while running.",
+        "description": "Run a shell command; output and session ID while running",
         "parameters": { "properties": {
             "cmd": { "description": "Shell command" },
-            "yield_time_ms": { "description": "Wait before yielding, default 10000 ms, range 250-30000 ms" }
+            "yield_time_ms": { "description": "Wait ms, default 10000, range 250-30000" }
         } }
     });
     let mut windows = unix.clone();
-    windows["parameters"]["properties"]["yield_time_ms"]["description"] = json!(
-        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately"
-    );
+    windows["parameters"]["properties"]["yield_time_ms"]["description"] =
+        json!("Wait ms, default 10000, Windows range 10000-30000; immediate return when finished");
     assert_eq!(portable_tool_schema(&unix), portable_tool_schema(&windows));
 
     windows["description"] = json!(format!(
-        "{}\n\nWindows safety rules:\nNew guidance.",
+        "{}\n\nWindows safety:\nNew guidance.",
         unix["description"].as_str().expect("shell description")
     ));
     assert_ne!(portable_tool_schema(&unix), portable_tool_schema(&windows));
@@ -347,11 +346,11 @@ fn portable_tool_schema_keeps_non_platform_changes_visible() {
 
 #[test]
 fn portable_tool_schema_normalizes_native_shell_guidance() {
-    let base = "Run a shell command. Returns output and a session ID while running.";
-    let windows_guidance = r#"Windows safety rules:
-- Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.
-- Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
-- When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control."#;
+    let base = "Run a shell command; output and session ID while running";
+    let windows_guidance = r#"Windows safety:
+- One shell end-to-end for delete or move; no PowerShell paths passed to cmd /c, batch builtins, or another shell; prefer Remove-Item or Move-Item with -LiteralPath, no string-built file-operation commands
+- Before recursive delete or move: verify resolved absolute targets within intended workspace or explicitly named directory, including computed paths
+- Start-Process background helpers or services: -WindowStyle Hidden unless explicitly requested visible; visible only for user-facing interactive tools"#;
     let description = |shell: String, wait: &str| {
         json!({ "type": "function", "name": "exec_command", "description": shell,
             "parameters": { "properties": { "yield_time_ms": { "description": wait } } }
@@ -360,17 +359,17 @@ fn portable_tool_schema_normalizes_native_shell_guidance() {
     let nested = |tool| json!({ "type": "namespace", "name": "functions", "tools": [tool] });
     let unix = nested(description(
         base.to_string(),
-        "Wait before yielding, default 10000 ms, range 250-30000 ms",
+        "Wait ms, default 10000, range 250-30000",
     ));
     let windows = nested(description(
         format!("{base}\n\n{windows_guidance}"),
-        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately",
+        "Wait ms, default 10000, Windows range 10000-30000; immediate return when finished",
     ));
     assert_eq!(portable_tool_schema(&unix), portable_tool_schema(&windows));
 
     let changed = nested(description(
         format!("{base}\n\n{windows_guidance}\nA new restriction."),
-        "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately",
+        "Wait ms, default 10000, Windows range 10000-30000; immediate return when finished",
     ));
     assert_ne!(portable_tool_schema(&unix), portable_tool_schema(&changed));
 }
@@ -690,8 +689,20 @@ fn detailed_skills_use_the_same_truncation_and_dynamic_normalization_as_other_te
     assert!(!large.contains("skill-15"));
 }
 
-#[test]
-fn rewritten_segments_share_one_tag_format_and_keep_compaction_data() {
+#[test_case::test_case(
+    "You are performing a CONTEXT CHECKPOINT COMPACTION. Routine guidance.",
+    "Another language model started to solve this problem.";
+    "legacy prose"
+)]
+#[test_case::test_case(
+    "CONTEXT CHECKPOINT COMPACTION. Concise, structured handoff for the next LLM",
+    "Previous model's handoff below. Tool state also available. Continue from this work without duplication:";
+    "current fragments"
+)]
+fn rewritten_segments_share_one_tag_format_and_keep_compaction_data(
+    summarization: &str,
+    summary_prefix: &str,
+) {
     let developer = |tag, body| tagged_message("developer", tag, body);
     let items = [
         developer("apps_instructions", "Apps guidance"),
@@ -704,14 +715,8 @@ fn rewritten_segments_share_one_tag_format_and_keep_compaction_data() {
             "user",
             "# AGENTS.md instructions for project\n\n<INSTRUCTIONS>\nProject rules\n</INSTRUCTIONS>",
         ),
-        message(
-            "user",
-            "You are performing a CONTEXT CHECKPOINT COMPACTION. Routine guidance.",
-        ),
-        message(
-            "user",
-            "Another language model started to solve this problem.\nGenerated summary",
-        ),
+        message("user", summarization),
+        message("user", &format!("{summary_prefix}\nGenerated summary")),
     ];
     let original = rewritten(&items);
     let lines = original
@@ -733,15 +738,16 @@ fn rewritten_segments_share_one_tag_format_and_keep_compaction_data() {
     let full = detailed(&items);
     assert!(full.contains("Routine guidance."));
     assert!(full.contains("Project rules"));
-    assert!(full.contains("Another language model started to solve this problem."));
+    assert!(full.contains(summary_prefix));
     assert!(full.contains("Generated summary"));
 }
 
-#[test]
-fn detailed_permissions_normalize_paths_and_keep_policy_changes_visible() {
+#[test_case::test_case("The writable roots are"; "legacy prose")]
+#[test_case::test_case("Writable roots:"; "current fragments")]
+fn detailed_permissions_normalize_paths_and_keep_policy_changes_visible(writable_label: &str) {
     let render = |cwd: &str, external: &str, separator: &str, network: &str, denied: &str| {
         let permissions = format!(
-            "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: {} Network access is {network}.\nApproval policy is currently never.\n The writable roots are `{cwd}`, `{external}`.\n- path `{cwd}{separator}{denied}`\n- glob `{external}{separator}*.key`\n</permissions instructions>",
+            "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: {} Network access is {network}.\nApproval policy is currently never.\n {writable_label} `{cwd}`, `{external}`.\n- path `{cwd}{separator}{denied}`\n- glob `{external}{separator}*.key`\n</permissions instructions>",
             "Some additional sandbox guidance. ".repeat(5)
         );
         let environment = format!(

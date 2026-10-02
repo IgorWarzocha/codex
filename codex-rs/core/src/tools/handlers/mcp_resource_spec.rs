@@ -8,13 +8,11 @@ pub fn create_list_mcp_resources_tool(messages: Option<&ToolMessage>) -> ToolSpe
     let properties = BTreeMap::from([
         (
             "server".to_string(),
-            JsonSchema::string(Some(
-                "Server name, defaults to all configured servers".to_string(),
-            )),
+            JsonSchema::string(Some("Default all configured servers".to_string())),
         ),
         (
             "cursor".to_string(),
-            JsonSchema::string(Some("Cursor from the previous resource page".to_string())),
+            JsonSchema::string(Some("Previous resource page cursor".to_string())),
         ),
     ]);
 
@@ -33,13 +31,11 @@ pub fn create_list_mcp_resource_templates_tool(messages: Option<&ToolMessage>) -
     let properties = BTreeMap::from([
         (
             "server".to_string(),
-            JsonSchema::string(Some(
-                "Server name, defaults to all configured servers".to_string(),
-            )),
+            JsonSchema::string(Some("Default all configured servers".to_string())),
         ),
         (
             "cursor".to_string(),
-            JsonSchema::string(Some("Cursor from the previous template page".to_string())),
+            JsonSchema::string(Some("Previous template page cursor".to_string())),
         ),
     ]);
 
@@ -58,13 +54,11 @@ pub fn create_read_mcp_resource_tool(messages: Option<&ToolMessage>) -> ToolSpec
     let properties = BTreeMap::from([
         (
             "server".to_string(),
-            JsonSchema::string(Some(
-                "Exact server value from list_mcp_resources".to_string(),
-            )),
+            JsonSchema::string(Some("Exact value from list_mcp_resources".to_string())),
         ),
         (
             "uri".to_string(),
-            JsonSchema::string(Some("URI returned by list_mcp_resources".to_string())),
+            JsonSchema::string(Some("From list_mcp_resources".to_string())),
         ),
     ]);
 

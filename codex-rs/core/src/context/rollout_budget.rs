@@ -25,7 +25,7 @@ impl ContextualUserFragment for RolloutBudgetContext {
 
     fn body(&self) -> String {
         format!(
-            "You have {} weighted tokens left in the shared session token budget.",
+            "Shared session budget: {} weighted tokens remaining",
             self.remaining_tokens
         )
     }

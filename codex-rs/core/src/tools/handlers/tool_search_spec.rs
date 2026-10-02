@@ -19,10 +19,7 @@ pub(crate) fn create_tool_search_tool(
     source_listing: ToolSearchSourceListing,
 ) -> ToolSpec {
     let properties = BTreeMap::from([
-        (
-            "query".to_string(),
-            JsonSchema::string(Some("Deferred-tool search query".to_string())),
-        ),
+        ("query".to_string(), JsonSchema::string(None)),
         (
             "limit".to_string(),
             JsonSchema::number(Some(format!("Result limit, default {default_limit}"))),
@@ -44,7 +41,7 @@ pub(crate) fn create_tool_search_tool(
             }
 
             let source_descriptions = if source_descriptions.is_empty() {
-                "None currently enabled.".to_string()
+                "None enabled".to_string()
             } else {
                 let reserved_name_bytes = source_descriptions.keys().fold(
                     source_descriptions.len().saturating_sub(1),
@@ -87,7 +84,7 @@ pub(crate) fn create_tool_search_tool(
     };
 
     let description = format!(
-        "Search deferred tool metadata with BM25. Matches become callable on the next model call.{source_section}For MCP tool discovery, use `{TOOL_SEARCH_TOOL_NAME}`, not list_mcp_resources or list_mcp_resource_templates."
+        "BM25 search of deferred tool metadata; matches callable on next model call{source_section}MCP tool discovery via {TOOL_SEARCH_TOOL_NAME}, not list_mcp_resources or list_mcp_resource_templates"
     );
 
     ToolSpec::ToolSearch {
@@ -134,7 +131,7 @@ mod tests {
             ),
             ToolSpec::ToolSearch {
                 execution: "client".to_string(),
-                description: "Search deferred tool metadata with BM25. Matches become callable on the next model call.\n\nEnabled sources:\n- Google Drive: Use Google Drive as the single entrypoint for Drive, Docs, Sheets, and Slides work.\n- docs\nFor MCP tool discovery, use `tool_search`, not list_mcp_resources or list_mcp_resource_templates.".to_string(),
+                description: "BM25 search of deferred tool metadata; matches callable on next model call\n\nEnabled sources:\n- Google Drive: Use Google Drive as the single entrypoint for Drive, Docs, Sheets, and Slides work.\n- docs\nMCP tool discovery via tool_search, not list_mcp_resources or list_mcp_resource_templates".to_string(),
                 parameters: JsonSchema::object(BTreeMap::from([
                         (
                             "limit".to_string(),
@@ -145,7 +142,7 @@ mod tests {
                         ),
                         (
                             "query".to_string(),
-                            JsonSchema::string(Some("Deferred-tool search query".to_string()),),
+                            JsonSchema::string(None,),
                         ),
                     ]), Some(vec!["query".to_string()]), Some(false.into())),
             }
@@ -167,7 +164,7 @@ mod tests {
 
         assert!(!description.contains("Enabled sources:"));
         assert!(!description.contains("Google Drive"));
-        assert!(description.contains("For MCP tool discovery, use `tool_search`"));
+        assert!(description.contains("MCP tool discovery via tool_search"));
     }
 
     #[test]
@@ -191,7 +188,7 @@ mod tests {
             .split_once("Enabled sources:\n")
             .expect("tool search should retain its source introduction");
         let (source_descriptions, _) = source_section
-            .split_once("\nFor MCP tool discovery")
+            .split_once("\nMCP tool discovery")
             .expect("tool search should retain its discovery instructions");
         assert!(source_descriptions.len() <= MAX_TOOL_SEARCH_SOURCE_DESCRIPTION_BYTES);
         assert!(source_descriptions.starts_with("- source-00: 🦀"));
@@ -213,9 +210,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(advertised_names, expected_names);
         assert!(
-            description.contains(
-                "use `tool_search`, not list_mcp_resources or list_mcp_resource_templates"
-            )
+            description
+                .contains("via tool_search, not list_mcp_resources or list_mcp_resource_templates")
         );
     }
 }

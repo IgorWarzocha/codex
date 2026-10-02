@@ -36,4 +36,5 @@ Scenario: True mid-turn continuation compaction after tool output: compact reque
     function call limit push
 03:message/user:
     <COMPACTION_SUMMARY>
+
     AUTO_SUMMARY

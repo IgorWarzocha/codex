@@ -43,6 +43,7 @@ Scenario: Pre-turn auto-compaction uses the prior context without the incoming u
     USER_TWO
 02:message/user:
     <COMPACTION_SUMMARY>
+
     PRE_TURN_SUMMARY
 03:message/developer:
     <PERMISSIONS_INSTRUCTIONS>

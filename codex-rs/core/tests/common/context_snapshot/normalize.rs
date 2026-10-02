@@ -235,7 +235,8 @@ impl Normalizer {
         let aliases = self.path_aliases();
         text.split('\n')
             .map(|line| {
-                let writable = line.trim_start().starts_with("The writable root");
+                let writable = line.trim_start().starts_with("The writable root")
+                    || line.trim_start().starts_with("Writable root");
                 if !writable && !line.starts_with("- path `") && !line.starts_with("- glob `") {
                     return line.to_string();
                 }
@@ -308,10 +309,12 @@ fn known_segment_name(text: &str, source: TextSource<'_>) -> Option<String> {
                 "You are performing a CONTEXT CHECKPOINT COMPACTION.",
                 "SUMMARIZATION_PROMPT",
             ),
+            ("CONTEXT CHECKPOINT COMPACTION.", "SUMMARIZATION_PROMPT"),
             (
                 "Another language model started to solve this problem",
                 "COMPACTION_SUMMARY",
             ),
+            ("Previous model's handoff below.", "COMPACTION_SUMMARY"),
         ],
         _ => &[],
     };
@@ -452,11 +455,12 @@ fn normalize_json(value: &mut Value, normalize: &mut impl FnMut(&str) -> String)
 // Shell guidance and its yield-time wording intentionally differ on Windows. Compare all other
 // tool schema fields, while keeping the context snapshots identical across operating systems.
 pub(super) fn portable_tool_schema(tool: &Value) -> Value {
-    const BASE: &str = "Run a shell command. Returns output and a session ID while running.";
+    const BASE: &str = "Run a shell command; output and session ID while running";
     // Exact current Windows-only suffix. A change to its wording must be reviewed explicitly.
-    const WINDOWS_SAFETY_SUFFIX_HASH: u64 = 0x6de3_23e4_7060_6128;
-    const UNIX_WAIT: &str = "Wait before yielding, default 10000 ms, range 250-30000 ms";
-    const WINDOWS_WAIT: &str = "Wait before yielding a running session, default 10000 ms, Windows range 10000-30000 ms. Finished commands return immediately";
+    const WINDOWS_SAFETY_SUFFIX_HASH: u64 = 0x055e_480c_a7dd_001a;
+    const UNIX_WAIT: &str = "Wait ms, default 10000, range 250-30000";
+    const WINDOWS_WAIT: &str =
+        "Wait ms, default 10000, Windows range 10000-30000; immediate return when finished";
     let mut stable = tool.clone();
     if let Some(Value::Array(members)) = stable.get_mut("tools") {
         for member in members {
@@ -476,7 +480,7 @@ pub(super) fn portable_tool_schema(tool: &Value) -> Value {
     }
     if let Some(Value::String(description)) = definition.get_mut("description")
         && description.strip_prefix(BASE).is_some_and(|rest| {
-            rest.starts_with("\n\nWindows safety rules:")
+            rest.starts_with("\n\nWindows safety:")
                 && fnv1a(normalize_line_endings(rest).as_bytes()) == WINDOWS_SAFETY_SUFFIX_HASH
         })
     {

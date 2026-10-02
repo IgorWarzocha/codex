@@ -28,11 +28,11 @@ impl ContextualUserFragment for EnvironmentsInstructions {
 
     fn body(&self) -> String {
         "\n## Execution environments\n\
-Execution environments are separate machines or workspaces with their own files, shell, and installed capabilities. `<environment_context>` lists the environments selected for this task.\n\
+Separate machines or workspaces, each with its own files, shell, and installed capabilities. Task selection: `<environment_context>`\n\
 \n\
-An environment marked `starting` is not yet usable. Its files, commands, AGENTS.md instructions, skills, plugins, and MCP tools may become available when startup completes.\n\
+`starting`: not yet usable. Files, commands, AGENTS.md instructions, skills, plugins, and MCP tools may become available after startup\n\
 \n\
-Wait only when the current task needs that environment. Continue using tools that are already available for unrelated work.\n"
+Wait only for environments needed by the current task. Available tools for unrelated work meanwhile\n"
             .to_string()
     }
 }

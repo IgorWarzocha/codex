@@ -12,9 +12,8 @@ use serde::Serialize;
 use std::io;
 
 const MAX_MANAGED_DEVELOPER_INSTRUCTIONS_TOKENS: usize = 10_000;
-const REPLACEMENT_NOTICE: &str = "These managed developer instructions replace all previously provided managed developer instructions.";
-const REMOVAL_NOTICE: &str =
-    "The previously provided managed developer instructions no longer apply.";
+const REPLACEMENT_NOTICE: &str = "Prior managed developer instructions replaced by the following";
+const REMOVAL_NOTICE: &str = "Prior managed developer instructions no longer applicable";
 
 /// A requirements-owned developer message, kept separate from client instructions.
 #[derive(Clone, Debug)]

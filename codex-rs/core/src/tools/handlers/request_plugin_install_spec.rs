@@ -37,7 +37,7 @@ pub(crate) fn create_request_plugin_install_tool(
                 "suggest_reason".to_string(),
             ],
             format!(
-                "Request installation only for an exact match to the user's explicit request returned by `{LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME}`. Pass its tool_type and id as tool_type and tool_id. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools."
+                "Installation request only for exact user-requested match from {LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME}; returned tool_type and id as tool_type and tool_id\nNo adjacent capabilities, general recommendations, or parallel tool calls"
             ),
         ),
         ToolSuggestPresentation::RecommendationContext => (
@@ -55,7 +55,7 @@ pub(crate) fn create_request_plugin_install_tool(
                 ),
             ]),
             vec!["plugin_id".to_string(), "suggest_reason".to_string()],
-            "Suggest installation only for a specific unavailable plugin the user explicitly requested, after exhausting tool search, and only from <recommended_plugins>. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools.".to_string(),
+            "Installation suggestion only for explicit user-requested unavailable plugin from <recommended_plugins>, after exhausting tool search\nNo adjacent capabilities, general recommendations, or parallel tool calls".to_string(),
         ),
     };
 
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn create_request_plugin_install_tool_uses_expected_legacy_wire_shape() {
-        let expected_description = "Request installation only for an exact match to the user's explicit request returned by `list_available_plugins_to_install`. Pass its tool_type and id as tool_type and tool_id. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools.";
+        let expected_description = "Installation request only for exact user-requested match from list_available_plugins_to_install; returned tool_type and id as tool_type and tool_id\nNo adjacent capabilities, general recommendations, or parallel tool calls";
 
         assert_eq!(
             create_request_plugin_install_tool(ToolSuggestPresentation::ListTool),
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn recommendation_context_uses_simplified_plugin_wire_shape() {
-        let expected_description = "Suggest installation only for a specific unavailable plugin the user explicitly requested, after exhausting tool search, and only from <recommended_plugins>. Not for adjacent capabilities or general recommendations. Do not call in parallel with other tools.";
+        let expected_description = "Installation suggestion only for explicit user-requested unavailable plugin from <recommended_plugins>, after exhausting tool search\nNo adjacent capabilities, general recommendations, or parallel tool calls";
 
         assert_eq!(
             create_request_plugin_install_tool(ToolSuggestPresentation::RecommendationContext),

@@ -56,10 +56,10 @@ impl ToolExecutor<ToolInvocation> for CurrentTimeHandler {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Namespace(ResponsesApiNamespace {
             name: NAMESPACE.to_string(),
-            description: "Tools for reading and waiting on time.".to_string(),
+            description: "Read or wait on time".to_string(),
             tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
                 name: TOOL_NAME.to_string(),
-                description: "Return the current time in UTC.".to_string(),
+                description: "Current UTC time".to_string(),
                 strict: false,
                 defer_loading: None,
                 parameters: JsonSchema::object(
@@ -67,17 +67,20 @@ impl ToolExecutor<ToolInvocation> for CurrentTimeHandler {
                     /*required*/ None,
                     /*additional_properties*/ Some(false.into()),
                 ),
-                output_schema: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "current_time": {
-                            "type": "string",
-                            "description": "Current UTC time formatted as YYYY-MM-DD HH:MM:SS UTC."
-                        }
-                    },
-                    "required": ["current_time"],
-                    "additionalProperties": false
-                }).into()),
+                output_schema: Some(
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "current_time": {
+                                "type": "string",
+                                "description": "YYYY-MM-DD HH:MM:SS UTC"
+                            }
+                        },
+                        "required": ["current_time"],
+                        "additionalProperties": false
+                    })
+                    .into(),
+                ),
             })],
         })
     }

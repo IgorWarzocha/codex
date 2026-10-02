@@ -4,10 +4,10 @@
 use super::ResolvedMessage;
 use codex_protocol::openai_models::MultiAgentMessages;
 
-const DEFAULT_MULTI_AGENT_V2_ROOT_AGENT_USAGE_HINT_TEXT: &str = "You are `/root`. Own the result and coordinate delegated work. Agent messages arrive in analysis. `send_message` contacts an active agent without starting a turn. `followup_task` starts a turn.";
-const DEFAULT_MULTI_AGENT_V2_SUBAGENT_USAGE_HINT_TEXT: &str = "Complete your assigned task. Your final answer goes to your parent. Agent messages arrive in analysis. `send_message` contacts an active agent without starting a turn. `followup_task` starts a turn.";
-const EXPLICIT_REQUEST_ONLY_MULTI_AGENT_MODE_TEXT: &str = "This replaces proactive-delegation guidance. Spawn agents only when explicitly requested by the user or applicable AGENTS.md or skill instructions.";
-const PROACTIVE_MULTI_AGENT_MODE_TEXT: &str = "This replaces explicit-request-only guidance until a developer mode change. Delegate parallel work when it saves time or improves quality. User requests override this hint.";
+const DEFAULT_MULTI_AGENT_V2_ROOT_AGENT_USAGE_HINT_TEXT: &str = "Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`: contact an active agent, no new turn. `followup_task`: new turn";
+const DEFAULT_MULTI_AGENT_V2_SUBAGENT_USAGE_HINT_TEXT: &str = "Complete the assigned task. Final answer to parent. Agent messages in analysis. `send_message`: contact an active agent, no new turn. `followup_task`: new turn";
+const EXPLICIT_REQUEST_ONLY_MULTI_AGENT_MODE_TEXT: &str = "Proactive-delegation guidance replaced. Agent spawning only on explicit request from the user or applicable AGENTS.md or skill instructions";
+const PROACTIVE_MULTI_AGENT_MODE_TEXT: &str = "Explicit-request-only guidance replaced until a developer mode change. Parallel delegation when faster or higher quality. User requests override this hint";
 
 /// Model-only role bases and mode alternatives for runtime selection.
 #[derive(Debug, Clone, Copy)]

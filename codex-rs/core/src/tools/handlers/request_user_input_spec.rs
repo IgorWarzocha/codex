@@ -17,13 +17,11 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
     let option_props = BTreeMap::from([
         (
             "label".to_string(),
-            JsonSchema::string(Some("Label, 1-5 words".to_string())),
+            JsonSchema::string(Some("1-5 words".to_string())),
         ),
         (
             "description".to_string(),
-            JsonSchema::string(Some(
-                "One sentence describing the choice's impact".to_string(),
-            )),
+            JsonSchema::string(Some("Choice impact, one sentence".to_string())),
         ),
     ]);
 
@@ -33,10 +31,7 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
             Some(vec!["label".to_string(), "description".to_string()]),
             Some(false.into()),
         ),
-        Some(
-            "2-3 mutually exclusive choices. Omit Other because the client adds free text"
-                .to_string(),
-        ),
+        Some("2-3 mutually exclusive choices; no Other, automatic free text".to_string()),
     );
 
     let question_props = BTreeMap::from([
@@ -50,7 +45,7 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
         ),
         (
             "question".to_string(),
-            JsonSchema::string(Some("Single-sentence question".to_string())),
+            JsonSchema::string(Some("One sentence".to_string())),
         ),
         ("options".to_string(), options_schema),
     ]);
@@ -119,7 +114,7 @@ pub(crate) fn normalize_request_user_input_tool_args(
 
 pub fn request_user_input_tool_description(available_modes: &[ModeKind]) -> String {
     let allowed_modes = format_allowed_modes(available_modes);
-    format!("Ask the user and wait for answers. Available only in {allowed_modes}.")
+    format!("Ask the user; wait for answers; {allowed_modes} only")
 }
 
 fn format_allowed_modes(available_modes: &[ModeKind]) -> String {

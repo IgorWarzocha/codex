@@ -634,7 +634,7 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
         "switching models should preserve the existing model-switch message"
     );
     let expected_guidance = format!(
-        "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\nThis context-window guidance replaces all previously provided context-window guidance.\n\nUse second-model context-window guidance.\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
+        "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\nPrior context-window guidance replaced by the following\n\nUse second-model context-window guidance.\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
     );
     assert_eq!(
         developer_texts
@@ -997,7 +997,7 @@ async fn get_context_remaining_returns_token_budget_remaining_fragment() -> Resu
         "get_context_remaining should be exposed when token budget is enabled"
     );
 
-    let remaining_context = "You have 6500 tokens left in this context window.".to_string();
+    let remaining_context = "Context-window budget: 6500 tokens remaining".to_string();
     let token_budgets = token_budget_contexts(&requests[1]);
     assert_eq!(token_budgets.len(), 1);
     token_budget_window_ids(&token_budgets[0], "/root");
@@ -1064,7 +1064,7 @@ async fn get_context_remaining_uses_body_after_prefix_window() -> Result<()> {
         "get_context_remaining should be exposed when token budget is enabled"
     );
 
-    let remaining_context = "You have 6500 tokens left in this context window.".to_string();
+    let remaining_context = "Context-window budget: 6500 tokens remaining".to_string();
     assert_eq!(
         requests[2].function_call_output_content_and_success(call_id),
         Some((Some(remaining_context), None))
@@ -1124,10 +1124,7 @@ async fn get_context_remaining_returns_unknown_when_threshold_is_unbounded() -> 
     assert_eq!(token_budget_contexts(&requests[0]), Vec::<String>::new());
     assert_eq!(
         requests[1].function_call_output_content_and_success(call_id),
-        Some((
-            Some("You have unknown tokens left in this context window.".to_string()),
-            None,
-        ))
+        Some((Some("Context-window budget: unknown".to_string()), None,))
     );
 
     Ok(())
@@ -1501,7 +1498,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     );
     assert_eq!(
         fallback_request.function_call_output_text(trigger_call_id),
-        Some("You have 0 tokens left in this context window.".to_string())
+        Some("Context-window budget: 0 tokens remaining".to_string())
     );
     let initial_context = token_budget_contexts(&requests[0]);
     assert_eq!(token_budget_contexts(fallback_request), initial_context);

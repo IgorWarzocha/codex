@@ -60,11 +60,11 @@ mod tests {
         .expect("expected apps section");
 
         assert!(rendered.starts_with(APPS_INSTRUCTIONS_OPEN_TAG));
-        assert!(rendered.contains("Apps use `codex_apps` tools."));
-        assert!(rendered.contains("Discover unloaded tools with `tool_search` when available."));
-        assert!(rendered.contains(
-            "Do not call `list_mcp_resources` or `list_mcp_resource_templates` for apps."
-        ));
+        assert!(rendered.contains("Apps: `codex_apps` tools."));
+        assert!(rendered.contains("Unloaded tools: `tool_search` when available."));
+        assert!(
+            rendered.contains("No `list_mcp_resources` or `list_mcp_resource_templates` for apps")
+        );
         assert!(rendered.ends_with(APPS_INSTRUCTIONS_CLOSE_TAG));
     }
 }

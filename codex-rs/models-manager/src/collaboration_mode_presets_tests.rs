@@ -26,13 +26,11 @@ fn default_mode_instructions_follow_user_input_tool_availability() {
         .expect("default instructions should be set");
 
     assert!(
-        default_instructions
-            .contains("Use `request_user_input`, when available, only for optional questions")
+        default_instructions.contains("`request_user_input`, when available: optional questions")
     );
     assert!(
-        default_instructions.contains(
-            "Ask one concise plain-text question when required input blocks safe progress."
-        )
+        default_instructions
+            .contains("Required input blocking safe progress: one concise plain-text question")
     );
     assert!(default_instructions.contains("never approvals"));
 }

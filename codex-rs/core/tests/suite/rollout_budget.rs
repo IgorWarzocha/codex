@@ -47,7 +47,7 @@ fn rollout_budget_texts(request: &ResponsesRequest) -> Vec<String> {
 
 fn rollout_budget_message(remaining_tokens: i64) -> String {
     format!(
-        "<rollout_budget>\nYou have {remaining_tokens} weighted tokens left in the shared session token budget.\n</rollout_budget>"
+        "<rollout_budget>\nShared session budget: {remaining_tokens} weighted tokens remaining\n</rollout_budget>"
     )
 }
 
@@ -456,7 +456,7 @@ async fn restates_the_current_remainder_after_compaction() -> Result<()> {
         .find("compact summary")
         .expect("post-compaction request should contain the summary");
     let reminder_position = request_body
-        .find("You have 70 weighted tokens left in the shared session token budget.")
+        .find("Shared session budget: 70 weighted tokens remaining")
         .expect("post-compaction request should contain the current remainder");
     assert!(
         summary_position < reminder_position,

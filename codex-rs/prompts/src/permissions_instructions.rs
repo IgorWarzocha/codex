@@ -28,15 +28,15 @@ use std::sync::LazyLock;
 
 const REQUEST_PERMISSION_RULE: &str =
     include_str!("../templates/permissions/approval_policy/on_request_rule_request_permission.md");
-const REQUEST_PERMISSIONS_TOOL: &str = "`request_permissions` is available. Request only needed `network` and `file_system` access before commands that need it.";
-const AUTO_REVIEW_SUFFIX: &str = "`approvals_reviewer`: `auto_review`. `require_escalated` requests receive policy review. After rejection, proceed only with a materially safer alternative, or explain the risk and ask for approval in a final message.";
+const REQUEST_PERMISSIONS_TOOL: &str = "`request_permissions` available. Only needed `network` and `file_system` access, before affected commands";
+const AUTO_REVIEW_SUFFIX: &str = "`approvals_reviewer`: `auto_review`. Policy review for `require_escalated`. After rejection: materially safer alternative only, or risk explanation and approval question in a final message";
 const APPROVED_PREFIXES: &str = "Approved command prefixes: ";
 const GRANULAR_INTRO: &str =
-    "Approval policy: `granular`. Categories set to `false` reject automatically.";
+    "Approval policy: `granular`. Categories set to `false`: automatic rejection";
 const GRANULAR_PROMPTED_CATEGORIES: &str = "May prompt:";
 const GRANULAR_REJECTED_CATEGORIES: &str = "Reject automatically:";
 const MAX_PERMISSION_PATH_BYTES: usize = 32 * 1024;
-const OMITTED_PERMISSION_PATHS: &str = "Additional permission paths or globs are omitted. All restrictions still apply. Do not bypass omitted read denials with escalation or additional permissions.";
+const OMITTED_PERMISSION_PATHS: &str = "Additional permission paths or globs omitted. All restrictions still apply. No bypass of omitted read denials through escalation or additional permissions";
 
 static DANGER_FULL_ACCESS: LazyLock<Template> = LazyLock::new(|| {
     Template::parse(DANGER_FULL_ACCESS_TEMPLATE.trim_end())
@@ -371,9 +371,9 @@ fn writable_roots_text(writable_roots: &[String]) -> Option<String> {
         .map(|root| format!("`{root}`"))
         .collect();
     Some(if roots_list.len() == 1 {
-        format!(" The writable root is {}.", roots_list[0])
+        format!(" Writable root: {}", roots_list[0])
     } else {
-        format!(" The writable roots are {}.", roots_list.join(", "))
+        format!(" Writable roots: {}", roots_list.join(", "))
     })
 }
 
@@ -388,7 +388,7 @@ fn denied_reads_text(paths: &[String], globs: &[String]) -> Option<String> {
     }
 
     Some(format!(
-        "Denied reads. Do not read these paths or globs, or request escalation or additional permissions to bypass the denials:\n{}",
+        "Denied reads: no reading these paths or globs, no escalation or additional-permission requests to bypass denials:\n{}",
         entries.join("\n")
     ))
 }

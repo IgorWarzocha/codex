@@ -5,9 +5,9 @@ use super::ResolvedModelMessages;
 use super::permissions::DEFAULT_CATALOG_ON_REQUEST_AUTO_REVIEW;
 use codex_protocol::openai_models::ModelMessages;
 
-const TOKEN_BUDGET_GUIDANCE: &str = "Before a context reset, checkpoint the goal, decisions, progress, learnings, and next steps in `notes`. Include window and item IDs for active requests and important evidence. After reset, read the checkpoint and recover only missing details from `history`. The next window does not automatically include this conversation. Keep this bookkeeping out of user-facing replies.";
-const TOKEN_BUDGET_REMINDER: &str = "<context_window_reminder>Only {n_remaining} tokens remain. Save a checkpoint in `notes` with the goal, decisions, progress, next steps, and relevant window and item IDs. Then call `functions.new_context`. The next window will not automatically include this conversation.</context_window_reminder>";
-const TOKEN_BUDGET_FALLBACK: &str = "<context_window_reminder>Context is exhausted. Do not continue the task or answer here. Make exactly one write or append to `notes` with the goal, decisions, progress, learnings, next steps, and relevant window and item IDs. After its result, call `functions.new_context`. Use no other tools. The next window will not automatically include this conversation.</context_window_reminder>";
+const TOKEN_BUDGET_GUIDANCE: &str = "Before context reset: `notes` checkpoint of goal, decisions, progress, learnings, next steps, and window and item IDs for active requests and important evidence. After reset: checkpoint first, `history` only for missing details. No automatic conversation carryover. Bookkeeping out of user-facing replies";
+const TOKEN_BUDGET_REMINDER: &str = "<context_window_reminder>Remaining tokens: {n_remaining}. `notes` checkpoint: goal, decisions, progress, next steps, relevant window and item IDs. Then `functions.new_context`. No automatic conversation carryover</context_window_reminder>";
+const TOKEN_BUDGET_FALLBACK: &str = "<context_window_reminder>Context exhausted. No task continuation or answer here. Exactly one `notes` write or append: goal, decisions, progress, learnings, next steps, relevant window and item IDs. After its result: `functions.new_context`. No other tools. No automatic conversation carryover</context_window_reminder>";
 
 /// Call only for the default catalog. Replace named prose fields, not feature settings,
 /// tool contracts, permission policies, or explicit empty-string suppression.

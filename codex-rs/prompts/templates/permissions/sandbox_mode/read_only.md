@@ -1,1 +1,1 @@
-`sandbox_mode`: `read-only`. Read files only. Network access: {{ network_access }}.
+`sandbox_mode`: `read-only`. Reads only. Network access: {{ network_access }}

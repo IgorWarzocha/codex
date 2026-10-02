@@ -105,16 +105,12 @@ async fn running_descendants_refresh_only_shared_thread_instructions(shared: boo
     }));
     let previous_loads = previous_provider.load_count();
 
-    let replacement = format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{UPDATED}"
-    );
+    let replacement =
+        format!("Prior AGENTS.md instructions replaced by the following\n\n{UPDATED}");
     let updates = [
         (Some(INITIAL), INITIAL),
         (Some(UPDATED), replacement.as_str()),
-        (
-            None,
-            "The previously provided AGENTS.md instructions no longer apply.",
-        ),
+        (None, "Prior AGENTS.md instructions no longer applicable"),
         (None, ""),
     ];
     let loads_before = provider.load_count();
@@ -261,9 +257,9 @@ async fn guardian_tracks_shared_instruction_updates_in_running_descendants() -> 
     let initial = format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{INITIAL}\n</INSTRUCTIONS>");
     let updated = format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{UPDATED}\n</INSTRUCTIONS>");
     let replacement = format!(
-        "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nThese AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{UPDATED}\n</INSTRUCTIONS>"
+        "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nPrior AGENTS.md instructions replaced by the following\n\n{UPDATED}\n</INSTRUCTIONS>"
     );
-    let cleared = "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nThe previously provided AGENTS.md instructions no longer apply.\n</INSTRUCTIONS>".to_owned();
+    let cleared = "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nPrior AGENTS.md instructions no longer applicable\n</INSTRUCTIONS>".to_owned();
     assert_eq!(
         requests
             .iter()

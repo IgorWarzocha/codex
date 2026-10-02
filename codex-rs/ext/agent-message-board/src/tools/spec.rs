@@ -27,17 +27,17 @@ pub(super) fn tool(
 ) -> ToolSpec {
     let (description, fields, required): (&str, &[&str], &[&str]) = match name {
         "create_channel" => (
-            "Create a channel where all agents in this collaboration can read and post messages. You are subscribed to new top-level posts by default.",
+            "Collaboration-wide read/post access; creator subscribed to new top-level posts by default",
             &["channel_name", "subscribe"],
             &["channel_name"],
         ),
         "get_channels" => (
-            "List channels, most recently active first, or search by a case-insensitive part of the name. Creating a channel or posting in it counts as activity.",
+            "Most recently active first; creation and posts count as activity; case-insensitive name substring search",
             &["query", "recent_first", "limit", "cursor"],
             &[],
         ),
         "list_threads" => (
-            "List a channel's threads with previews of the first post and latest reply. New threads come first by default; sorting by activity brings threads with recent replies to the top.",
+            "First-post and latest-reply previews; newest threads first by default; activity sort uses recent replies",
             &[
                 "channel_name",
                 "sort",
@@ -49,7 +49,7 @@ pub(super) fn tool(
             &["channel_name"],
         ),
         "search_posts" => (
-            "Search top-level posts and replies, newest first. Text matches are case-insensitive substrings; omit the query to see recent activity. You can narrow by channel, author, or posts after a message ID. Results are previews; read_post can retrieve the full text.",
+            "Top-level posts and replies, newest first; case-insensitive substring; omitted query shows recent activity; previews, full text via read_post",
             &[
                 "channel_name",
                 "query",
@@ -62,27 +62,27 @@ pub(super) fn tool(
             &[],
         ),
         "read_thread" => (
-            "Read a thread using its first post's message ID. Every page includes previews of the first post and the newest replies; the cursor advances through replies.",
+            "thread_id = first post message ID; each page includes first-post and newest-reply previews; cursor advances through replies",
             &["thread_id", "limit", "cursor", "max_chars_per_post"],
             &["thread_id"],
         ),
         "read_post" => (
-            "Read a post or reply by message ID, without needing its channel. Offsets count Unicode characters; continue at next_offset_chars while it is less than n_chars.",
+            "Post/reply text; Unicode character offsets; continue at next_offset_chars while below n_chars",
             &["message_id", "offset_chars", "limit_chars"],
             &["message_id"],
         ),
         "subscribe" => (
-            "Subscribe yourself or another agent to a channel for new top-level posts, or to a thread for replies. Provide exactly one of channel_name or thread_id. Notifications only reach agents with a running turn; missed notifications are not saved.",
+            "Channel top-level posts or thread replies; exactly one of channel_name/thread_id; notifications only during running turns, missed notifications not saved",
             &["channel_name", "thread_id", "target_agent"],
             &[],
         ),
         "unsubscribe" => (
-            "Unsubscribe yourself or another agent from a channel or thread. Provide exactly one of channel_name or thread_id. Posting again does not undo a thread unsubscribe. Agents explicitly named on a post can still receive that notification.",
+            "Exactly one of channel_name/thread_id; thread unsubscribe survives posting; explicit post notifications still delivered",
             &["channel_name", "thread_id", "target_agent"],
             &[],
         ),
         "post" => (
-            "Start a thread in an existing or new channel, or reply using the first post's message ID as thread_id. Exactly one destination is required. Posting subscribes you to the thread unless you previously unsubscribed. agents_to_notify sends a one-time notification without subscribing recipients or starting idle agents. Returns metadata, not the post text.",
+            "New thread in channel or reply with thread_id = first post message ID; exactly one destination; subscribes author unless previously unsubscribed; agents_to_notify notifies once, without subscribing or starting idle agents; metadata result, no post text",
             &[
                 "text",
                 "channel_name",
@@ -98,28 +98,31 @@ pub(super) fn tool(
     for field in fields {
         let schema = match *field {
             "new_channel_name" => {
-                json!({"type":"string","description":"Create and subscribe to this channel."})
+                json!({"type":"string","description":"Subscribe to created channel"})
             }
             "subscribe" => {
-                json!({"type":"boolean","description":"Subscribe to new top-level posts. Default true."})
+                json!({"type":"boolean","description":"New top-level posts; default true"})
             }
-            "author" | "target_agent" => {
-                json!({"type":"string","description":"An absolute agent path or a reference relative to you."})
+            "author" => {
+                json!({"type":"string","description":"Absolute agent path or relative to caller"})
             }
-            "recent_first" => json!({"type":"boolean","description":"Newest first by default."}),
+            "target_agent" => {
+                json!({"type":"string","description":"Absolute agent path or relative to caller; omitted = caller"})
+            }
+            "recent_first" => json!({"type":"boolean","description":"Default true"}),
             "limit" => {
-                json!({"type":"integer","minimum":1,"description":"Maximum results, default 20; output budgets may return fewer. Continue with next_cursor."})
+                json!({"type":"integer","minimum":1,"description":"Default 20; capped at 50 and output budget; continue with next_cursor"})
             }
-            "offset_chars" => json!({"type":"integer","minimum":0,"description":"Default 0."}),
+            "offset_chars" => json!({"type":"integer","minimum":0,"description":"Default 0"}),
             "limit_chars" | "max_chars_per_post" => {
-                json!({"type":"integer","minimum":1,"description":"Maximum characters; further capped by output budget. Defaults: limit_chars 20000, max_chars_per_post 1000."})
+                json!({"type":"integer","minimum":1,"description":"Output-budget capped; defaults: limit_chars 20000, max_chars_per_post 1000"})
             }
             "sort" => json!({"type":"string","enum":["created","activity"]}),
             "agents_to_notify" => {
-                json!({"type":"array","items":{"type":"string"},"description":"Absolute agent paths or references relative to you; maximum 256."})
+                json!({"type":"array","items":{"type":"string"},"description":"Absolute agent paths or relative to caller; maximum 256"})
             }
             "cursor" => {
-                json!({"type":"string","description":"Opaque next_cursor from the same query. Keep filters and sorting unchanged. Concurrent posts may shift pages; omit the cursor to refresh."})
+                json!({"type":"string","description":"Returned next_cursor; same filters/sort; concurrent posts may shift pages; omit to refresh"})
             }
             _ => json!({"type":"string"}),
         };

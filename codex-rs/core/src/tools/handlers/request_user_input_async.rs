@@ -40,12 +40,17 @@ impl ToolExecutor<ToolInvocation> for RequestUserInputAsyncHandler {
     fn spec(&self) -> ToolSpec {
         let mut options = JsonSchema::array(
             JsonSchema::string(/*description*/ None),
-            Some("Suggested answers, in display order. Put the recommended answer first; the first option is preselected by default. The user can select one option or enter a free-text answer. Do not include an Other option or a free-text placeholder; the UI provides free-text input automatically. Omit options for a free-text-only question.".to_string()),
+            Some("Display order; recommended first, preselected by default; single selection or automatic free text; no Other or free-text placeholder; omit for free-text-only questions".to_string()),
         );
         options.min_items = Some(1);
         let question = JsonSchema::object(
             BTreeMap::from([
-                ("title".to_string(), JsonSchema::string(Some("The complete question shown to the user, including any context needed to answer it.".to_string()))),
+                (
+                    "title".to_string(),
+                    JsonSchema::string(Some(
+                        "Complete question with context needed to answer".to_string(),
+                    )),
+                ),
                 ("options".to_string(), options),
             ]),
             Some(vec!["title".to_string()]),
@@ -53,10 +58,7 @@ impl ToolExecutor<ToolInvocation> for RequestUserInputAsyncHandler {
         );
         let mut questions = JsonSchema::array(
             question,
-            Some(
-                "One or more self-contained questions to present together, in display order."
-                    .to_string(),
-            ),
+            Some("Self-contained questions in display order".to_string()),
         );
         questions.min_items = Some(1);
         let properties = BTreeMap::from([("questions".to_string(), questions)]);

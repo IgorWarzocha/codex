@@ -22,15 +22,13 @@ use super::parse_args;
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct AddAdHocNoteArgs {
-    /// Name of the note file to create, in
-    /// YYYY-MM-DDTHH-MM-SS-<slug>.md format. The slug must use only lowercase
-    /// ASCII letters, digits, and hyphens.
+    /// YYYY-MM-DDTHH-MM-SS-<slug>.md; slug: lowercase ASCII letters, digits, hyphens
     #[schemars(
         length(min = 24, max = 128),
         regex(pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]{0,79}\.md$")
     )]
     filename: String,
-    /// Verbatim Markdown note to append to the ad-hoc memory notes.
+    /// Verbatim Markdown
     #[schemars(length(min = 1))]
     note: String,
 }
@@ -52,7 +50,7 @@ where
     fn spec(&self) -> ToolSpec {
         memory_function_tool::<AddAdHocNoteArgs, AddAdHocMemoryNoteResponse>(
             ADD_AD_HOC_NOTE_TOOL_NAME,
-            "Create one append-only ad-hoc memory note after the user explicitly asks Codex to remember, forget, or update something.",
+            "Append-only memory note; explicit user remember/forget/update request only",
         )
     }
 

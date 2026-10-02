@@ -56,14 +56,14 @@ fn request_user_input_tool_includes_questions_schema() {
                                                 (
                                                     "description".to_string(),
                                                     JsonSchema::string(Some(
-                                                        "One sentence describing the choice's impact"
+                                                        "Choice impact, one sentence"
                                                             .to_string(),
                                                     )),
                                                 ),
                                                 (
                                                     "label".to_string(),
                                                     JsonSchema::string(Some(
-                                                        "Label, 1-5 words"
+                                                        "1-5 words"
                                                             .to_string(),
                                                     )),
                                                 ),
@@ -75,14 +75,14 @@ fn request_user_input_tool_includes_questions_schema() {
                                             Some(false.into()),
                                         ),
                                         Some(
-                                            "2-3 mutually exclusive choices. Omit Other because the client adds free text"
+                                            "2-3 mutually exclusive choices; no Other, automatic free text"
                                                 .to_string(),
                                         ),
                                     ),
                                 ),
                                 (
                                     "question".to_string(),
-                                    JsonSchema::string(Some("Single-sentence question".to_string())),
+                                    JsonSchema::string(Some("One sentence".to_string())),
                                 ),
                             ]),
                             Some(vec![
@@ -175,14 +175,14 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
 fn request_user_input_tool_description_mentions_available_modes() {
     assert_eq!(
         request_user_input_tool_description(&default_available_modes()),
-        "Ask the user and wait for answers. Available only in Plan mode.".to_string()
+        "Ask the user; wait for answers; Plan mode only".to_string()
     );
     assert_eq!(
         request_user_input_tool_description(&default_mode_enabled_available_modes()),
-        "Ask the user and wait for answers. Available only in Default or Plan mode.".to_string()
+        "Ask the user; wait for answers; Default or Plan mode only".to_string()
     );
     assert_eq!(
         request_user_input_tool_description(&[ModeKind::Default]),
-        "Ask the user and wait for answers. Available only in Default mode.".to_string()
+        "Ask the user; wait for answers; Default mode only".to_string()
     );
 }

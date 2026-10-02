@@ -32,6 +32,7 @@ Scenario: Manual /compact with prior user history compacts existing history and 
     first manual turn
 01:message/user:
     <COMPACTION_SUMMARY>
+
     FIRST_MANUAL_SUMMARY
 02:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
@@ -46,6 +47,7 @@ Scenario: Manual /compact with prior user history compacts existing history and 
     first manual turn
 01:message/user:
     <COMPACTION_SUMMARY>
+
     FIRST_MANUAL_SUMMARY
 02:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
@@ -66,6 +68,7 @@ Scenario: Manual /compact with prior user history compacts existing history and 
     second manual turn
 02:message/user:
     <COMPACTION_SUMMARY>
+
     SECOND_MANUAL_SUMMARY
 03:message/developer:
     <PERMISSIONS_INSTRUCTIONS>

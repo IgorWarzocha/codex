@@ -1220,7 +1220,7 @@ timeout = 900
             .lines()
             .filter(|line| {
                 line.contains("`sandbox_mode`")
-                    || line.starts_with(" The writable root")
+                    || line.starts_with(" Writable root")
                     || line.starts_with("- path `")
                     || line.starts_with("- glob `")
             })

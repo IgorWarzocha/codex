@@ -17,10 +17,7 @@ pub fn create_update_plan_tool() -> ToolSpec {
     ]);
 
     let properties = BTreeMap::from([
-        (
-            "explanation".to_string(),
-            JsonSchema::string(Some("Reason for the update".to_string())),
-        ),
+        ("explanation".to_string(), JsonSchema::string(None)),
         (
             "plan".to_string(),
             JsonSchema::array(
@@ -36,7 +33,7 @@ pub fn create_update_plan_tool() -> ToolSpec {
 
     ToolSpec::Function(ResponsesApiTool {
         name: "update_plan".to_string(),
-        description: r#"Update the task plan. At most one step may be in_progress."#.to_string(),
+        description: "Update the task plan; at most one in_progress step".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(

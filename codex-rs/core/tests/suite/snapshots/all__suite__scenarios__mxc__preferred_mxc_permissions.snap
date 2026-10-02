@@ -8,15 +8,15 @@ Scenario: Resolved local MXC selection preserves workspace-write permissions in 
 -- request 1 (turn) --
 00:message/developer:
     <permissions instructions>
-    `sandbox_mode`: `workspace-write`. Read files and edit within `cwd` and `writable_roots`. Other writes require approval. Network access: restricted.
-    Approval policy: `on-request`. Request needed access through the command's approval parameters, not a se..."` with a short approval question in `justification`. [hash=5cbb0c5f48f43c11]
+    `sandbox_mode`: `workspace-write`. Reads allowed. Writes within `cwd` and `writable_roots`. Other writes require approval. Network access: restricted
+    Approval policy: `on-request`. Needed access through command approval parameters, not a separate message...d"` with a short approval question in `justification` [hash=6edee554ee91cf66]
 
-    Request only needed access. Obtain approval before destructive actions the user did not authorize. Do not bypass approvals through other tools.
+    Only needed access. Approval before destructive actions not authorized by the user. No approval bypasses through other tools
 
-    Use `prefix_rule` for a narrowly scoped reusable capability, not usually the whole command. Never sugges...x for destructive commands, heredocs, or herestrings. [hash=489adb7c8e81177d]
+    `prefix_rule`: narrowly scoped reusable capability, usually not the whole command. Never broad interpret...es for destructive commands, heredocs, or herestrings [hash=b27489a8aea81869]
 
-    Shell control operators split commands into independently evaluated segments. An approved prefix does no...mand. Complex shell syntax may prevent rule matching. [hash=9a8799913b6e8df5]
-     The writable root is `<WORKSPACE_ROOT 1>`.
+    Shell control operators: independently evaluated segments. Approved prefixes do not authorize whole compound commands. Complex syntax may prevent rule matching
+     Writable root: `<WORKSPACE_ROOT 1>`
     </permissions instructions>
 01:message/user:
     <environment_context>

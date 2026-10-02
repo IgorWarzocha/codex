@@ -38,18 +38,17 @@ struct SleepArgs {
 fn create_sleep_tool() -> ToolSpec {
     let properties = BTreeMap::from([(
         "duration_ms".to_string(),
-        JsonSchema::number(Some(format!(
-            "How long to sleep in milliseconds. Must be between 1 and {MAX_SLEEP_DURATION_MS}."
-        ))),
+        JsonSchema::number(Some(format!("Range 1-{MAX_SLEEP_DURATION_MS}"))),
     )]);
 
     ToolSpec::Namespace(ResponsesApiNamespace {
         name: NAMESPACE.to_string(),
-        description: "Tools for reading and waiting on time.".to_string(),
+        description: "Read or wait on time".to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Pause execution for a specified duration. The sleep ends early when new input arrives for the active turn. Returns the elapsed wall-clock time."
-                .to_string(),
+            description:
+                "Pause until duration or new active-turn input; elapsed wall time returned"
+                    .to_string(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(

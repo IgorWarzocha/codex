@@ -7,7 +7,7 @@ use codex_utils_string::take_bytes_at_char_boundary;
 
 const MAX_EXPLICIT_PLUGIN_INSTRUCTIONS_BYTES: usize = 4 * 1024;
 const TRUNCATED_PLUGIN_INSTRUCTIONS_SUFFIX: &str =
-    "\n- Additional plugin capabilities omitted to fit the context limit.";
+    "\n- Additional plugin capabilities omitted at context limit";
 
 #[cfg(test)]
 pub(crate) fn render_plugins_section(plugins: &[PluginCapabilitySummary]) -> Option<String> {
@@ -19,16 +19,13 @@ pub(crate) fn render_explicit_plugin_instructions(
     available_mcp_servers: &[String],
     available_apps: &[String],
 ) -> Option<String> {
-    let mut lines = vec![format!(
-        "Capabilities from the `{}` plugin:",
-        plugin.display_name
-    )];
+    let mut lines = vec![format!("Plugin `{}` capabilities:", plugin.display_name)];
 
     if !available_apps.is_empty() {
         lines.push(
             concat!(
-                "- For this request only, if `tool_search` is available and this plugin's apps ",
-                "may help, search their tools before using unrelated or built-in tools."
+                "- This request only: if `tool_search` is available and these apps ",
+                "may help, search their tools before unrelated or built-in tools"
             )
             .to_string(),
         );
@@ -39,14 +36,12 @@ pub(crate) fn render_explicit_plugin_instructions(
             .plugin_namespace
             .as_deref()
             .unwrap_or(plugin.display_name.as_str());
-        lines.push(format!(
-            "- Skills from this plugin are prefixed with `{skill_namespace}:`."
-        ));
+        lines.push(format!("- Skill prefix: `{skill_namespace}:`"));
     }
 
     if !available_apps.is_empty() {
         lines.push(format!(
-            "- Apps from this plugin available in this session: {}.",
+            "- Apps this session: {}",
             available_apps
                 .iter()
                 .map(|app| format!("`{app}`"))
@@ -57,7 +52,7 @@ pub(crate) fn render_explicit_plugin_instructions(
 
     if !available_mcp_servers.is_empty() {
         lines.push(format!(
-            "- MCP servers from this plugin available in this session: {}.",
+            "- MCP servers this session: {}",
             available_mcp_servers
                 .iter()
                 .map(|server| format!("`{server}`"))

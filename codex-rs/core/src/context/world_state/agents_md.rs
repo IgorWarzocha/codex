@@ -7,9 +7,8 @@ use crate::context::UserInstructions;
 use serde::Deserialize;
 use serde::Serialize;
 
-const REPLACEMENT_NOTICE: &str =
-    "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.";
-const REMOVAL_NOTICE: &str = "The previously provided AGENTS.md instructions no longer apply.";
+const REPLACEMENT_NOTICE: &str = "Prior AGENTS.md instructions replaced by the following";
+const REMOVAL_NOTICE: &str = "Prior AGENTS.md instructions no longer applicable";
 
 /// The AGENTS.md instructions currently visible to the model.
 #[derive(Clone, Debug, Default)]

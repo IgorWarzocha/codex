@@ -257,7 +257,7 @@ async fn review_op_emits_lifecycle_and_review_output() {
             if role == "user" {
                 for c in content {
                     if let ContentItem::InputText { text } = c {
-                        if text.contains("full review output from reviewer model") {
+                        if text.contains("Full reviewer output.") {
                             saw_header = true;
                         }
                         if text.contains("- Prefer Stylize helpers — /tmp/file.rs:10-20") {
@@ -1235,7 +1235,7 @@ async fn review_input_isolated_from_parent_history() {
         {
             for c in content {
                 if let ContentItem::InputText { text } = c
-                    && text.contains("User initiated a review task, but was interrupted.")
+                    && text.contains("Review interrupted.")
                 {
                     saw_interruption_message = true;
                     break;
@@ -1327,7 +1327,7 @@ async fn review_history_surfaces_in_parent_session() {
         msg["content"][0]["text"]
             .as_str()
             .unwrap_or_default()
-            .contains("User initiated a review task.")
+            .contains("Full reviewer output.")
     });
     let contains_review_assistant = input.iter().any(|msg| {
         msg["content"][0]["text"]

@@ -35,8 +35,8 @@ fn spawn_agent_tool_v2_requires_task_name() {
         .properties
         .as_ref()
         .expect("spawn_agent should use object params");
-    assert!(description.contains("Spawn an agent for the task."));
-    assert!(description.contains("Agents have your tools"));
+    assert!(description.contains("Spawn an agent for the task;"));
+    assert!(description.contains("Your tools, child spawning"));
     assert!(!description.contains("max_concurrent_threads_per_session"));
     assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
     assert!(properties.contains_key("task_name"));
@@ -105,7 +105,7 @@ fn spawn_agent_catalog_description_preserves_generated_context() {
     assert!(
         !configured_tool
             .description
-            .contains("Spawn an agent for the task.")
+            .contains("Spawn an agent for the task;")
     );
     configured_tool.description = default_tool.description.clone();
     assert_eq!(configured_tool, default_tool);
@@ -295,7 +295,7 @@ fn followup_task_tool_requires_message_and_has_no_output_schema() {
     assert_eq!(name, "followup_task");
     assert_eq!(
         description,
-        "Assign a follow-up task to a non-root agent. Starts a turn if idle; otherwise delivers at a message boundary or after the pending tool call"
+        "Follow-up task for non-root agent; new turn if idle, otherwise delivery at message boundary or after pending tool call"
     );
     assert_eq!(
         parameters.schema_type,
@@ -346,10 +346,7 @@ fn wait_agent_tool_v2_uses_timeout_only_summary_output() {
         .expect("wait_agent should use object params");
     assert!(!properties.contains_key("targets"));
     assert!(properties.contains_key("timeout_ms"));
-    assert!(
-        description
-            .contains("Returns an update, interruption, or timeout summary, not message content")
-    );
+    assert!(description.contains("update, interruption, or timeout summary, no message content"));
     assert_eq!(
         properties
             .get("timeout_ms")

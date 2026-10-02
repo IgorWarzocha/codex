@@ -17,9 +17,8 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 
 const WAIT_FOR_ENVIRONMENT_TOOL_NAME: &str = "wait_for_environment";
-const DEFAULT_TOOL_DESCRIPTION: &str = "Wait for a selected execution environment marked as `starting` to become available. Use this when the current task needs that environment's files, commands, or installed capabilities. Do not wait if the task can be completed using tools already available, such as connectors. Waiting may take several minutes and blocks other tool calls. If startup fails, continue without that environment.";
-const DEFAULT_ENVIRONMENT_ID_DESCRIPTION: &str =
-    "The exact environment ID marked as `starting` in `<environment_context>`.";
+const DEFAULT_TOOL_DESCRIPTION: &str = "Wait for a starting environment only when its files, commands, or installed capabilities are needed; no wait if available tools suffice\nMay take minutes; blocks other tools; continue without environment on startup failure";
+const DEFAULT_ENVIRONMENT_ID_DESCRIPTION: &str = "Exact starting ID from <environment_context>";
 const MAX_COMBINED_DESCRIPTION_BYTES: usize = 1_024;
 const MAX_SERIALIZED_TOOL_SPEC_BYTES: usize = 1_000;
 
