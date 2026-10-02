@@ -7,6 +7,7 @@ pub(crate) mod notebook;
 pub(crate) mod notebook_handler;
 mod notebook_spec;
 mod output;
+pub(crate) mod prompt;
 mod response_adapter;
 #[cfg(test)]
 mod shutdown_tests;
@@ -847,6 +848,7 @@ mod tests {
             Vec::new(),
             ToolMode::CodeModeOnly,
             BTreeMap::new(),
+            /*code_mode_instructions*/ None,
             /*tool_namespaces_info*/ None,
             &[],
         ));

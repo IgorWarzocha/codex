@@ -21,7 +21,7 @@ pub fn render_json_schema_to_typescript(schema: &JsonValue) -> String {
 
 /// Standing signatures expose argument names, not nested schema manuals.
 /// Full declarations remain in the runtime's on-demand tool descriptions.
-pub(crate) fn render_compact_input_type(schema: &JsonValue) -> String {
+pub fn render_compact_input_type(schema: &JsonValue) -> String {
     let mut renderer = JsonSchemaTypeRenderer::new(schema, DEFAULT_INPUT_SCHEMA_MAX_BYTES);
     renderer.compact = true;
     let rendered = renderer.render(schema);

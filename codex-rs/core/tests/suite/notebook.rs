@@ -72,6 +72,7 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
             config.code_mode.runtime = CodeModeRuntime::Notebook;
             config.code_mode.deno_program = Some(deno);
             config.ephemeral = true;
+            config.base_instructions = Some("Keep this explicit base unchanged.".to_string());
             config.features.enable(Feature::TokenBudget).unwrap();
         })
         .build(&server)
@@ -80,6 +81,33 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
         .await?;
     let requests = responses.requests();
     assert_eq!(requests.len(), 5);
+    let instructions = requests[0].instructions_text();
+    assert!(instructions.starts_with("Keep this explicit base unchanged.\n\n<exec_tools>\n"));
+    assert!(instructions.contains("tools.exec_command("));
+    for request in &requests {
+        // Repeated samples and context rollover must not accumulate tool catalogs.
+        assert_eq!(request.instructions_text(), instructions);
+        assert_eq!(
+            request.instructions_text().matches("<exec_tools>").count(),
+            1
+        );
+        assert!(
+            !request
+                .message_input_texts("developer")
+                .join("\n")
+                .contains("<exec_tools>")
+        );
+        let body = request.body_json();
+        let exec = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "exec")
+            .expect("Notebook exec declaration");
+        let description = exec["description"].as_str().unwrap();
+        assert!(!description.contains("tools.exec_command("));
+        assert!(!description.contains("<exec_tools>"));
+    }
     let startup = requests[0].message_input_texts("developer").join("\n");
     assert!(startup.contains("Notebook idle"), "{startup}");
     assert!(!startup.contains("Notebook status unavailable"));

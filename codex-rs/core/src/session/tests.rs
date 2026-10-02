@@ -300,6 +300,7 @@ impl StepContext {
                 Vec::new(),
                 ToolMode::Direct,
                 BTreeMap::new(),
+                /*code_mode_instructions*/ None,
                 /*tool_namespaces_info*/ None,
                 &[],
             )),

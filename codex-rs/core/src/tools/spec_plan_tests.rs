@@ -83,6 +83,7 @@ struct ToolPlanProbe {
     exposures: BTreeMap<String, ToolExposure>,
     tool_namespaces_info: Option<TurnToolNamespacesInfo>,
     code_mode_tool_names: BTreeMap<String, ToolName>,
+    code_mode_instructions: Option<String>,
     tool_mode: ToolMode,
     requires_code_mode_worker: bool,
     has_terminal_controls: bool,
@@ -138,6 +139,7 @@ impl ToolPlanProbe {
             exposures,
             tool_namespaces_info: router.tool_namespaces_info().cloned(),
             code_mode_tool_names: router.code_mode_tool_names().clone(),
+            code_mode_instructions: router.code_mode_instructions().map(str::to_owned),
             tool_mode: router.tool_mode(),
             requires_code_mode_worker: router.requires_code_mode_worker(),
             has_terminal_controls: router.has_terminal_controls(),
@@ -2587,16 +2589,22 @@ async fn code_mode_only_exposes_code_executor_and_hides_nested_tools() {
     );
 }
 
+#[test_case::test_case(false; "nested_control_available")]
+#[test_case::test_case(true; "nested_control_excluded")]
 #[tokio::test]
-async fn notebook_lifecycle_stays_top_level_and_has_a_nested_read_surface() {
+async fn notebook_lifecycle_stays_top_level_and_has_a_nested_read_surface(exclude_functions: bool) {
     let v8 = probe(|turn| {
         set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
     })
     .await;
     v8.assert_registered_lacks(&["notebook"]);
+    assert!(v8.code_mode_instructions.is_none());
     let notebook = probe(|turn| {
         update_config(turn, |config| {
             config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
+            if exclude_functions {
+                config.code_mode.excluded_tool_namespaces = vec!["functions".to_string()];
+            }
         });
     })
     .await;
@@ -2604,16 +2612,21 @@ async fn notebook_lifecycle_stays_top_level_and_has_a_nested_read_surface() {
     assert_eq!(notebook.exposure("notebook"), ToolExposure::DirectModelOnly);
     assert_eq!(
         notebook.code_mode_tool_names.get("notebook"),
-        Some(&ToolName::plain("notebook"))
+        (!exclude_functions).then_some(&ToolName::plain("notebook"))
     );
     let ToolSpec::Freeform(exec) = notebook.visible_spec("exec") else {
         panic!("expected notebook exec tool");
     };
-    assert!(
-        exec.description
-            .contains("tools.notebook({action}) supports status without query, list, diagnostics")
+    let instructions = notebook.code_mode_instructions.as_deref().unwrap();
+    assert!(instructions.starts_with("<exec_tools>\n"));
+    assert!(instructions.ends_with("\n</exec_tools>"));
+    assert_eq!(instructions.contains("tools.notebook"), !exclude_functions);
+    assert_eq!(
+        instructions.contains("tools.exec_command("),
+        !exclude_functions
     );
-    assert!(!exec.description.contains("- tools.notebook("));
+    assert!(!exec.description.contains("tools.notebook"));
+    assert!(!exec.description.contains("tools.exec_command("));
     let ToolSpec::Function(control) = notebook.visible_spec("notebook") else {
         panic!("expected notebook control tool");
     };

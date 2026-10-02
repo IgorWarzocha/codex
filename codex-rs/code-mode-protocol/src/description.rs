@@ -488,7 +488,8 @@ fn render_code_mode_tool_declaration(
     format!("{tool_name}({input_name}: {input_type}): Promise<{output_type}>;")
 }
 
-fn mcp_structured_content_schema(output_schema: Option<&JsonValue>) -> Option<&JsonValue> {
+/// Recognize an MCP result wrapper and return its structured-content schema.
+pub fn mcp_structured_content_schema(output_schema: Option<&JsonValue>) -> Option<&JsonValue> {
     let output_schema = output_schema?;
     let properties = output_schema
         .get("properties")

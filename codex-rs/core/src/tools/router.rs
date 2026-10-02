@@ -76,6 +76,7 @@ pub struct ToolRouter {
     model_visible_specs: Arc<[ToolSpec]>,
     tool_mode: ToolMode,
     code_mode_tool_names: BTreeMap<String, ToolName>,
+    code_mode_instructions: Option<String>,
     tool_namespaces_info: Option<TurnToolNamespacesInfo>,
     can_manage_children: bool,
 }
@@ -116,6 +117,7 @@ impl ToolRouter {
         model_visible_specs: Vec<ToolSpec>,
         tool_mode: ToolMode,
         code_mode_tool_names: BTreeMap<String, ToolName>,
+        code_mode_instructions: Option<String>,
         tool_namespaces_info: Option<TurnToolNamespacesInfo>,
         child_management_tools: &[ToolName],
     ) -> Self {
@@ -124,6 +126,7 @@ impl ToolRouter {
             model_visible_specs: model_visible_specs.into(),
             tool_mode,
             code_mode_tool_names,
+            code_mode_instructions,
             tool_namespaces_info,
             can_manage_children: false,
         };
@@ -140,6 +143,10 @@ impl ToolRouter {
 
     pub(crate) fn tool_mode(&self) -> ToolMode {
         self.tool_mode
+    }
+
+    pub(crate) fn code_mode_instructions(&self) -> Option<&str> {
+        self.code_mode_instructions.as_deref()
     }
 
     /// Code Mode still needs its dispatcher when the nested tool set is empty.

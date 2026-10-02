@@ -410,8 +410,10 @@ pub(crate) fn finalize_tool_router(
         registry.mcp_namespaces(),
     )
     .map_err(|error| CodexErrorDetails::InvalidRequest(error.to_string()))?;
-    let code_mode_tool_names =
-        register_code_mode_executors(turn_context, model_info, &mut registry, &indirect_prefixes);
+    let CodeModePresentation {
+        tool_names: code_mode_tool_names,
+        instructions: code_mode_instructions,
+    } = register_code_mode_executors(turn_context, model_info, &mut registry, &indirect_prefixes);
     let include_tool_namespaces_info = turn_context
         .config
         .tool_registry
@@ -493,6 +495,7 @@ pub(crate) fn finalize_tool_router(
         model_visible_specs,
         tool_mode,
         code_mode_tool_names,
+        code_mode_instructions,
         tool_namespaces_info,
         &child_management_tools,
     );
@@ -816,15 +819,21 @@ fn is_excluded_from_code_mode(turn_context: &TurnContext, tool_name: &ToolName) 
     })
 }
 
+#[derive(Default)]
+struct CodeModePresentation {
+    tool_names: BTreeMap<String, ToolName>,
+    instructions: Option<String>,
+}
+
 fn register_code_mode_executors(
     turn_context: &TurnContext,
     model_info: &ModelInfo,
     registry: &mut ToolRegistry,
     indirect_prefixes: &IndirectNamespacePrefixes<'_>,
-) -> BTreeMap<String, ToolName> {
+) -> CodeModePresentation {
     let tool_mode = effective_tool_mode(turn_context, model_info);
     if !matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly) {
-        return BTreeMap::new();
+        return CodeModePresentation::default();
     }
 
     let notebook_runtime =
@@ -922,16 +931,32 @@ fn register_code_mode_executors(
     }
     enabled_tools
         .sort_by(|left, right| compare_code_mode_tools(left, right, &namespace_descriptions));
-    let notebook_messages = (turn_context.config.code_mode.runtime
-        == codex_features::CodeModeRuntime::Notebook)
-        .then(|| crate::tools::code_mode::notebook::tool_messages(model_messages.code_mode()));
-    let execute_handler = CodeModeExecuteHandler::new(
-        create_code_mode_tool(
+    let instructions = notebook_runtime.then(|| {
+        crate::tools::code_mode::prompt::build_notebook_tools_prompt(
             &enabled_tools,
             &deferred_tools,
             &namespace_descriptions,
+            code_mode_tool_names.contains_key("notebook"),
+            model_messages.code_mode(),
+        )
+    });
+    let notebook_messages = notebook_runtime
+        .then(|| crate::tools::code_mode::notebook::tool_messages(model_messages.code_mode()));
+    let execute_handler = CodeModeExecuteHandler::new(
+        create_code_mode_tool(
+            if notebook_runtime {
+                &[]
+            } else {
+                &enabled_tools
+            },
+            if notebook_runtime {
+                &[]
+            } else {
+                &deferred_tools
+            },
+            &namespace_descriptions,
             turn_context.config.code_mode.default_exec_yield_time_ms,
-            tool_mode == ToolMode::CodeModeOnly,
+            tool_mode == ToolMode::CodeModeOnly && !notebook_runtime,
             if unified_image_budget_enabled(&turn_context.config.features, model_info) {
                 codex_code_mode::ImageDetailVisibility::Hidden
             } else {
@@ -950,7 +975,10 @@ fn register_code_mode_executors(
     )));
     registry.prepend_trusted(Arc::new(execute_handler));
 
-    code_mode_tool_names
+    CodeModePresentation {
+        tool_names: code_mode_tool_names,
+        instructions,
+    }
 }
 
 #[instrument(level = "trace", skip_all, fields(tool_spec_count = specs.len()))]

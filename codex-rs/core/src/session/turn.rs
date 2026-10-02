@@ -1600,9 +1600,17 @@ pub(super) fn collect_explicit_app_ids_from_skill_items(
 pub(crate) fn build_prompt(
     input: Vec<ResponseItem>,
     step_context: &StepContext,
-    base_instructions: BaseInstructions,
+    mut base_instructions: BaseInstructions,
 ) -> Prompt {
     let turn_context = &step_context.turn;
+    // Match this request's finalized tools without persisting an inventory in the
+    // thread's base instructions or replaying it through conversation history.
+    if let Some(instructions) = step_context.tool_router.code_mode_instructions() {
+        if !base_instructions.text.is_empty() {
+            base_instructions.text.push_str("\n\n");
+        }
+        base_instructions.text.push_str(instructions);
+    }
     Prompt {
         input,
         tools: step_context.tool_router.model_visible_specs(),

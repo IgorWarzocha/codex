@@ -57,6 +57,8 @@ pub(super) fn validate_access(
 
 pub(crate) fn tool_messages(base: Option<&CodeModeToolMessages>) -> CodeModeToolMessages {
     let mut messages = base.cloned().unwrap_or_default();
+    // The runtime owns exec's source/output contract. Other catalog overrides
+    // remain available to the notebook usage section and the native wait tool.
     messages.exec = Some(ToolMessage {
         description: Some(include_str!("notebook_prompt.md").to_string()),
         ..Default::default()
