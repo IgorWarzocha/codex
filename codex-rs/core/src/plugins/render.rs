@@ -27,9 +27,8 @@ pub(crate) fn render_explicit_plugin_instructions(
     if !available_apps.is_empty() {
         lines.push(
             concat!(
-                "- For the user request that explicitly selected this plugin, and only for that ",
-                "request, if `tool_search` is available and an app from this plugin may help, ",
-                "search for its tools before falling back to unrelated or built-in tools."
+                "- For this request only, if `tool_search` is available and this plugin's apps ",
+                "may help, search their tools before using unrelated or built-in tools."
             )
             .to_string(),
         );
@@ -70,8 +69,6 @@ pub(crate) fn render_explicit_plugin_instructions(
     if lines.len() == 1 {
         return None;
     }
-
-    lines.push("Use these plugin-associated capabilities to help solve the task.".to_string());
 
     Some(bound_explicit_plugin_instructions(lines.join("\n")))
 }

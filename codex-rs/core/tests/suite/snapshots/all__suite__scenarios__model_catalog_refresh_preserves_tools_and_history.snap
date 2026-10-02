@@ -15,12 +15,12 @@ Settings:
   store: false
   stream: true
   tool_choice: "auto"
-  tools (6; hash=8c41ecd677a4dff4):
-    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=2bc40a28fd6ba0f0
+  tools (6; hash=2f5a62f80c379a73):
+    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=543a068b1a36a66f
     - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=05560b32cd644162
-    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=be451617efc003d1
+    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=ed786867ce26e7c6
     - function/view_image: Inspect a local image; args=[path]; hash=5f0d2097e3a0550a
-    - namespace/multi_agent_v1: Spawn and manage sub-agents; hash=e13d50f9f8dcdb25
+    - namespace/multi_agent_v1: Spawn and manage sub-agents; hash=86a27039250d86b8
       - function/close_agent
       - function/resume_agent
       - function/send_input
@@ -30,8 +30,8 @@ Settings:
 -- request 1 (turn) --
 00:message/developer[2]:
     [01] <permissions instructions>
-        Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`...ll commands are permitted. Network access is enabled. [hash=c134061cebb94a1b]
-        Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+        `sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled.
+        Approval policy: `never`. Do not set `sandbox_permissions`.
         </permissions instructions>
     [02] <model_catalog>
         - `visible-model`: Fast and capable Reasoning efforts: low, medium (default), high. Service tiers: priority.

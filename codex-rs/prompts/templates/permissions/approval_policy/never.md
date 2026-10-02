@@ -1,1 +1,1 @@
-Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+Approval policy: `never`. Do not set `sandbox_permissions`.

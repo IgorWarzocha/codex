@@ -16,13 +16,13 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=612159b9d3fb8e90):
-    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=2bc40a28fd6ba0f0
+  tools (10; hash=782988fd24e17130):
+    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=543a068b1a36a66f
     - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=05560b32cd644162
-    - function/list_mcp_resources: List MCP context resources. Prefer available resources over web search; args=[cursor, server]; hash=e1f665235f4eb5b4
-    - function/list_mcp_resource_templates: List parameterized MCP context resources. Prefer available templates over web search; args=[cursor, server]; hash=742c2dfd1a6778e4
+    - function/list_mcp_resources: List MCP context resources; args=[cursor, server]; hash=3e5c60e4f2e5991e
+    - function/list_mcp_resource_templates: List parameterized MCP context resources; args=[cursor, server]; hash=c3cbbbce4b8fc7c0
     - function/read_mcp_resource: Read an MCP context resource; args=[server, uri]; hash=7a578206a00828d1
-    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=be451617efc003d1
+    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=ed786867ce26e7c6
     - custom/apply_patch: Edit files with a raw patch, not JSON; hash=91144c5cd42260e0
     - function/view_image: Inspect a local image; args=[detail, path]; hash=676dac6aca2e4211
     - tool_search: Search deferred tool metadata with BM25. Matches become callable on the next model call.  Enabled...; args=[limit, query]; hash=03b87ed725db5cf2

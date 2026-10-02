@@ -27,14 +27,17 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
         ),
     ]);
 
-    let options_schema = JsonSchema::array(JsonSchema::object(
+    let options_schema = JsonSchema::array(
+        JsonSchema::object(
             option_props,
             Some(vec!["label".to_string(), "description".to_string()]),
             Some(false.into()),
-        ), Some(
-            "2-3 mutually exclusive choices. Recommended first, label suffixed \"(Recommended)\". Omit Other; the client adds free text"
+        ),
+        Some(
+            "2-3 mutually exclusive choices. Omit Other because the client adds free text"
                 .to_string(),
-        ));
+        ),
+    );
 
     let question_props = BTreeMap::from([
         (
@@ -63,7 +66,7 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
             ]),
             Some(false.into()),
         ),
-        Some("Prefer 1 question, at most 3".to_string()),
+        Some("At most 3".to_string()),
     );
 
     let properties = BTreeMap::from([("questions".to_string(), questions_schema)]);

@@ -22,16 +22,27 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
         .unwrap();
 
     assert!(instructions.contains(&format!(
-        "- {}/memory_summary.md (already provided below; do NOT open again)",
+        "- {}/memory_summary.md is provided below. Do not reread it.",
         memories_dir.display()
     )));
-    assert!(instructions.contains("Short memory summary for tests."));
+    assert_eq!(
+        instructions
+            .matches(&memories_dir.display().to_string())
+            .count(),
+        11
+    );
+    assert!(!instructions.contains("{{"));
     assert_eq!(
         instructions
             .matches("========= MEMORY_SUMMARY BEGINS =========")
             .count(),
         1
     );
+    assert!(instructions.ends_with(concat!(
+        "========= MEMORY_SUMMARY BEGINS =========\n",
+        "Short memory summary for tests.\n",
+        "========= MEMORY_SUMMARY ENDS =========\n",
+    )));
 }
 
 #[tokio::test]
@@ -56,11 +67,16 @@ async fn v2_reads_only_its_own_summary_without_falling_back_to_v1()
     assert!(!instructions.contains("legacy content"));
     assert!(instructions.contains("do not retrieve history speculatively"));
     assert!(instructions.contains(&format!("{}/rollout_summaries/", v2.display())));
-    assert!(
+    let legacy_instructions =
         build_memory_tool_developer_instructions(&codex_home, MemoryVersion::V1)
             .await
-            .expect("v1 instructions")
-            .contains("legacy content")
+            .expect("v1 instructions");
+    assert!(legacy_instructions.contains("legacy content"));
+    assert!(!legacy_instructions.contains("new pipeline content"));
+    assert!(
+        legacy_instructions.contains("Use memory unless the request is clearly self-contained")
     );
+    assert!(legacy_instructions.contains("If relevant memory files informed the answer"));
+    assert!(instructions.contains("When a read rollout summary informs the answer"));
     Ok(())
 }

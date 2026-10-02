@@ -187,8 +187,7 @@ pub fn create_send_input_tool_v1() -> ToolSpec {
         description: MULTI_AGENT_V1_NAMESPACE_DESCRIPTION.to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: "send_input".to_string(),
-            description: "Message an agent. Reuse agents when their previous context matters"
-                .to_string(),
+            description: "Message an agent".to_string(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(
@@ -717,9 +716,7 @@ fn spawn_agent_tool_description(
         r#"
         {tool_description}
 Spawn only when the user or applicable AGENTS.md/skill instructions explicitly request sub-agents, delegation, or parallel agent work. Requests for depth, research, or thoroughness are not authorization.{agent_role_usage_hint}
-Model overrides require the user's explicit request.
-Delegate bounded, self-contained tasks that advance the request in parallel with local work. Keep immediate blockers local. Avoid duplicate work and overlapping write scopes. For coding tasks, prefer direct edits in a clear scope and request changed paths.
-Continue non-overlapping work while agents run. Wait only when their results block your next step. Review and integrate returned changes."#
+Model overrides require the user's explicit request."#
     )
 }
 

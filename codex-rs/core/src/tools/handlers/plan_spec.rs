@@ -6,15 +6,12 @@ use std::collections::BTreeMap;
 
 pub fn create_update_plan_tool() -> ToolSpec {
     let plan_item_properties = BTreeMap::from([
-        (
-            "step".to_string(),
-            JsonSchema::string(Some("Task step".to_string())),
-        ),
+        ("step".to_string(), JsonSchema::string(None)),
         (
             "status".to_string(),
             JsonSchema::string_enum(
                 vec![json!("pending"), json!("in_progress"), json!("completed")],
-                Some("Status".to_string()),
+                None,
             ),
         ),
     ]);
@@ -32,7 +29,7 @@ pub fn create_update_plan_tool() -> ToolSpec {
                     Some(vec!["step".to_string(), "status".to_string()]),
                     Some(false.into()),
                 ),
-                Some("Plan steps".to_string()),
+                None,
             ),
         ),
     ]);

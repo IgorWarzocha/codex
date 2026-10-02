@@ -1,1 +1,1 @@
- `approval_policy` is `unless-trusted`: The harness will require user approval before running commands unless an explicit exec policy rule allows them.
+Approval policy: `unless-trusted`. Commands require approval unless an explicit exec-policy rule allows them.

@@ -13,6 +13,9 @@ const APPROVAL_POLICY_UNLESS_TRUSTED: &str =
 const APPROVAL_POLICY_ON_REQUEST: &str =
     include_str!("../../templates/permissions/approval_policy/on_request.md");
 
+// Default catalog prose retains its evidence-gathering retry path, unlike bundled feedback.
+pub(super) const DEFAULT_CATALOG_ON_REQUEST_AUTO_REVIEW: &str = "`approvals_reviewer`: `auto_review`. `require_escalated` requests receive policy review. After rejection, use a safer alternative or gather evidence establishing authorization or low risk before retrying. Complete unaffected work without confirmation. Report remaining blocks, explain the auto-review rejection and risk, and ask for approval.";
+
 pub(crate) const DANGER_FULL_ACCESS_TEMPLATE: &str =
     include_str!("../../templates/permissions/sandbox_mode/danger_full_access.md");
 pub(crate) const WORKSPACE_WRITE_TEMPLATE: &str =

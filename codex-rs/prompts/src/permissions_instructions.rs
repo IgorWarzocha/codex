@@ -28,17 +28,15 @@ use std::sync::LazyLock;
 
 const REQUEST_PERMISSION_RULE: &str =
     include_str!("../templates/permissions/approval_policy/on_request_rule_request_permission.md");
-const REQUEST_PERMISSIONS_TOOL: &str = "# request_permissions Tool\n\nThe built-in `request_permissions` tool is available in this session. Invoke it when you need to request additional `network` or `file_system` permissions before later shell-like commands need them. Request only the specific permissions required for the task.";
-const AUTO_REVIEW_SUFFIX: &str = "`approvals_reviewer` is `auto_review`: Sandbox escalations with require_escalated will be reviewed for compliance with the policy. If a rejection happens, you should proceed only with a materially safer alternative, or inform the user of the risk and send a final message to ask for approval.";
-const APPROVED_PREFIXES: &str =
-    "## Approved command prefixes\nThe following prefix rules have already been approved: ";
-const GRANULAR_INTRO: &str = "# Approval Requests\n\nApproval policy is `granular`. Categories set to `false` are automatically rejected instead of prompting the user.";
-const GRANULAR_PROMPTED_CATEGORIES: &str =
-    "These approval categories may still prompt the user when needed:";
-const GRANULAR_REJECTED_CATEGORIES: &str =
-    "These approval categories are automatically rejected instead of prompting the user:";
+const REQUEST_PERMISSIONS_TOOL: &str = "`request_permissions` is available. Request only needed `network` and `file_system` access before commands that need it.";
+const AUTO_REVIEW_SUFFIX: &str = "`approvals_reviewer`: `auto_review`. `require_escalated` requests receive policy review. After rejection, proceed only with a materially safer alternative, or explain the risk and ask for approval in a final message.";
+const APPROVED_PREFIXES: &str = "Approved command prefixes: ";
+const GRANULAR_INTRO: &str =
+    "Approval policy: `granular`. Categories set to `false` reject automatically.";
+const GRANULAR_PROMPTED_CATEGORIES: &str = "May prompt:";
+const GRANULAR_REJECTED_CATEGORIES: &str = "Reject automatically:";
 const MAX_PERMISSION_PATH_BYTES: usize = 32 * 1024;
-const OMITTED_PERMISSION_PATHS: &str = "Additional permission paths/globs are omitted. All restrictions still apply; do not use escalation or additional permissions to bypass omitted read denials.";
+const OMITTED_PERMISSION_PATHS: &str = "Additional permission paths or globs are omitted. All restrictions still apply. Do not bypass omitted read denials with escalation or additional permissions.";
 
 static DANGER_FULL_ACCESS: LazyLock<Template> = LazyLock::new(|| {
     Template::parse(DANGER_FULL_ACCESS_TEMPLATE.trim_end())
@@ -390,7 +388,7 @@ fn denied_reads_text(paths: &[String], globs: &[String]) -> Option<String> {
     }
 
     Some(format!(
-        "## Denied filesystem reads\nThe active permission profile denies reading these paths/globs. Do not request escalation or additional permissions to read them; these denials are policy restrictions.\n{}",
+        "Denied reads. Do not read these paths or globs, or request escalation or additional permissions to bypass the denials:\n{}",
         entries.join("\n")
     ))
 }

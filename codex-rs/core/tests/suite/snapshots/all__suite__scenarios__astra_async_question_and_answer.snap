@@ -6,8 +6,8 @@ Scenario: Astra uses the catalog question schema to ask who a launch update is f
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=be1174aa322f611c):
-        - namespace/functions; hash=1f79fed2bf2ebeab
+00:additional_tools/developer (3; hash=b9b0244b97dd5fcb):
+        - namespace/functions; hash=d15d65a4c8f65680
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -25,7 +25,10 @@ Scenario: Astra uses the catalog question schema to ask who a launch update is f
     <MODEL_INSTRUCTIONS>
 02:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <COLLABORATION_MODE>
+    [02] <collaboration_mode>Execute the request. This replaces prior collaboration-mode instructions. Only a developer `<collaboration_mode>` message changes mode.
+
+        Use `request_user_input`, when available, only for optional questions that materially improve the work, ...xt question when required input blocks safe progress. [hash=6eb65f08c6f6a28e]
+        </collaboration_mode>
 03:message/developer:
     <MULTI_AGENT_ROLE>
 04:message/developer:

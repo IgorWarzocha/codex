@@ -9,8 +9,7 @@ fn list_mcp_resources_tool_matches_expected_spec() {
         create_list_mcp_resources_tool(/*messages*/ None),
         ToolSpec::Function(ResponsesApiTool {
             name: "list_mcp_resources".to_string(),
-            description: "List MCP context resources. Prefer available resources over web search"
-                .to_string(),
+            description: "List MCP context resources".to_string(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(
@@ -42,25 +41,27 @@ fn list_mcp_resource_templates_tool_matches_expected_spec() {
         create_list_mcp_resource_templates_tool(/*messages*/ None),
         ToolSpec::Function(ResponsesApiTool {
             name: "list_mcp_resource_templates".to_string(),
-            description: "List parameterized MCP context resources. Prefer available templates over web search".to_string(),
+            description: "List parameterized MCP context resources".to_string(),
             strict: false,
             defer_loading: None,
-            parameters: JsonSchema::object(BTreeMap::from([
+            parameters: JsonSchema::object(
+                BTreeMap::from([
                     (
                         "server".to_string(),
                         JsonSchema::string(Some(
-                                "Server name, defaults to all configured servers"
-                                    .to_string(),
-                            ),),
+                            "Server name, defaults to all configured servers".to_string(),
+                        ),),
                     ),
                     (
                         "cursor".to_string(),
                         JsonSchema::string(Some(
-                                "Cursor from the previous template page"
-                                    .to_string(),
-                            ),),
+                            "Cursor from the previous template page".to_string(),
+                        ),),
                     ),
-                ]), /*required*/ None, Some(false.into())),
+                ]),
+                /*required*/ None,
+                Some(false.into())
+            ),
             output_schema: None,
         })
     );

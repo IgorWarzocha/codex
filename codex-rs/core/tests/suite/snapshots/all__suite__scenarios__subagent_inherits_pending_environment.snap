@@ -10,15 +10,15 @@ Scenario: A parent spawns a child before the selected environment is configured.
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <ENVIRONMENTS_INSTRUCTIONS>
 01:message/developer:
-    You are `/root`, the primary agent. Own the result and coordinate delegated work. Agent messages arrive ... without starting a turn. `followup_task` starts one. [hash=5effd14f65494b2b]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    You are `/root`. Own the result and coordinate delegated work. Agent messages arrive in analysis. `send_...thout starting a turn. `followup_task` starts a turn. [hash=57c7402ce89cae25]
+    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
+    Prefer waits of minutes with `wait_agent` to busy polling.
 
     At most 4 agents may be active, including you.
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...ed or `"all"` inherits the parent's model and effort. [hash=75b60222a0f8595a]
 02:message/developer:
-    <multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user o...ons explicitly request delegation.</multi_agent_mode> [hash=62799ec0c4d26ac4]
+    <multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly request...e AGENTS.md or skill instructions.</multi_agent_mode> [hash=72a2fd98b66d3a10]
 03:message/user:
     <environment_context>
       <environments>
@@ -42,15 +42,15 @@ Scenario: A parent spawns a child before the selected environment is configured.
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <ENVIRONMENTS_INSTRUCTIONS>
 01:message/developer:
-    Complete the assigned task. Your final answer is delivered to your parent. Agent messages arrive in anal... without starting a turn. `followup_task` starts one. [hash=88902141a129e3ea]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    Complete your assigned task. Your final answer goes to your parent. Agent messages arrive in analysis. `...thout starting a turn. `followup_task` starts a turn. [hash=4aca0d874ca020ca]
+    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
+    Prefer waits of minutes with `wait_agent` to busy polling.
 
     At most 4 agents may be active, including you.
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...ed or `"all"` inherits the parent's model and effort. [hash=75b60222a0f8595a]
 02:message/developer:
-    <multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user o...ons explicitly request delegation.</multi_agent_mode> [hash=62799ec0c4d26ac4]
+    <multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly request...e AGENTS.md or skill instructions.</multi_agent_mode> [hash=72a2fd98b66d3a10]
 03:message/user:
     <environment_context>
       <environments>
@@ -70,15 +70,15 @@ Scenario: A parent spawns a child before the selected environment is configured.
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <ENVIRONMENTS_INSTRUCTIONS>
 01:message/developer:
-    Complete the assigned task. Your final answer is delivered to your parent. Agent messages arrive in anal... without starting a turn. `followup_task` starts one. [hash=88902141a129e3ea]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    Complete your assigned task. Your final answer goes to your parent. Agent messages arrive in analysis. `...thout starting a turn. `followup_task` starts a turn. [hash=4aca0d874ca020ca]
+    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
+    Prefer waits of minutes with `wait_agent` to busy polling.
 
     At most 4 agents may be active, including you.
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...ed or `"all"` inherits the parent's model and effort. [hash=75b60222a0f8595a]
 02:message/developer:
-    <multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user o...ons explicitly request delegation.</multi_agent_mode> [hash=62799ec0c4d26ac4]
+    <multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly request...e AGENTS.md or skill instructions.</multi_agent_mode> [hash=72a2fd98b66d3a10]
 03:message/user:
     <environment_context>
       <environments>
@@ -108,15 +108,15 @@ Scenario: A parent spawns a child before the selected environment is configured.
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <ENVIRONMENTS_INSTRUCTIONS>
 01:message/developer:
-    You are `/root`, the primary agent. Own the result and coordinate delegated work. Agent messages arrive ... without starting a turn. `followup_task` starts one. [hash=5effd14f65494b2b]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    You are `/root`. Own the result and coordinate delegated work. Agent messages arrive in analysis. `send_...thout starting a turn. `followup_task` starts a turn. [hash=57c7402ce89cae25]
+    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
+    Prefer waits of minutes with `wait_agent` to busy polling.
 
     At most 4 agents may be active, including you.
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...ed or `"all"` inherits the parent's model and effort. [hash=75b60222a0f8595a]
 02:message/developer:
-    <multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user o...ons explicitly request delegation.</multi_agent_mode> [hash=62799ec0c4d26ac4]
+    <multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly request...e AGENTS.md or skill instructions.</multi_agent_mode> [hash=72a2fd98b66d3a10]
 03:message/user:
     <environment_context>
       <environments>

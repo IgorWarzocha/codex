@@ -9,16 +9,16 @@ Absent -> {}
 None
 
 Absent -> {"mode":"explicitRequestOnly"} (role - developer)
-<multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user or applicable AGENTS.md or skill instructions explicitly request delegation.</multi_agent_mode>
+<multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly requested by the user or applicable AGENTS.md or skill instructions.</multi_agent_mode>
 
 {"mode":"explicitRequestOnly"} -> {"mode":"explicitRequestOnly"}
 None
 
 {"mode":"explicitRequestOnly"} -> {"mode":"proactive"} (role - developer)
-<multi_agent_mode>Proactive delegation replaces earlier explicit-request-only guidance until a later developer mode message changes it. Delegate parallel work when it saves time or improves quality. User requests override this hint.</multi_agent_mode>
+<multi_agent_mode>This replaces explicit-request-only guidance until a developer mode change. Delegate parallel work when it saves time or improves quality. User requests override this hint.</multi_agent_mode>
 
 {"mode":"proactive"} -> {} (role - developer)
-<multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user or applicable AGENTS.md or skill instructions explicitly request delegation.</multi_agent_mode>
+<multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly requested by the user or applicable AGENTS.md or skill instructions.</multi_agent_mode>
 
 {"mode":"explicitRequestOnly"} -> {}
 None
@@ -30,7 +30,7 @@ None
 None
 
 Unknown -> {"mode":"explicitRequestOnly"} (role - developer)
-<multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user or applicable AGENTS.md or skill instructions explicitly request delegation.</multi_agent_mode>
+<multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly requested by the user or applicable AGENTS.md or skill instructions.</multi_agent_mode>
 
 Unknown -> {} (role - developer)
-<multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user or applicable AGENTS.md or skill instructions explicitly request delegation.</multi_agent_mode>
+<multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly requested by the user or applicable AGENTS.md or skill instructions.</multi_agent_mode>

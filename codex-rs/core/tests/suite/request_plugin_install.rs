@@ -589,7 +589,7 @@ async fn startup_recommendations_use_developer_message(
             recommendation_message.last().map(String::as_str),
             Some(concat!(
                 "<recommended_plugins>\n",
-                "Here is a list of plugins that are available but not installed.\n\n",
+                "Available plugins not installed:\n\n",
                 "- GitHub (github@openai-curated-remote)\n",
                 "</recommended_plugins>",
             ))
@@ -1077,7 +1077,7 @@ async fn endpoint_mode_injects_candidates_hides_list_and_rejects_invented_ids() 
             recommendations,
             vec![concat!(
                 "<recommended_plugins>\n",
-                "Here is a list of plugins that are available but not installed.\n\n",
+                "Available plugins not installed:\n\n",
                 "- GitHub (github@openai-curated-remote)\n",
                 "- Google Calendar (google-calendar@openai-curated-remote)\n",
                 "</recommended_plugins>",

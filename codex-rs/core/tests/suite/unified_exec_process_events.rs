@@ -1228,7 +1228,7 @@ timeout = 900
             .join("\n");
         insta::allow_duplicates! {
             insta::assert_snapshot!(permissions, @r#"
-            Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: The sandbox permits reading files, and editing files in `cwd` and `writable_roots`. Editing files in other directories requires approval. Network access is restricted.
+            `sandbox_mode`: `workspace-write`. Read files and edit within `cwd` and `writable_roots`. Other writes require approval. Network access: restricted.
              The writable roots are `C:\workspace`, `D:\other-workspace`.
             - path `C:\workspace\blocked`
             - glob `C:\workspace\private\**`

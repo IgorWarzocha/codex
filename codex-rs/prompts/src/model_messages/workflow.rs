@@ -2,6 +2,7 @@
 //! Explicit catalogs and runtime configuration remain authoritative elsewhere.
 
 use super::ResolvedModelMessages;
+use super::permissions::DEFAULT_CATALOG_ON_REQUEST_AUTO_REVIEW;
 use codex_protocol::openai_models::ModelMessages;
 
 const TOKEN_BUDGET_GUIDANCE: &str = "Before a context reset, checkpoint the goal, decisions, progress, learnings, and next steps in `notes`. Include window and item IDs for active requests and important evidence. After reset, read the checkpoint and recover only missing details from `history`. The next window does not automatically include this conversation. Keep this bookkeeping out of user-facing replies.";
@@ -12,6 +13,12 @@ const TOKEN_BUDGET_FALLBACK: &str = "<context_window_reminder>Context is exhaust
 /// tool contracts, permission policies, or explicit empty-string suppression.
 pub fn apply_default_catalog_workflow(messages: &mut ModelMessages) {
     let bundled = ResolvedModelMessages::bundled();
+    if let Some(approvals) = messages.approvals.as_mut() {
+        replace_nonempty(
+            &mut approvals.on_request_auto_review,
+            DEFAULT_CATALOG_ON_REQUEST_AUTO_REVIEW,
+        );
+    }
     replace_nonempty(
         &mut messages.persistent_instructions,
         bundled.persistent_instructions(),

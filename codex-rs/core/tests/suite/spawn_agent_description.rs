@@ -41,6 +41,7 @@ use tokio::time::sleep;
 const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
 const SPAWN_AGENT_TOOL_NAME: &str = "spawn_agent";
+const WAIT_AGENT_GUIDANCE: &str = "Prefer waits of minutes with `wait_agent` to busy polling.";
 
 fn spawn_agent_description(body: &Value, namespace: &str) -> Option<String> {
     namespace_child_tool(body, namespace, SPAWN_AGENT_TOOL_NAME)
@@ -65,8 +66,7 @@ fn resolved_root_usage_hint(config: &Config, request: &ResponsesRequest) -> Stri
         .into_iter()
         .rev()
         .find_map(|group| {
-            (group.len() == 1 && group[0].contains("available concurrency slots"))
-                .then(|| group[0].clone())
+            (group.len() == 1 && group[0].contains("You are `/root`.")).then(|| group[0].clone())
         })
         .expect("resolved root usage hint should be a standalone developer message")
 }
@@ -319,9 +319,8 @@ pub(super) async fn model_catalog_refresh_requests(
     );
         assert!(
             description
-                .contains("Requests for depth, research, or thoroughness are not authorization.")
-                && description.contains("Keep immediate blockers local."),
-            "expected delegation decision guidance in spawn_agent description: {description:?}"
+                .contains("Requests for depth, research, or thoroughness are not authorization."),
+            "expected delegation authorization boundary in spawn_agent description: {description:?}"
         );
         assert!(
             !description.contains("A mini model can solve many tasks faster than the main model."),
@@ -478,11 +477,9 @@ async fn multi_agent_v2_wait_guidance_uses_overridable_developer_instructions(
 
     let request = response.single_request();
     let developer_messages = request.message_input_texts("developer");
-    let has_wait_guidance = developer_messages.iter().any(|message| {
-        message.contains(
-            "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.",
-        )
-    });
+    let has_wait_guidance = developer_messages
+        .iter()
+        .any(|message| message.contains(WAIT_AGENT_GUIDANCE));
     assert_eq!(has_wait_guidance, expected_wait_guidance);
 
     let body = request.body_json();
@@ -512,8 +509,6 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
 ) -> Result<()> {
     let resumed_root_agent_usage_hint_text = resumed_root_agent_usage_hint_text.map(str::to_string);
     let legacy_root_agent_usage_hint_text = "Legacy root instructions.";
-    let wait_guidance =
-        "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.";
     let config_toml = format!(
         "[features.multi_agent_v2]\nenabled = true\nwait_agent_enabled = {wait_agent_enabled}\n"
     );
@@ -552,7 +547,7 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
         !initial_request
             .message_input_texts("developer")
             .iter()
-            .any(|message| message.contains(wait_guidance)),
+            .any(|message| message.contains(WAIT_AGENT_GUIDANCE)),
         "legacy rollout should not already contain wait guidance"
     );
 
@@ -653,7 +648,7 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
         let wait_guidance_count = developer_messages
             .iter()
             .flatten()
-            .filter(|message| message.contains(wait_guidance))
+            .filter(|message| message.contains(WAIT_AGENT_GUIDANCE))
             .count();
         assert_eq!(
             wait_guidance_count,
@@ -686,8 +681,6 @@ async fn multi_agent_v2_resume_refreshes_changed_wait_guidance(
     initial_wait_agent_enabled: bool,
     resumed_wait_agent_enabled: bool,
 ) -> Result<()> {
-    let wait_guidance =
-        "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.";
     let initial_config_toml = format!(
         "[features.multi_agent_v2]\nenabled = true\nwait_agent_enabled = {initial_wait_agent_enabled}\n"
     );
@@ -781,7 +774,7 @@ async fn multi_agent_v2_resume_refreshes_changed_wait_guidance(
         let current_usage_hint_position = current_usage_hint_positions[0];
         let current_usage_message = &developer_messages[current_usage_hint_position][0];
         assert_eq!(
-            current_usage_message.contains(wait_guidance),
+            current_usage_message.contains(WAIT_AGENT_GUIDANCE),
             resumed_wait_agent_enabled
         );
         let active_mode_position = developer_messages
@@ -863,11 +856,7 @@ wait_agent_enabled = {wait_agent_enabled}
         request
             .message_input_texts("developer")
             .iter()
-            .any(|message| {
-                message.contains(
-                "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.",
-            )
-            }),
+            .any(|message| message.contains(WAIT_AGENT_GUIDANCE)),
         wait_agent_enabled
     );
 

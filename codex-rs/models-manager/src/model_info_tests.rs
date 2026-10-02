@@ -279,6 +279,45 @@ fn unknown_model_uses_builtin_instruction_template() {
 }
 
 #[test]
+fn bundled_catalog_templates_match_fallback_instructions() {
+    let catalog = crate::bundled_models_response().expect("bundled catalog should parse");
+    for model in catalog.models {
+        assert_eq!(
+            render_model_instructions(&model),
+            BASE_INSTRUCTIONS,
+            "bundled template for {} must not reintroduce a competing default",
+            model.slug,
+        );
+    }
+}
+
+#[test]
+fn bundled_catalog_operating_prose_matches_default_workflow() {
+    let catalog = crate::bundled_models_response().expect("bundled catalog should parse");
+    for model in catalog.models {
+        let messages = model.model_messages.expect("bundled model messages");
+        let mut normalized = messages.clone();
+        codex_prompts::apply_default_catalog_workflow(&mut normalized);
+        assert_eq!(
+            (
+                messages.persistent_instructions,
+                messages.collaboration_modes,
+                messages.multi_agent,
+                messages.approvals,
+            ),
+            (
+                normalized.persistent_instructions,
+                normalized.collaboration_modes,
+                normalized.multi_agent,
+                normalized.approvals,
+            ),
+            "bundled operating prose for {} must match the default workflow",
+            model.slug,
+        );
+    }
+}
+
+#[test]
 fn model_context_window_override_clamps_to_max_context_window() {
     let mut model = model_info_from_slug("unknown-model");
     model.context_window = Some(273_000);

@@ -80,10 +80,10 @@ fn builds_permissions_from_profile() {
         /*request_permissions_tool_enabled*/ false,
     );
     let text = instructions.body();
-    assert!(text.contains("`sandbox_mode` is `workspace-write`"));
-    assert!(text.contains("Network access is enabled."));
+    assert!(text.contains("`sandbox_mode`: `workspace-write`"));
+    assert!(text.contains("Network access: enabled."));
     assert!(text.contains(writable_root.to_string_lossy().as_ref()));
-    assert!(text.contains("Do not request escalation or additional permissions"));
+    assert!(text.contains("request escalation or additional permissions"));
     assert!(text.contains(&format!("path `{}`", denied_root.display())));
     assert!(text.contains(&format!("glob `{denied_glob}`")));
 }
@@ -149,8 +149,8 @@ fn builds_permissions_from_profile_with_executor_denied_reads() {
         /*request_permissions_tool_enabled*/ false,
     );
     let text = instructions.body();
-    assert!(text.contains("## Denied filesystem reads"));
-    assert!(text.contains("Do not request escalation or additional permissions"));
+    assert!(text.contains("Denied reads."));
+    assert!(text.contains("request escalation or additional permissions"));
     assert!(text.contains(r"path `C:\workspace\blocked`"));
     assert!(text.contains(&format!("glob `{denied_glob}`")));
 }
@@ -163,7 +163,7 @@ fn renders_sandbox_mode_text() {
             NetworkAccess::Restricted,
             ResolvedPermissionMessages::new(/*messages*/ None),
         ),
-        "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: The sandbox permits reading files, and editing files in `cwd` and `writable_roots`. Editing files in other directories requires approval. Network access is restricted."
+        "`sandbox_mode`: `workspace-write`. Read files and edit within `cwd` and `writable_roots`. Other writes require approval. Network access: restricted."
     );
 
     assert_eq!(
@@ -172,7 +172,7 @@ fn renders_sandbox_mode_text() {
             NetworkAccess::Restricted,
             ResolvedPermissionMessages::new(/*messages*/ None),
         ),
-        "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sandbox only permits reading files. Network access is restricted."
+        "`sandbox_mode`: `read-only`. Read files only. Network access: restricted."
     );
 
     assert_eq!(
@@ -181,7 +181,7 @@ fn renders_sandbox_mode_text() {
             NetworkAccess::Enabled,
             ResolvedPermissionMessages::new(/*messages*/ None),
         ),
-        "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted. Network access is enabled."
+        "`sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled."
     );
 }
 
@@ -320,7 +320,7 @@ fn empty_catalog_permission_message_preserves_non_sandbox_sections() {
     .body();
 
     assert!(!text.contains("Filesystem sandboxing defines"));
-    assert!(text.contains("Approval policy is currently never"));
+    assert!(text.contains("Approval policy: `never`"));
     assert!(text.contains(&writable_root));
 }
 
@@ -340,11 +340,11 @@ fn includes_request_rule_instructions_for_on_request() {
     assert!(text.contains("Approved command prefixes"));
     assert!(text.contains(r#"["git", "pull"]"#));
     assert!(
-        text.contains("Network access is enabled."),
+        text.contains("Network access: enabled."),
         "expected network access to be enabled in message"
     );
     assert!(
-        text.contains("How to request escalation"),
+        text.contains("Approval policy: `on-request`"),
         "expected approval guidance to be included"
     );
 }
@@ -361,8 +361,8 @@ fn includes_request_permissions_tool_instructions_for_unless_trusted_when_enable
     )
     .body();
 
-    assert!(text.contains("`approval_policy` is `unless-trusted`"));
-    assert!(text.contains("# request_permissions Tool"));
+    assert!(text.contains("Approval policy: `unless-trusted`"));
+    assert!(text.contains("`request_permissions` is available."));
 }
 
 #[test]
@@ -384,11 +384,7 @@ fn on_request_permission_guidance_matches_enabled_capabilities() {
             (exec_permission_approvals_enabled, "additional_permissions"),
             (
                 request_permissions_tool_enabled,
-                "# request_permissions Tool",
-            ),
-            (
-                request_permissions_tool_enabled,
-                "The built-in `request_permissions` tool is available in this session.",
+                "`request_permissions` is available.",
             ),
         ] {
             assert_eq!(
@@ -473,11 +469,11 @@ fn empty_catalog_approval_message_suppresses_legacy_approval_section() {
     )
     .body();
 
-    assert!(text.contains("`sandbox_mode` is `workspace-write`"));
-    assert!(text.contains("Network access is restricted."));
+    assert!(text.contains("`sandbox_mode`: `workspace-write`"));
+    assert!(text.contains("Network access: restricted."));
     assert!(text.contains(&writable_root));
-    assert!(!text.contains("How to request escalation"));
-    assert!(!text.contains("request_permissions Tool"));
+    assert!(!text.contains("Approval policy: `on-request`"));
+    assert!(!text.contains("`request_permissions` is available."));
     assert!(!text.contains("Approved command prefixes"));
 }
 
@@ -520,7 +516,7 @@ fn missing_catalog_key_uses_legacy_approval_text() {
             /*exec_permission_approvals_enabled*/ false,
             /*request_permissions_tool_enabled*/ false,
         );
-        assert!(on_request.contains("How to request escalation"));
+        assert!(on_request.contains("Approval policy: `on-request`"));
         assert_eq!(
             on_request.contains(AUTO_REVIEW_SUFFIX),
             reviewer == ApprovalsReviewer::AutoReview
@@ -569,8 +565,8 @@ fn auto_review_approvals_append_auto_review_specific_guidance() {
         /*request_permissions_tool_enabled*/ false,
     );
 
-    assert!(text.contains("`approvals_reviewer` is `auto_review`"));
-    assert!(!text.contains("`approvals_reviewer` is `guardian_subagent`"));
+    assert!(text.contains("`approvals_reviewer`: `auto_review`"));
+    assert!(!text.contains("`approvals_reviewer`: `guardian_subagent`"));
     assert!(text.contains("materially safer alternative"));
 }
 
@@ -585,8 +581,8 @@ fn auto_review_approvals_omit_auto_review_specific_guidance_when_approval_is_nev
         /*request_permissions_tool_enabled*/ false,
     );
 
-    assert!(!text.contains("`approvals_reviewer` is `auto_review`"));
-    assert!(!text.contains("`approvals_reviewer` is `guardian_subagent`"));
+    assert!(!text.contains("`approvals_reviewer`: `auto_review`"));
+    assert!(!text.contains("`approvals_reviewer`: `guardian_subagent`"));
 }
 
 const ALL_APPROVALS_ENABLED: GranularApprovalConfig = GranularApprovalConfig {
@@ -597,8 +593,7 @@ const ALL_APPROVALS_ENABLED: GranularApprovalConfig = GranularApprovalConfig {
     mcp_elicitations: true,
 };
 
-const ALL_PROMPTED_CATEGORIES: &str =
-    "These approval categories may still prompt the user when needed:
+const ALL_PROMPTED_CATEGORIES: &str = "May prompt:
 - `sandbox_approval`
 - `rules`
 - `skill_approval`
@@ -625,8 +620,8 @@ fn granular_policy_lists_prompted_and_rejected_categories_separately() {
         text,
         [
             GRANULAR_INTRO,
-            "These approval categories may still prompt the user when needed:\n- `rules`",
-            "These approval categories are automatically rejected instead of prompting the user:\n- `sandbox_approval`\n- `skill_approval`\n- `mcp_elicitations`",
+            "May prompt:\n- `rules`",
+            "Reject automatically:\n- `sandbox_approval`\n- `skill_approval`\n- `mcp_elicitations`",
         ]
         .join("\n\n")
     );
@@ -681,7 +676,7 @@ fn granular_policy_includes_request_permissions_tool_only_when_that_prompt_can_s
         /*exec_permission_approvals_enabled*/ true,
         /*request_permissions_tool_enabled*/ true,
     );
-    assert!(allowed.contains("# request_permissions Tool"));
+    assert!(allowed.contains("`request_permissions` is available."));
 
     let rejected = approval_text(
         AskForApproval::Granular(GranularApprovalConfig {
@@ -694,7 +689,7 @@ fn granular_policy_includes_request_permissions_tool_only_when_that_prompt_can_s
         /*exec_permission_approvals_enabled*/ true,
         /*request_permissions_tool_enabled*/ true,
     );
-    assert!(!rejected.contains("# request_permissions Tool"));
+    assert!(!rejected.contains("`request_permissions` is available."));
 }
 
 #[test]
@@ -729,8 +724,7 @@ fn preserves_supplied_path_spellings_and_order() {
     );
     let expected_body = concat!(
         "\n The writable roots are `C:\\work\\z`, `/work/a`.\n",
-        "## Denied filesystem reads\n",
-        "The active permission profile denies reading these paths/globs. Do not request escalation or additional permissions to read them; these denials are policy restrictions.\n",
+        "Denied reads. Do not read these paths or globs, or request escalation or additional permissions to bypass the denials:\n",
         "- path `C:\\private`\n- path `/private`\n",
         "- glob `C:\\private\\**`\n- glob `/private/**`\n",
     );

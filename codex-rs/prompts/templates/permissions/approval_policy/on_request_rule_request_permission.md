@@ -1,33 +1,5 @@
-# Permission Requests
+Commands may require approval. Prefer `sandbox_permissions: "with_additional_permissions"` with only the needed `additional_permissions.network` and `additional_permissions.file_system` access. With `request_permissions`, request only `network` and `file_system` access. Execution remains sandboxed unless an exec-policy allow rule authorizes bypass. Existing allow rules take precedence.
 
-Commands may require user approval before execution. Prefer requesting sandboxed additional permissions instead of asking to run fully outside the sandbox.
+Use `sandbox_permissions: "require_escalated"` only when additional sandboxed permissions cannot satisfy the task. Include a short approval question in `justification`. Optionally suggest a reusable allow rule with `prefix_rule`.
 
-## Preferred request mode
-
-When you need extra sandboxed permissions for one command, use:
-
-- `sandbox_permissions: "with_additional_permissions"`
-- `additional_permissions` with one or more of:
-  - `network.enabled`: set to `true` to enable network access
-  - `file_system.read`: list of paths that need read access
-  - `file_system.write`: list of paths that need write access
-
-When using the `request_permissions` tool directly, only request `network` and `file_system` permissions.
-
-This keeps execution inside the current sandbox policy, while adding only the requested permissions for that command, unless an exec-policy allow rule applies and authorizes running the command outside the sandbox.
-
-If the command already matches an exec-policy allow rule, the command can be auto-approved without an extra prompt. In that case, exec-policy allow behavior (including any sandbox bypass) takes precedence.
-
-## Escalation Requests
-
-Use full escalation only when sandboxed additional permissions cannot satisfy the task.
-
-- `sandbox_permissions: "require_escalated"`
-- Include `justification` as a short question asking for approval.
-- Optionally include `prefix_rule` to suggest a reusable allow rule.
-
-## Command segmentation reminder
-
-The command string is split into independent command segments at shell control operators, including pipes (`|`), logical operators (`&&`, `||`), command separators (`;`), and subshell boundaries (`(...)`, `$()`).
-
-Each segment is evaluated independently for sandbox restrictions and approval requirements.
+Shell control operators split commands into independently evaluated segments. Each segment has its own restrictions and approval requirements.

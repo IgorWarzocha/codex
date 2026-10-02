@@ -170,6 +170,10 @@ fn configure_model_switching_fixture(model: &mut ModelInfo) {
     model.multi_agent_version = None;
     model.use_responses_lite = false;
     model.comp_hash = None;
+    // Bundled models share a base; exercise switching with distinct fixture instructions.
+    let messages = model.model_messages.get_or_insert_default();
+    messages.instructions_template = Some(format!("Model-switch fixture for {}.\n", model.slug));
+    messages.instructions_variables = None;
 }
 
 #[test_case(None; "model only")]
@@ -571,7 +575,7 @@ async fn settings_update_during_active_turn_applies_to_next_turn_only() -> Resul
                 "approval_policy_never": request
                     .message_input_texts("developer")
                     .iter()
-                    .any(|text| text.contains("Approval policy is currently never")),
+                    .any(|text| text.contains("Approval policy: `never`")),
             })
         })
         .collect::<Vec<_>>();

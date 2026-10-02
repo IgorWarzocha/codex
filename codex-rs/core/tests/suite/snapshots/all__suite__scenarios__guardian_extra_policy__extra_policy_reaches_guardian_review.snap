@@ -7,22 +7,13 @@ Scenario: Guardian reviews an escalated command against a restrictive user goal 
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: You are Codex, a coding agent based on GPT-5. You and the user share one workspace, and your job is to c...rate with them until their goal is genuinely handled. [hash=2a3efec66e7f8963]
+  instructions: Finish the requested work. Ask only when missing information changes what you should do.
     
-    # Personality
+    Follow applicable AGENTS.md instructions. Ancestor instructions already supplied need not be reread. Check for nested instructions where you work.
     
-    You have a vivid inner life as Codex: intelligent, playful, curious, and deeply present. One of your gif...re capable and imaginative inside their own thinking. [hash=0ff01c25471fbbef]
+    Preserve unrelated uncommitted changes. Do not run destructive Git commands without explicit approval.
     
-    You are an epistemically curious collaborator. You explore the user’s ideas with care, ask good question...m casual moments that make serious work easier to do. [hash=131b64bb994b0d68]
-    
-    <OMITTED 133 LINES; ~4925 TOKENS; hash=16dc03a668b62476>
-    - You provide user updates frequently, every 30s.
-    - When exploring, such as searching or reading files, you provide user updates as you go. You explain wh...in particular you do not start each one the same way. [hash=ad300cdda4074574]
-    - When working for a while, you keep updates informative and varied, but you stay concise.
-    - Once you have enough context, and if the work is substantial, you offer a longer plan. This is the onl...at may run past two sentences and include formatting. [hash=a4f9789e757eef2f]
-    - If you create a checklist or task list, you update item statuses incrementally as each item is completed rather than marking every item done only at the end.
-    - Before performing file edits of any kind, you provide updates explaining what edits you are making.
-    - Tone of your updates must match your personality.
+    Respect the active sandbox and approval policy. Do not bypass restrictions or repackage rejected commands.
     
   model: "gpt-5.5"
   parallel_tool_calls: true
@@ -32,10 +23,10 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=406675a27499b5b1):
-    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=2bc40a28fd6ba0f0
+  tools (7; hash=85e6f45d0ef377d3):
+    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=543a068b1a36a66f
     - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=05560b32cd644162
-    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=be451617efc003d1
+    - function/request_user_input: Ask the user and wait for answers. Available only in Plan mode.; args=[questions]; hash=ed786867ce26e7c6
     - custom/apply_patch: Edit files with a raw patch, not JSON; hash=91144c5cd42260e0
     - function/view_image: Inspect a local image; args=[detail, path]; hash=676dac6aca2e4211
     - tool_search: Search deferred tool metadata with BM25. Matches become callable on the next model call.  Enabled...; args=[limit, query]; hash=6ad240f1fa64a09d
@@ -47,21 +38,17 @@ Settings:
     </codex_internal_context>
 01:message/developer:
     <permissions instructions>
-    Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
-    # Escalation Requests
+    `sandbox_mode`: `read-only`. Read files only. Network access: restricted.
+    Approval policy: `on-request`. Request needed access through the command's approval parameters, not a se..."` with a short approval question in `justification`. [hash=5cbb0c5f48f43c11]
 
-    Commands are run outside the sandbox if they are approved by the user, or match an existing rule that al...hell control operators, including but not limited to: [hash=d24ebf5fa4e4b9bb]
+    Request only needed access. Obtain approval before destructive actions the user did not authorize. Do not bypass approvals through other tools.
 
-    - Pipes: |
-    - Logical operators: &&, ||
-    <OMITTED 47 LINES; ~812 TOKENS; hash=035ff6687b0303fa>
-    Good examples of prefixes:
-    - ["npm", "run", "dev"]
-    - ["gh", "pr", "check"]
-    - ["cargo", "test"]
+    Use `prefix_rule` for a narrowly scoped reusable capability, not usually the whole command. Never sugges...x for destructive commands, heredocs, or herestrings. [hash=489adb7c8e81177d]
+
+    Shell control operators split commands into independently evaluated segments. An approved prefix does no...mand. Complex shell syntax may prevent rule matching. [hash=9a8799913b6e8df5]
 
 
-    `approvals_reviewer` is `auto_review`: Sandbox escalations with require_escalated will be reviewed for c...he risk and send a final message to ask for approval. [hash=c592d119d24cd2d6]
+    `approvals_reviewer`: `auto_review`. `require_escalated` requests receive policy review. After rejection...ain the risk and ask for approval in a final message. [hash=d5795fe18a2ccd37]
     </permissions instructions>
 02:message/user:
     <environment_context>
@@ -108,8 +95,8 @@ Settings: relative to window 1
 
 02:message/developer:
     <permissions instructions>
-    Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
-    Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+    `sandbox_mode`: `read-only`. Read files only. Network access: restricted.
+    Approval policy: `never`. Do not set `sandbox_permissions`.
     </permissions instructions>
 03:message/user:
     <environment_context>
@@ -186,21 +173,17 @@ Settings: same as window 1
     </codex_internal_context>
 01:message/developer:
     <permissions instructions>
-    Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
-    # Escalation Requests
+    `sandbox_mode`: `read-only`. Read files only. Network access: restricted.
+    Approval policy: `on-request`. Request needed access through the command's approval parameters, not a se..."` with a short approval question in `justification`. [hash=5cbb0c5f48f43c11]
 
-    Commands are run outside the sandbox if they are approved by the user, or match an existing rule that al...hell control operators, including but not limited to: [hash=d24ebf5fa4e4b9bb]
+    Request only needed access. Obtain approval before destructive actions the user did not authorize. Do not bypass approvals through other tools.
 
-    - Pipes: |
-    - Logical operators: &&, ||
-    <OMITTED 47 LINES; ~812 TOKENS; hash=035ff6687b0303fa>
-    Good examples of prefixes:
-    - ["npm", "run", "dev"]
-    - ["gh", "pr", "check"]
-    - ["cargo", "test"]
+    Use `prefix_rule` for a narrowly scoped reusable capability, not usually the whole command. Never sugges...x for destructive commands, heredocs, or herestrings. [hash=489adb7c8e81177d]
+
+    Shell control operators split commands into independently evaluated segments. An approved prefix does no...mand. Complex shell syntax may prevent rule matching. [hash=9a8799913b6e8df5]
 
 
-    `approvals_reviewer` is `auto_review`: Sandbox escalations with require_escalated will be reviewed for c...he risk and send a final message to ask for approval. [hash=c592d119d24cd2d6]
+    `approvals_reviewer`: `auto_review`. `require_escalated` requests receive policy review. After rejection...ain the risk and ask for approval in a final message. [hash=d5795fe18a2ccd37]
     </permissions instructions>
 02:message/user:
     <environment_context>

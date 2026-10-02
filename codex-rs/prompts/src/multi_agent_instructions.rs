@@ -5,10 +5,10 @@ use crate::without_update_plan_instructions;
 use codex_context_fragments::ContextualUserFragment;
 use codex_protocol::models::ContentItemKind;
 
-const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly request it. Overrides require `fork_turns` = `\"none\"` or a positive integer string. Omitted or `\"all\"` inherits the parent's model and effort.";
+const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Overrides require `fork_turns: \"none\"` or a positive integer string. Omitted or `\"all\"` inherits the parent's model and effort.";
 const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
-    "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.";
-const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = "Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents share the filesystem and working directory. Coordinate edits and preserve other agents' changes.";
+    "Prefer waits of minutes with `wait_agent` to busy polling.";
+const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = "Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working directory. Coordinate edits and preserve others' changes.";
 
 /// Multi-agent role text and the captured capabilities used to render its context segment.
 #[derive(Debug, Clone, PartialEq, Eq)]

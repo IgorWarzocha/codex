@@ -75,7 +75,7 @@ fn request_user_input_tool_includes_questions_schema() {
                                             Some(false.into()),
                                         ),
                                         Some(
-                                            "2-3 mutually exclusive choices. Recommended first, label suffixed \"(Recommended)\". Omit Other; the client adds free text"
+                                            "2-3 mutually exclusive choices. Omit Other because the client adds free text"
                                                 .to_string(),
                                         ),
                                     ),
@@ -94,7 +94,7 @@ fn request_user_input_tool_includes_questions_schema() {
                             Some(false.into()),
                         ),
                         Some(
-                            "Prefer 1 question, at most 3".to_string(),
+                            "At most 3".to_string(),
                         ),
                     ),
                 ),
@@ -116,7 +116,7 @@ fn normalize_request_user_input_tool_args_sets_other_on_every_question() {
             is_other: false,
             is_secret: false,
             options: Some(vec![RequestUserInputQuestionOption {
-                label: "Yes (Recommended)".to_string(),
+                label: "Yes".to_string(),
                 description: "Continue.".to_string(),
             }]),
         }],

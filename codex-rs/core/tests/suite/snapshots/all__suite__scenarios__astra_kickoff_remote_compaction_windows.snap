@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=e1e7efd8390ca636):
-        - namespace/functions; hash=0eaa532112973009
+00:additional_tools/developer (3; hash=f37a97a52f34d89b):
+        - namespace/functions; hash=ba5f9dafe877a484
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -32,78 +32,40 @@ Settings:
           - function/spawn_agent
           - function/wait_agent
 01:message/developer:
-    You are Codex, an agent based on GPT-6. You and the user share one workspace, and your job is to collabo...them until their intended goal is completely handled. [hash=efa50f074efa5803]
+    Finish the requested work. Ask only when missing information changes what you should do.
 
-    # When to ask the user for permission
+    Follow applicable AGENTS.md instructions. Ancestor instructions already supplied need not be reread. Check for nested instructions where you work.
 
-    Use your best judgement given task context for when you really need user permission, like a competent co...ork without ending the turn to clarify with the user. [hash=ca7367e658b51388]
+    Preserve unrelated uncommitted changes. Do not run destructive Git commands without explicit approval.
 
-    User authorization and preferences persist across turns. Do not request permission again when the user h... any guidelines provided in skills or external files. [hash=911f91c92c72882c]
-
-    <OMITTED 155 LINES; ~4935 TOKENS; hash=5573869716192298>
-
-    - Skill naming: If a plugin contributes skills, those skill entries are prefixed with plugin_name: in the Skills list.
-    - MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as mcp__server__tool; use tool provenance to tell which plugin they come from.
-    - Trigger rules: If the user explicitly names a plugin, prefer capabilities associated with that plugin for that turn.
-    - Relationship to capabilities: Plugins are not invoked directly. Use their underlying skills, MCP tools, and app tools to help solve the task.
-    - Relevance: Determine what a plugin can help with from explicit user mention or from the plugin-associa..., MCP tools, and apps exposed elsewhere in this turn. [hash=620459a4e7b590f0]
-    - Missing/blocked: If the user requests a plugin that does not have relevant callable capabilities for t..., say so briefly and continue with the best fallback. [hash=746b0469a8f6cb3e]
+    Respect the active sandbox and approval policy. Do not bypass restrictions or repackage rejected commands.
 
 02:message/developer[3]:
     [01] Skills: List once at session start; read always-applicable and task-relevant skills before work
     [02] <permissions instructions>
-        Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
-        # Escalation Requests
+        `sandbox_mode`: `read-only`. Read files only. Network access: restricted.
+        Approval policy: `on-request`. Request needed access through the command's approval parameters, not a se..."` with a short approval question in `justification`. [hash=5cbb0c5f48f43c11]
 
-        Commands are run outside the sandbox if they are approved by the user, or match an existing rule that al...hell control operators, including but not limited to: [hash=d24ebf5fa4e4b9bb]
+        Request only needed access. Obtain approval before destructive actions the user did not authorize. Do not bypass approvals through other tools.
 
-        - Pipes: |
-        - Logical operators: &&, ||
-        <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
-        NEVER provide a prefix_rule if your command uses a heredoc or herestring.
+        Use `prefix_rule` for a narrowly scoped reusable capability, not usually the whole command. Never sugges...x for destructive commands, heredocs, or herestrings. [hash=489adb7c8e81177d]
 
-        ### Examples
-        Good examples of prefixes:
-        - ["npm", "run", "dev"]
-        - ["gh", "pr", "check"]
-        - ["cargo", "test"]
+        Shell control operators split commands into independently evaluated segments. An approved prefix does no...mand. Complex shell syntax may prevent rule matching. [hash=9a8799913b6e8df5]
         </permissions instructions>
-    [03] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode>Execute the request. This replaces prior collaboration-mode instructions. Only a developer `<collaboration_mode>` message changes mode.
 
-        You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
-
-        Your active mode changes only when new developer instructions with a different `<collaboration_mode>...<...by themselves. Known mode names are Default and Plan. [hash=e75f6b12fc52d812]
-
-        ## request_user_input availability
-
-        Use the `request_user_input` tool only when it is listed in the available tools for this turn.
-
-        Use the `request_user_input` tool only for optional questions where the answer would materially improve the quality of the work.
-
-        If `request_user_input` returns no answers, continue with best judgment instead of asking again or treating the turn as blocked.
-
-        Never use the `request_user_input` tool for permission requests or permission-related escalations.
+        Use `request_user_input`, when available, only for optional questions that materially improve the work, ...xt question when required input blocks safe progress. [hash=6eb65f08c6f6a28e]
         </collaboration_mode>
 03:message/developer:
-    <multi_agent_role>You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
-
-    At the start of your turn, you are the active agent.
-    You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
-    All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
-
-    You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
-    `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 11 LINES; ~82 TOKENS; hash=85bc6c57e3814f8c>
-    They may be addressed as to=/root
-
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    <multi_agent_role>You are `/root`. Own the result and coordinate delegated work. Agent messages arrive i...thout starting a turn. `followup_task` starts a turn. [hash=de31451d7dbc42b3]
+    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
+    Prefer waits of minutes with `wait_agent` to busy polling.
 
     At most 4 agents may be active, including you.
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...its the parent's model and effort.</multi_agent_role> [hash=e36161e61d51acf5]
+    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...its the parent's model and effort.</multi_agent_role> [hash=3aa079c4e0d6f001]
 04:message/developer:
-    <multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user o...ons explicitly request delegation.</multi_agent_mode> [hash=62799ec0c4d26ac4]
+    <multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly request...e AGENTS.md or skill instructions.</multi_agent_mode> [hash=72a2fd98b66d3a10]
 05:message/user[2]:
     [01] # AGENTS.md instructions for <AGENTS_DIRECTORY>
 
@@ -146,7 +108,6 @@ Settings:
 09:message/developer:
     Capabilities from the `calendar` plugin:
     - Skills from this plugin are prefixed with `calendar:`.
-    Use these plugin-associated capabilities to help solve the task.
 -- request 2 (turn) --
 10:message/assistant:
     Agenda drafted for the kickoff.
@@ -167,7 +128,6 @@ Settings:
 13:message/developer:
     Capabilities from the `notes` plugin:
     - Skills from this plugin are prefixed with `notes:`.
-    Use these plugin-associated capabilities to help solve the task.
 -- request 3 (compaction) --
 14:message/assistant:
     The team chose Friday and assigned owners.
@@ -176,8 +136,8 @@ Settings:
 ## Window 2 (after request 3: input diverged at item 02)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (3; hash=e1e7efd8390ca636):
-        - namespace/functions; hash=0eaa532112973009
+00:additional_tools/developer (3; hash=f37a97a52f34d89b):
+        - namespace/functions; hash=ba5f9dafe877a484
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -192,22 +152,13 @@ Settings: same as window 1
           - function/spawn_agent
           - function/wait_agent
 01:message/developer:
-    You are Codex, an agent based on GPT-6. You and the user share one workspace, and your job is to collabo...them until their intended goal is completely handled. [hash=efa50f074efa5803]
+    Finish the requested work. Ask only when missing information changes what you should do.
 
-    # When to ask the user for permission
+    Follow applicable AGENTS.md instructions. Ancestor instructions already supplied need not be reread. Check for nested instructions where you work.
 
-    Use your best judgement given task context for when you really need user permission, like a competent co...ork without ending the turn to clarify with the user. [hash=ca7367e658b51388]
+    Preserve unrelated uncommitted changes. Do not run destructive Git commands without explicit approval.
 
-    User authorization and preferences persist across turns. Do not request permission again when the user h... any guidelines provided in skills or external files. [hash=911f91c92c72882c]
-
-    <OMITTED 155 LINES; ~4935 TOKENS; hash=5573869716192298>
-
-    - Skill naming: If a plugin contributes skills, those skill entries are prefixed with plugin_name: in the Skills list.
-    - MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as mcp__server__tool; use tool provenance to tell which plugin they come from.
-    - Trigger rules: If the user explicitly names a plugin, prefer capabilities associated with that plugin for that turn.
-    - Relationship to capabilities: Plugins are not invoked directly. Use their underlying skills, MCP tools, and app tools to help solve the task.
-    - Relevance: Determine what a plugin can help with from explicit user mention or from the plugin-associa..., MCP tools, and apps exposed elsewhere in this turn. [hash=620459a4e7b590f0]
-    - Missing/blocked: If the user requests a plugin that does not have relevant callable capabilities for t..., say so briefly and continue with the best fallback. [hash=746b0469a8f6cb3e]
+    Respect the active sandbox and approval policy. Do not bypass restrictions or repackage rejected commands.
 
 02:message/user:
     Plan a team kickoff for Friday using $outline and $calendar:agenda.
@@ -217,58 +168,29 @@ Settings: same as window 1
 05:message/developer[3]:
     [01] Skills: List once at session start; read always-applicable and task-relevant skills before work
     [02] <permissions instructions>
-        Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
-        # Escalation Requests
+        `sandbox_mode`: `read-only`. Read files only. Network access: restricted.
+        Approval policy: `on-request`. Request needed access through the command's approval parameters, not a se..."` with a short approval question in `justification`. [hash=5cbb0c5f48f43c11]
 
-        Commands are run outside the sandbox if they are approved by the user, or match an existing rule that al...hell control operators, including but not limited to: [hash=d24ebf5fa4e4b9bb]
+        Request only needed access. Obtain approval before destructive actions the user did not authorize. Do not bypass approvals through other tools.
 
-        - Pipes: |
-        - Logical operators: &&, ||
-        <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
-        NEVER provide a prefix_rule if your command uses a heredoc or herestring.
+        Use `prefix_rule` for a narrowly scoped reusable capability, not usually the whole command. Never sugges...x for destructive commands, heredocs, or herestrings. [hash=489adb7c8e81177d]
 
-        ### Examples
-        Good examples of prefixes:
-        - ["npm", "run", "dev"]
-        - ["gh", "pr", "check"]
-        - ["cargo", "test"]
+        Shell control operators split commands into independently evaluated segments. An approved prefix does no...mand. Complex shell syntax may prevent rule matching. [hash=9a8799913b6e8df5]
         </permissions instructions>
-    [03] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode>Execute the request. This replaces prior collaboration-mode instructions. Only a developer `<collaboration_mode>` message changes mode.
 
-        You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
-
-        Your active mode changes only when new developer instructions with a different `<collaboration_mode>...<...by themselves. Known mode names are Default and Plan. [hash=e75f6b12fc52d812]
-
-        ## request_user_input availability
-
-        Use the `request_user_input` tool only when it is listed in the available tools for this turn.
-
-        Use the `request_user_input` tool only for optional questions where the answer would materially improve the quality of the work.
-
-        If `request_user_input` returns no answers, continue with best judgment instead of asking again or treating the turn as blocked.
-
-        Never use the `request_user_input` tool for permission requests or permission-related escalations.
+        Use `request_user_input`, when available, only for optional questions that materially improve the work, ...xt question when required input blocks safe progress. [hash=6eb65f08c6f6a28e]
         </collaboration_mode>
 06:message/developer:
-    <multi_agent_role>You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
-
-    At the start of your turn, you are the active agent.
-    You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
-    All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
-
-    You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
-    `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 11 LINES; ~82 TOKENS; hash=85bc6c57e3814f8c>
-    They may be addressed as to=/root
-
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    <multi_agent_role>You are `/root`. Own the result and coordinate delegated work. Agent messages arrive i...thout starting a turn. `followup_task` starts a turn. [hash=de31451d7dbc42b3]
+    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
+    Prefer waits of minutes with `wait_agent` to busy polling.
 
     At most 4 agents may be active, including you.
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...its the parent's model and effort.</multi_agent_role> [hash=e36161e61d51acf5]
+    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...its the parent's model and effort.</multi_agent_role> [hash=3aa079c4e0d6f001]
 07:message/developer:
-    <multi_agent_mode>This replaces earlier proactive-delegation guidance. Spawn agents only when the user o...ons explicitly request delegation.</multi_agent_mode> [hash=62799ec0c4d26ac4]
+    <multi_agent_mode>This replaces proactive-delegation guidance. Spawn agents only when explicitly request...e AGENTS.md or skill instructions.</multi_agent_mode> [hash=72a2fd98b66d3a10]
 08:message/user[2]:
     [01] # AGENTS.md instructions for <AGENTS_DIRECTORY>
 
@@ -312,4 +234,3 @@ Settings: same as window 1
 12:message/developer:
     Capabilities from the `calendar` plugin:
     - Skills from this plugin are prefixed with `calendar:`.
-    Use these plugin-associated capabilities to help solve the task.

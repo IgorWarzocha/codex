@@ -115,8 +115,8 @@ async fn catalog_approval_message_is_sent_in_initial_permissions() -> Result<()>
     let permissions = permissions_texts(&request);
     assert_eq!(permissions.len(), 1);
     assert!(permissions[0].contains("catalog user approval instructions"));
-    assert!(permissions[0].contains("Filesystem sandboxing defines"));
-    assert!(!permissions[0].contains("How to request escalation"));
+    assert!(permissions[0].contains("`sandbox_mode`:"));
+    assert!(!permissions[0].contains("Approval policy: `on-request`"));
     Ok(())
 }
 
@@ -299,7 +299,7 @@ async fn catalog_permission_message_is_sent_initially_and_after_model_change() -
     assert!(
         permissions
             .last()
-            .is_some_and(|text| text.contains("Approval policy is currently never"))
+            .is_some_and(|text| text.contains("Approval policy: `never`"))
     );
     assert!(
         !permissions
@@ -346,8 +346,8 @@ async fn empty_catalog_permission_message_preserves_approval_instructions() -> R
 
     let permissions = permissions_texts(&req.single_request());
     assert_eq!(permissions.len(), 1);
-    assert!(permissions[0].contains("Approval policy is currently never"));
-    assert!(!permissions[0].contains("Filesystem sandboxing defines"));
+    assert!(permissions[0].contains("Approval policy: `never`"));
+    assert!(!permissions[0].contains("Read files only."));
     assert!(!permissions[0].contains("`sandbox_mode`"));
     Ok(())
 }

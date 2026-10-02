@@ -33,10 +33,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         "Wait before yielding, default 10000 ms, range 250-30000 ms"
     };
     let mut properties = BTreeMap::from([
-        (
-            "cmd".to_string(),
-            JsonSchema::string(Some("Shell command".to_string())),
-        ),
+        ("cmd".to_string(), JsonSchema::string(None)),
         (
             "workdir".to_string(),
             JsonSchema::string(Some("Cwd, defaults to turn cwd".to_string())),

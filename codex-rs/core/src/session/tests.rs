@@ -10589,7 +10589,7 @@ async fn build_initial_context_reuses_in_flight_recommendation_prewarm() {
             .collect::<Vec<_>>(),
         vec![concat!(
             "<recommended_plugins>\n",
-            "Here is a list of plugins that are available but not installed.\n\n",
+            "Available plugins not installed:\n\n",
             "- GitHub (github@openai-curated-remote)\n",
             "</recommended_plugins>",
         )]

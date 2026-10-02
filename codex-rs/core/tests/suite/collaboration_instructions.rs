@@ -4,6 +4,7 @@ use codex_features::Feature;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
 use codex_models_manager::model_info::model_info_from_slug;
+use codex_prompts::ResolvedModelMessages;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
@@ -240,7 +241,7 @@ async fn catalog_collaboration_messages_track_mode_changes() -> Result<()> {
 #[test_case(ModeKind::Default; "default")]
 #[test_case(ModeKind::Plan; "plan")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
+async fn default_catalog_collaboration_messages_refresh_without_mode_or_model_change(
     mode: ModeKind,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -248,24 +249,26 @@ async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
     const ETAG_1: &str = "\"collaboration-models-1\"";
     const ETAG_2: &str = "\"collaboration-models-2\"";
     const ETAG_3: &str = "\"collaboration-models-3\"";
+    const ETAG_4: &str = "\"collaboration-models-4\"";
     const MODEL: &str = "catalog-collaboration-refresh-model";
     const ORIGINAL: &str = "original catalog collaboration instructions";
     const UPDATED: &str = "updated catalog collaboration instructions";
     const INACTIVE: &str = "inactive mode instructions";
+    const LEGACY: &str = "legacy fallback instructions";
 
-    let catalog = |instructions: &str| ModelsResponse {
+    let catalog = |instructions: Option<&str>| ModelsResponse {
         models: vec![match mode {
             ModeKind::Default => {
-                model_with_collaboration_messages(MODEL, Some(instructions), Some(INACTIVE))
+                model_with_collaboration_messages(MODEL, instructions, Some(INACTIVE))
             }
             ModeKind::Plan => {
-                model_with_collaboration_messages(MODEL, Some(INACTIVE), Some(instructions))
+                model_with_collaboration_messages(MODEL, Some(INACTIVE), instructions)
             }
         }],
     };
     let server = MockServer::start().await;
     let mut models_mocks =
-        vec![mount_models_once_with_etag(&server, catalog(ORIGINAL), ETAG_1).await];
+        vec![mount_models_once_with_etag(&server, catalog(Some(ORIGINAL)), ETAG_1).await];
     let test = test_codex()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(MODEL)
@@ -283,24 +286,30 @@ async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
     core_test_support::submit_thread_settings(
         &test.codex,
         ThreadSettingsOverrides {
-            collaboration_mode: Some(collab_mode_for_model(
-                mode,
-                MODEL,
-                Some("legacy fallback instructions"),
-            )),
+            collaboration_mode: Some(collab_mode_for_model(mode, MODEL, Some(LEGACY))),
             ..Default::default()
         },
     )
     .await?;
 
-    let history = [ORIGINAL, UPDATED, ""];
+    // Refreshed default catalogs normalize nonblank prose. Missing and empty fields
+    // still change the active instructions without changing the mode or model.
+    // Explicit catalog text is covered by catalog_collaboration_messages_track_mode_changes.
+    let bundled = ResolvedModelMessages::bundled().collaboration_modes();
+    let native = match mode {
+        ModeKind::Default => bundled.default.text(),
+        ModeKind::Plan => bundled.plan.text(),
+    };
+    let history = [native, LEGACY, ""];
     let mut requests = Vec::new();
     for (turn, etag, refreshed_instructions, expected) in [
-        ("original", ETAG_2, Some(UPDATED), &history[..1]),
-        ("updated", ETAG_2, None, &history[..2]),
-        ("unchanged", ETAG_3, Some(""), &history[..2]),
-        ("cleared", ETAG_3, None, &history[..]),
-        ("still-cleared", ETAG_3, None, &history[..]),
+        ("original", ETAG_2, Some(Some(UPDATED)), &history[..1]),
+        ("normalized-update", ETAG_2, None, &history[..1]),
+        ("unchanged", ETAG_3, Some(None), &history[..1]),
+        ("fallback", ETAG_3, None, &history[..2]),
+        ("unchanged-fallback", ETAG_4, Some(Some("")), &history[..2]),
+        ("cleared", ETAG_4, None, &history[..]),
+        ("still-cleared", ETAG_4, None, &history[..]),
     ] {
         if let Some(instructions) = refreshed_instructions {
             models_mocks
@@ -318,11 +327,17 @@ async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
         let dev_texts = request.message_input_texts("developer");
         let collaboration_instructions = dev_texts
             .iter()
-            .flat_map(|text| text.split(COLLABORATION_MODE_OPEN_TAG).skip(1))
-            .map(|text| {
-                text.split_once(COLLABORATION_MODE_CLOSE_TAG)
-                    .expect("collaboration fragment should have a closing tag")
-                    .0
+            .flat_map(|text| {
+                let mut remaining = text.as_str();
+                std::iter::from_fn(move || {
+                    let (_, fragment) = remaining.split_once(COLLABORATION_MODE_OPEN_TAG)?;
+                    let (body, rest) = fragment
+                        .split_once(COLLABORATION_MODE_CLOSE_TAG)
+                        .expect("collaboration fragment should have a closing tag");
+                    // A body's prose can mention the opening tag. Consume the body first.
+                    remaining = rest;
+                    Some(body)
+                })
             })
             .collect::<Vec<_>>();
         assert_eq!(collaboration_instructions.as_slice(), expected, "{turn}");
@@ -334,7 +349,7 @@ async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
             .iter()
             .map(|mock| mock.requests().len())
             .collect::<Vec<_>>(),
-        [1, 1, 1]
+        [1, 1, 1, 1]
     );
     for pair in requests.windows(2) {
         let previous_input = pair[0].input();

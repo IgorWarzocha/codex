@@ -16,10 +16,10 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=521efdf62948f23f):
-    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=2bc40a28fd6ba0f0
+  tools (7; hash=22061976ca2f0e73):
+    - function/exec_command: Run a shell command. Returns output and a session ID while running.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=543a068b1a36a66f
     - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=05560b32cd644162
-    - function/request_user_input: Ask the user and wait for answers. Available only in Default or Plan mode.; args=[questions]; hash=a8708c435bcd01f1
+    - function/request_user_input: Ask the user and wait for answers. Available only in Default or Plan mode.; args=[questions]; hash=3fcb3e44f87ae2e6
     - custom/apply_patch: Edit files with a raw patch, not JSON; hash=91144c5cd42260e0
     - function/view_image: Inspect a local image; args=[detail, path]; hash=676dac6aca2e4211
     - tool_search: Search deferred tool metadata with BM25. Matches become callable on the next model call.  Enabled...; args=[limit, query]; hash=6ad240f1fa64a09d
@@ -50,8 +50,8 @@ Settings: relative to window 1
   reasoning: {"context":"all_turns","effort":"medium"}
   tools: <removed>
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=fd669cd0405d6cfa):
-        - namespace/functions; hash=169120e74837e92c
+00:additional_tools/developer (1; hash=660e54737e1cb95b):
+        - namespace/functions; hash=88f5e7ed4c423171
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -187,8 +187,8 @@ Settings: relative to window 2
 ## Window 4 (after request 6: input diverged at item 00)
 Settings: same as window 2
 -- request 7 (turn) --
-00:additional_tools/developer (1; hash=fd669cd0405d6cfa):
-        - namespace/functions; hash=169120e74837e92c
+00:additional_tools/developer (1; hash=660e54737e1cb95b):
+        - namespace/functions; hash=88f5e7ed4c423171
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -216,8 +216,8 @@ Settings: same as window 2
 ## Window 5 (after request 8: input diverged at item 04)
 Settings: same as window 2
 -- request 9 (turn) --
-00:additional_tools/developer (1; hash=fd669cd0405d6cfa):
-        - namespace/functions; hash=169120e74837e92c
+00:additional_tools/developer (1; hash=660e54737e1cb95b):
+        - namespace/functions; hash=88f5e7ed4c423171
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -340,8 +340,8 @@ Settings: same as window 3
 ## Window 7 (after request 10: input diverged at item 00)
 Settings: same as window 2
 -- request 11 (turn) --
-00:additional_tools/developer (1; hash=fd669cd0405d6cfa):
-        - namespace/functions; hash=169120e74837e92c
+00:additional_tools/developer (1; hash=660e54737e1cb95b):
+        - namespace/functions; hash=88f5e7ed4c423171
           - custom/exec
           - function/wait
           - function/request_user_input

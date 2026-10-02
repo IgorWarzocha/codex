@@ -16,18 +16,20 @@ async fn default_catalog_compacts_remote_workflow_but_explicit_catalogs_keep_it(
         .into_iter()
         .find(|model| model.slug == "gpt-6-luna")
         .expect("model with workflow messages");
-    model
-        .model_messages
-        .as_mut()
-        .unwrap()
-        .multi_agent
-        .as_mut()
-        .unwrap()
-        .mode = Some(MultiAgentModeMessages {
+    // Exercise remote normalization independently of the compact bundled catalog.
+    let messages = model.model_messages.as_mut().unwrap();
+    messages.persistent_instructions = Some("Remote persistence tutorial. ".repeat(64));
+    messages.collaboration_modes.as_mut().unwrap().default =
+        Some("Remote default-mode tutorial.".to_string());
+    let agents = messages.multi_agent.as_mut().unwrap();
+    agents.role.as_mut().unwrap().root = Some("Remote root-role tutorial.".to_string());
+    agents.mode = Some(MultiAgentModeMessages {
         explicit: Some("Remote explicit-delegation tutorial.".to_string()),
         proactive: Some("Remote proactive-delegation tutorial.".to_string()),
         hint_text: Some("Retain this specific mode hint.".to_string()),
     });
+    messages.token_budget.as_mut().unwrap().guidance_message =
+        "Remote context-budget tutorial. ".repeat(32);
     let catalog_messages = model.model_messages.as_ref().expect("catalog messages");
     let mut expected = catalog_messages.clone();
     codex_prompts::apply_default_catalog_workflow(&mut expected);

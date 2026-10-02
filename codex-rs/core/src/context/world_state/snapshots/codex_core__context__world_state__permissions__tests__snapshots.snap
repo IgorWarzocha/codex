@@ -20,10 +20,10 @@ Full access.
 Ask for approval.
 </permissions instructions>
 
-{"approved_command_prefixes":[],"instructions":"0ccde536dd8b4cfebb1df573f679dfe86b5718e3"} -> {"approved_command_prefixes":[],"instructions":"d96f228104cb899a8d3788b08e1d64b3bbb6ac84"} (role - developer)
+{"approved_command_prefixes":[],"instructions":"0ccde536dd8b4cfebb1df573f679dfe86b5718e3"} -> {"approved_command_prefixes":[],"instructions":"53865f585a511fbb2c51782dcaabc020f72d0d97"} (role - developer)
 <permissions instructions>
 Read only.
-Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+Approval policy: `never`. Do not set `sandbox_permissions`.
 </permissions instructions>
 
 Unknown -> {"approved_command_prefixes":[],"instructions":"0ccde536dd8b4cfebb1df573f679dfe86b5718e3"} (role - developer)

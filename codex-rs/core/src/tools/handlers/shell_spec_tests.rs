@@ -35,10 +35,7 @@ fn exec_command_tool_matches_expected_spec() {
     };
 
     let mut properties = BTreeMap::from([
-        (
-            "cmd".to_string(),
-            JsonSchema::string(Some("Shell command".to_string())),
-        ),
+        ("cmd".to_string(), JsonSchema::string(None)),
         (
             "workdir".to_string(),
             JsonSchema::string(Some("Cwd, defaults to turn cwd".to_string())),

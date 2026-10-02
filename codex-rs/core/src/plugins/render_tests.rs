@@ -59,11 +59,9 @@ fn explicit_plugin_instructions_search_available_apps_before_fallback() {
     assert_eq!(
         rendered,
         "Capabilities from the `Adobe` plugin:\n\
-         - For the user request that explicitly selected this plugin, and only for that request, \
-         if `tool_search` is available and an app from this plugin may help, search for its \
-         tools before falling back to unrelated or built-in tools.\n\
-         - Apps from this plugin available in this session: `Adobe`.\n\
-         Use these plugin-associated capabilities to help solve the task."
+         - For this request only, if `tool_search` is available and this plugin's apps \
+         may help, search their tools before using unrelated or built-in tools.\n\
+         - Apps from this plugin available in this session: `Adobe`."
     );
 }
 
@@ -89,7 +87,7 @@ fn explicit_plugin_instructions_are_bounded() {
     .expect("MCP capability should render");
 
     assert!(rendered.len() <= MAX_EXPLICIT_PLUGIN_INSTRUCTIONS_BYTES);
-    assert!(rendered.contains("only for that request"));
+    assert!(rendered.contains("For this request only"));
     assert!(rendered.contains("if `tool_search` is available"));
     assert!(rendered.contains("Skills from this plugin"));
     assert!(rendered.contains("`app-0`"));

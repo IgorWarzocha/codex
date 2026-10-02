@@ -20,8 +20,7 @@ pub fn create_list_mcp_resources_tool(messages: Option<&ToolMessage>) -> ToolSpe
 
     let tool = ResponsesApiTool {
         name: "list_mcp_resources".to_string(),
-        description: "List MCP context resources. Prefer available resources over web search"
-            .to_string(),
+        description: "List MCP context resources".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(properties, /*required*/ None, Some(false.into())),
@@ -46,9 +45,7 @@ pub fn create_list_mcp_resource_templates_tool(messages: Option<&ToolMessage>) -
 
     let tool = ResponsesApiTool {
         name: "list_mcp_resource_templates".to_string(),
-        description:
-            "List parameterized MCP context resources. Prefer available templates over web search"
-                .to_string(),
+        description: "List parameterized MCP context resources".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(properties, /*required*/ None, Some(false.into())),

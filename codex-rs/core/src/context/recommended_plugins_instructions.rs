@@ -2,8 +2,7 @@ use super::ContextualUserFragment;
 use codex_protocol::models::ContentItemKind;
 use codex_tools::DiscoverableTool;
 
-const RECOMMENDED_PLUGINS_INTRO: &str =
-    "Here is a list of plugins that are available but not installed.";
+const RECOMMENDED_PLUGINS_INTRO: &str = "Available plugins not installed:";
 const MAX_RECOMMENDED_PLUGINS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq)]

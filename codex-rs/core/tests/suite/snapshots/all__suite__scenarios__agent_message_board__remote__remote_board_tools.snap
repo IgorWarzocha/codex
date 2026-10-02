@@ -15,13 +15,13 @@ Scenario: Remote board tools and active-turn notifications share the existing se
 02:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
 03:message/developer:
-    You are `/root`, the primary agent. Own the result and coordinate delegated work. Agent messages arrive ... without starting a turn. `followup_task` starts one. [hash=5effd14f65494b2b]
-    Call collaboration tools directly using their declared recipient, not inside `functions.exec`. Agents sh... Coordinate edits and preserve other agents' changes. [hash=4faaf2d94910491f]
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
+    You are `/root`. Own the result and coordinate delegated work. Agent messages arrive in analysis. `send_...thout starting a turn. `followup_task` starts a turn. [hash=57c7402ce89cae25]
+    Call collaboration tools directly, not inside `functions.exec`. Agents share the filesystem and working ...ctory. Coordinate edits and preserve others' changes. [hash=65cb900ff14c98ef]
+    Prefer waits of minutes with `wait_agent` to busy polling.
 
     At most 4 agents may be active, including you.
 
-    Set `model` or `reasoning_effort` only when the user, AGENTS.md, or skill instructions explicitly reques...ed or `"all"` inherits the parent's model and effort. [hash=86b32396de89cd86]
+    Set `model` or `reasoning_effort` only when explicitly requested by the user, AGENTS.md, or skills. Over...ed or `"all"` inherits the parent's model and effort. [hash=75b60222a0f8595a]
 04:message/developer:
     <MULTI_AGENT_MODE>
 05:message/user:

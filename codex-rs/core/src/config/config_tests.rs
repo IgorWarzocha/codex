@@ -12279,7 +12279,7 @@ max_concurrent_threads_per_session = 17
             let hint = hint.expect("default usage hints should be present").body();
             assert!(hint.contains(concurrency_guidance));
             assert_eq!(
-                hint.contains("When calling `wait_agent`, prefer longer waits"),
+                hint.contains("Prefer waits of minutes with `wait_agent`"),
                 wait_agent_enabled
             );
         }
@@ -12369,7 +12369,10 @@ fn multi_agent_v2_exposes_model_overrides_by_default() {
             .expect("model-override guidance should extend the base usage hint");
         for required_fragment in [
             "inherits the parent's model and effort",
-            "`fork_turns`",
+            "only when explicitly requested by the user, AGENTS.md, or skills",
+            "`fork_turns: \"none\"`",
+            "positive integer string",
+            "Omitted or `\"all\"`",
             "`model`",
             "`reasoning_effort`",
         ] {
