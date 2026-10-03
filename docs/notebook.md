@@ -4,25 +4,21 @@ This fork uses a persistent JavaScript and TypeScript runtime by default for Cod
 
 ## Run
 
-Build the fork's CLI from `codex-rs`. On Linux or macOS:
+Use a [release package](https://github.com/IgorWarzocha/codex-lean/releases/latest).
+Notebook is already the default, so no runtime flag or particular model is needed.
+From the extracted package folder, on Linux or macOS:
 
 ```sh
-CARGO_PROFILE_DEV_DEBUG=0 cargo build -p codex-cli --bin codex
-./target/debug/codex \
-  -c 'features.code_mode.runtime="notebook"' \
-  -m gpt-6-luna -c 'model_reasoning_effort="low"' \
-  --sandbox danger-full-access
+./bin/codex --sandbox danger-full-access --cd /path/to/project
 ```
 
 On Windows, use PowerShell:
 
 ```powershell
-$env:CARGO_PROFILE_DEV_DEBUG = "0"
-cargo build -p codex-cli --bin codex
-.\target\debug\codex.exe -c 'features.code_mode.runtime="notebook"' -m gpt-6-luna -c 'model_reasoning_effort="low"' --sandbox danger-full-access
+.\bin\codex.exe --sandbox danger-full-access --cd C:\path\to\project
 ```
 
-Use this only in a trusted local working directory. Deno Jupyter always has full filesystem, network and subprocess access. Notebook refuses restricted permissions, managed network proxies and remote or multiple execution environments. The fork does not change your global Codex configuration.
+Replace the project path with your own. Use this only in a trusted local working directory. Deno Jupyter always has full filesystem, network and subprocess access. Notebook refuses restricted permissions, managed network proxies and remote or multiple execution environments. See the [quick start](../README.md#start) for sign-in and the [alternative setup](install.md#sandbox-and-api-key-setup) for sandboxed execution.
 
 Notebook uses Deno from `PATH` when available. Otherwise, its first authorized startup downloads the pinned Deno 2.9.7 release from `denoland/deno` into `$CODEX_HOME/notebook/runtime`. The download and extracted executable must match the bundled SHA-256 hashes and sizes before installation. The cached runtime is reused without another download. Nothing is installed globally. Linux, macOS and Windows assets are provided for x86-64 and ARM64.
 
@@ -44,10 +40,6 @@ notebook_plain_command_output = true
 Code Mode is enabled by default and uses Notebook when `runtime` is omitted. Full-access permissions must still be selected separately. Set `runtime = "v8"` for sandboxed execution. Set `features.code_mode.enabled = false` to disable feature-selected Code Mode. Explicit model catalog tool-mode overrides still apply.
 
 Omit `deno_program` to allow automatic installation. Set it to `"deno"` to require an existing executable on `PATH`, including for offline environments. Network and verification failures are reported rather than falling back to an unverified runtime. Ephemeral threads can share the managed runtime cache without persisting Notebook state.
-
-Keep the same Cargo profile and build flags between runs to reuse compiled dependencies. Incremental compilation is disabled for development and test builds to limit disk usage. Use `CARGO_BUILD_JOBS` to tune concurrency for your machine. Building tests for a previously unbuilt dependency feature set can compile additional artifacts even when the CLI is already built.
-
-The workspace has a distinct prerelease version. Keep a real version rather than upstream's `0.0.0` development placeholder: Codex sends its compiled version during model discovery and requests. In live validation, `0.0.0` rejected GPT-6 Luna while the versioned fork accepted it with the same account.
 
 ## Retained state
 
