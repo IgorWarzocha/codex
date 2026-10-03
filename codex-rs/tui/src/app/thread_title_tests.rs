@@ -222,7 +222,8 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
-            "model = \"gpt-5.2\"\n\
+            "context_strategy = \"compaction\"\n\
+             model = \"gpt-5.2\"\n\
              model_provider = \"{provider_id}\"\n\n\
              [model_providers.{provider_id}]\n\
              name = \"Thread title test\"\n\

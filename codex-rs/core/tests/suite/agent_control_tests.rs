@@ -218,6 +218,7 @@ async fn test_with_host_control(
     let thread_id = ThreadId::new();
     let controller = Arc::new(TestAgentControl::new(thread_id));
     let test = test_codex()
+        .with_direct_tools()
         .with_config(|config| {
             for feature in [
                 Feature::Collab,
@@ -301,6 +302,7 @@ async fn host_threads_preserve_lineage_settings_and_resume_routing() -> anyhow::
         (&child.thread, "/root/worker", "/root", "channel_name"),
     ] {
         let arguments = serde_json::json!({
+            "action": "post",
             (destination): "design",
             "text": "A shared decision.",
             "agents_to_notify": [recipient],
@@ -312,7 +314,7 @@ async fn host_threads_preserve_lineage_settings_and_resume_routing() -> anyhow::
                     responses::ev_function_call_with_namespace(
                         "post",
                         "collaboration",
-                        "post",
+                        "agent_board",
                         &arguments.to_string(),
                     ),
                     responses::ev_completed("post"),

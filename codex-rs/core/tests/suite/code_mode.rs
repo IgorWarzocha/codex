@@ -1111,6 +1111,7 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
             let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
             let environment_id = remote_aware_environment_id();
             let mut builder = test_codex()
+                .with_v8_runtime()
                 .with_model_info_override("gpt-5.4", move |model| {
                     model.supports_search_tool = supports_search_tool;
                 })
@@ -8378,7 +8379,7 @@ async fn code_mode_excludes_configured_nested_tool_namespaces() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_v8_runtime().with_config(|config| {
         config.update_plan_enabled = true;
         let _ = config.features.enable(Feature::CodeMode);
         config.code_mode.excluded_tool_namespaces = vec!["excluded".to_string()];

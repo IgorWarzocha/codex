@@ -772,6 +772,7 @@ async fn background_network_approval_uses_current_review_settings_and_original_e
         Feature::RequestPermissionsTool,
         Feature::StepModelSwitching,
     ])?
+    .with_direct_tools()
     .with_model("guardian-parent-a")
     .with_config(|config| {
         config.model_catalog = Some(guardian_parent_catalog());

@@ -19,6 +19,7 @@ async fn reloads_accept_a_provider_supplied_by_thread_overrides() -> anyhow::Res
     let initial = manager
         .load_for_cwd(
             Some(HashMap::from([
+                ("context_strategy".to_string(), json!("compaction")),
                 ("model_provider".to_string(), json!("thread-provider")),
                 (
                     "model_providers.thread-provider".to_string(),
@@ -76,7 +77,7 @@ async fn user_reload_promotes_plugin_and_feature_requirements_without_server_cha
     std::fs::write(&requirements_path, "")?;
     std::fs::write(
         home.path().join(codex_config::CONFIG_TOML_FILE),
-        "[features]\nenable_mcp_apps = true\n",
+        "context_strategy = 'compaction'\n[features]\nenable_mcp_apps = true\n",
     )?;
     let mut overrides = codex_config::LoaderOverrides::without_managed_config_for_tests();
     overrides.ignore_managed_requirements = false;
@@ -166,6 +167,11 @@ async fn mcp_refresh_rejects_superseded_app_server_policy(
     use codex_core::ConfigRefreshOutcome;
 
     let home = tempfile::tempdir()?;
+    // Policy refresh is exercised with API-key auth, without a Notes backend.
+    std::fs::write(
+        home.path().join(codex_config::CONFIG_TOML_FILE),
+        "context_strategy = 'compaction'\n",
+    )?;
     let policy = CloudConfigBundlePolicy::default();
     let mut snapshot = CloudConfigBundleSnapshot {
         bundle: Ok(None),

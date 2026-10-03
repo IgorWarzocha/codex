@@ -1669,6 +1669,8 @@ async fn cold_resume_with_removed_permission_profile_uses_configured_default() -
         };
 
         MockResponsesConfig::new(&server.uri())
+            .with_root_config("context_strategy = 'compaction'")
+            .with_extra_config("[features.code_mode]\nruntime = 'v8'")
             .with_root_config(&format!(
                 "default_permissions = \"{BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS}\""
             ))
@@ -1794,6 +1796,8 @@ async fn cold_resume_without_active_permission_profile_uses_current_config() -> 
     };
 
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_root_config(&format!(
             "default_permissions = \"{BUILT_IN_PERMISSION_PROFILE_WORKSPACE}\""
         ))
@@ -1932,6 +1936,8 @@ fn write_dev_permission_config(
     dev_extends: &str,
 ) -> std::io::Result<()> {
     MockResponsesConfig::new(server_uri)
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_root_config("default_permissions = \":danger-full-access\"")
         .with_extra_config(&format!("[permissions.dev]\nextends = \"{dev_extends}\""))
         .write(codex_home)
@@ -6296,7 +6302,10 @@ async fn thread_resume_accepts_deprecated_personality_override() -> Result<()> {
 }
 
 fn mock_responses_config(server_uri: &str) -> MockResponsesConfig {
-    MockResponsesConfig::new(server_uri).with_model("gpt-5.4")
+    MockResponsesConfig::new(server_uri)
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .with_model("gpt-5.4")
 }
 
 #[allow(dead_code)]

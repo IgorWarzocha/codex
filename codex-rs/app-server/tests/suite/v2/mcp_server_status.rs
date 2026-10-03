@@ -1487,6 +1487,8 @@ async fn start_slow_inventory_mcp_server(tool_name: &str) -> Result<(String, Joi
 
 fn mock_responses_config(server_uri: &str) -> MockResponsesConfig {
     MockResponsesConfig::new(server_uri)
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_root_config("compact_prompt = \"compact\"\nmodel_auto_compact_token_limit = 1024")
         .with_provider_config("supports_websockets = false")
 }

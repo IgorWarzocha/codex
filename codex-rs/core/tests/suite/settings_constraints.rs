@@ -144,6 +144,7 @@ async fn protected_model_settings_use_the_proposed_permissions(
         read_only: Some(PERMISSION_INSTRUCTIONS.to_string()),
     });
     let test = test_codex()
+        .with_direct_tools()
         .with_model(INITIAL_MODEL)
         .with_cloud_config_bundle(
             CloudConfigBundleFixture::loader_with_enterprise_requirement(

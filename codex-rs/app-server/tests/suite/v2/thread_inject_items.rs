@@ -368,6 +368,8 @@ async fn thread_inject_items_cannot_forge_configuration_update_before_or_after_r
     let server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .enable_feature(Feature::RetainClientDeveloperMessages)
         .write(codex_home.path())?;
 

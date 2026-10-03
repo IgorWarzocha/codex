@@ -2485,6 +2485,8 @@ async fn spawn_agent_allows_depth_up_to_configured_max_depth() {
 
     let mut config = (*turn.config).clone();
     config.agent_max_depth = DEFAULT_AGENT_MAX_DEPTH + 1;
+    // The depth test uses API-key authentication, not remote Notes storage.
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     turn.config = Arc::new(config);
     turn.session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id: session.thread_id,
@@ -2529,6 +2531,7 @@ async fn multi_agent_v2_spawn_agent_ignores_configured_max_depth() {
     let manager = thread_manager();
     let mut config = (*turn.config).clone();
     config.agent_max_depth = 1;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config
         .features
         .enable(Feature::MultiAgentV2)

@@ -774,6 +774,7 @@ async fn environment_mcp_policy_filters_runtime_config_and_model_tools(
         )?;
     }
     let fixture = test_codex()
+        .with_direct_tools()
         .with_home(codex_home)
         .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
         .with_config(move |config| {
@@ -2009,6 +2010,7 @@ async fn stdio_server_uses_configured_cwd_before_runtime_fallback() -> anyhow::R
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
 
     let fixture = test_codex()
+        .with_direct_tools()
         .with_workspace_setup(|cwd, fs| async move {
             let configured_cwd = cwd.join("mcp-configured-cwd");
             let configured_cwd_uri = PathUri::from_host_native_path(&configured_cwd)?;
@@ -2082,6 +2084,7 @@ async fn local_stdio_server_uses_runtime_fallback_cwd_when_config_omits_cwd() ->
     let relative_command = relative_server_path.to_string_lossy().into_owned();
 
     let fixture = test_codex()
+        .with_direct_tools()
         .with_config(move |config| {
             *expected_cwd_for_config
                 .lock()

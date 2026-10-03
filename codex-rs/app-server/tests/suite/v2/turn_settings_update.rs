@@ -574,6 +574,8 @@ fn mock_config(codex_home: &Path, server_uri: &str) -> Result<MockResponsesConfi
     )?;
     let catalog_path = serde_json::to_string(&catalog_path)?;
     Ok(MockResponsesConfig::new(server_uri)
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_model(MODEL_A)
         .with_root_config(&format!(
             "model_catalog_json = {catalog_path}\nmodel_reasoning_effort = \"low\"\nmodel_reasoning_summary = \"concise\""

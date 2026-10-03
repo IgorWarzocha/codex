@@ -951,6 +951,8 @@ async fn queue_app(responses: Vec<String>) -> Result<(TestAppServer, TempDir, Mo
 async fn queue_app_with_server(server: MockServer) -> Result<(TestAppServer, TempDir, MockServer)> {
     let codex_home = TempDir::new()?;
     let config = MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_approval_policy("on-request")
         .with_root_config(r#"approvals_reviewer = "user""#);
     config.write(codex_home.path())?;

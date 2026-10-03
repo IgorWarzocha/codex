@@ -436,7 +436,8 @@ enabled = false
         std::fs::create_dir_all(&bad_cwd)?;
         std::fs::write(
             temp_dir.path().join(codex_config::CONFIG_TOML_FILE),
-            "[features]\nsecret_auth_storage = false\n",
+            // These reload fixtures use API-key auth, not a remote Notes backend.
+            "context_strategy = 'compaction'\n[features]\nsecret_auth_storage = false\n",
         )?;
 
         let initial_config_manager =

@@ -63,7 +63,10 @@ pub(crate) async fn pending_subagent_scenario(
     let failed = matches!(case, PendingSpawnCase::Failure);
     let server = start_mock_server().await;
     let test = test_codex_with_wait_for_environment()
+        .with_direct_tools()
         .with_config(move |config| {
+            // This scenario explicitly coordinates the child through wait_agent.
+            config.multi_agent_v2.wait_agent_enabled = true;
             config.project_doc_max_bytes = 0;
             for (feature, enabled) in [
                 (Feature::DeferredExecutor, true),

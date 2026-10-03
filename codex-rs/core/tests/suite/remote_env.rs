@@ -505,7 +505,7 @@ async fn environment_permissions_follow_configuration_ownership() -> Result<()> 
     );
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_direct_tools().with_config(|config| {
         config
             .permissions
             .set_permission_profile(PermissionProfile::workspace_write())
@@ -720,6 +720,7 @@ async fn environment_permissions_follow_configuration_ownership() -> Result<()> 
 async fn executor_profile_roots_survive_settings_restore_and_turn_recording() -> Result<()> {
     let server = start_mock_server().await;
     let test = test_codex()
+        .with_direct_tools()
         .with_config(|config| {
             config.workspace_roots = vec![config.cwd.clone()];
             config
@@ -833,7 +834,7 @@ async fn step_world_state_gates_deferred_prompt_independently_of_host_config() -
             } else {
                 test_codex()
             };
-            let mut builder = builder.with_config(move |config| {
+            let mut builder = builder.with_direct_tools().with_config(move |config| {
                 if deferred_executor_enabled {
                     assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
                 }
@@ -908,7 +909,7 @@ async fn settings_update_does_not_retarget_active_turn_environment() -> Result<(
         ],
     )
     .await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_direct_tools().with_config(|config| {
         assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
         assert!(
             config
@@ -1049,7 +1050,7 @@ async fn active_environment_update_waits_for_a_configured_executor_to_connect(
         ],
     )
     .await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_direct_tools().with_config(|config| {
         config.project_doc_max_bytes = 0;
         assert!(config.features.disable(Feature::DeferredExecutor).is_ok());
         assert!(
@@ -1916,6 +1917,7 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
     extensions.thread_lifecycle_contributor(Arc::new(WaitForEnvironmentTestExtension));
     extensions.prompt_contributor(Arc::new(ReadyCapabilityRootsTestExtension::default()));
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_extensions(Arc::new(extensions.build()))
         .with_config(|config| {
             assert!(config.features.enable(Feature::DeferredExecutor).is_ok());

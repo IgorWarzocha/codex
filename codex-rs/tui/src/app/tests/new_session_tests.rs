@@ -152,9 +152,10 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
         let (mut app, _events, _ops) = make_test_app_with_channels().await;
         let server_home = tempdir()?;
         let client_home = tempdir()?;
+        // Server-default precedence is independent of authenticated backend notes storage.
         std::fs::write(
             server_home.path().join("work.config.toml"),
-            "model = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
+            "context_strategy = \"compaction\"\nmodel = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
         )?;
         std::fs::write(
             client_home.path().join("config.toml"),

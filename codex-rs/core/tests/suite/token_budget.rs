@@ -93,6 +93,17 @@ async fn omitted_context_strategy_starts_a_real_notes_session() -> Result<()> {
     // No ordinary test_codex fixture and no context_strategy assignment.
     let mut config = load_default_config_for_test(&home).await;
     assert_eq!(config.context_strategy, ContextStrategy::Notes);
+    assert!(config.features.enabled(Feature::CodeMode));
+    assert_eq!(
+        config.code_mode.runtime,
+        codex_features::CodeModeRuntime::Notebook
+    );
+    assert!(config.features.enabled(Feature::AgentMessageBoard));
+    // Keep every fork default, but satisfy Notebook's explicit access contract.
+    config
+        .permissions
+        .set_permission_profile(codex_protocol::models::PermissionProfile::Disabled)?;
+    config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
     config.model = Some("gpt-5.5".to_string());
     config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
     config.model_provider.base_url = Some(format!("{}/backend-api/codex", server.uri()));
@@ -107,7 +118,10 @@ async fn omitted_context_strategy_starts_a_real_notes_session() -> Result<()> {
         config.model_provider.clone(),
     );
     let thread = manager
-        .start_thread(StartThreadOptions::new(config))
+        .start_thread(StartThreadOptions {
+            environments: Some(vec![local(config.cwd.clone())]),
+            ..StartThreadOptions::new(config)
+        })
         .await?
         .thread;
     thread
@@ -119,6 +133,10 @@ async fn omitted_context_strategy_starts_a_real_notes_session() -> Result<()> {
     wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     let request = response.single_request();
     assert_eq!(token_budget_contexts(&request).len(), 1);
+    let names = tool_names(&request);
+    assert!(names.iter().any(|name| name == "exec"));
+    assert!(names.iter().any(|name| name == "notebook"));
+    assert!(!names.iter().any(|name| name == "exec_command"));
     assert!(
         tool_names(&request)
             .iter()

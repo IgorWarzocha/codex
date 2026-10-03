@@ -1587,6 +1587,11 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
 async fn local_mcp_respects_configured_servers_and_managed_requirements() -> Result<()> {
     for scenario in ["conflicting", "blocked", "mismatched", "allowed"] {
         let (mut app, _codex_home) = make_history_test_app().await?;
+        // MCP policy is exercised locally, without authenticated backend notes storage.
+        std::fs::write(
+            app.config.codex_home.join("config.toml"),
+            "context_strategy = \"compaction\"\n",
+        )?;
         if scenario == "conflicting" {
             let raw = serde_json::from_value::<codex_config::RawMcpServerConfig>(
                 serde_json::json!({"url": "http://127.0.0.1:1/mcp", "enabled": false}),

@@ -69,6 +69,7 @@ async fn initial_plugin_ids_use_turn_context_without_extra_settings_checkpoints(
 
     let server = responses::start_mock_server().await;
     let test = test_codex()
+        .with_direct_tools()
         .with_history_mode(history_mode)
         .build_with_auto_env(&server)
         .await?;
@@ -194,6 +195,7 @@ async fn settings_notifications_keep_their_commit_across_postcommit_work(
         gate: Mutex::new(Some((entered_tx, release_rx))),
     }));
     let test = test_codex()
+        .with_direct_tools()
         .with_model(INITIAL_MODEL)
         .with_extensions(Arc::new(extensions.build()))
         .build_with_auto_env(&server)
@@ -316,6 +318,7 @@ async fn compaction_checkpoints_settings_changed_during_its_model_request() -> R
     ])
     .await;
     let test = test_codex()
+        .with_direct_tools()
         .with_model(INITIAL_MODEL)
         .with_config(|config| {
             // Local compaction lets the SSE gate hold its response in flight.

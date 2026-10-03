@@ -505,6 +505,7 @@ async fn settings_update_during_active_turn_applies_to_next_turn_only() -> Resul
     )
     .await;
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_model_info_override("gpt-5.6-terra", configure_model_switching_fixture)
         .with_config(|config| {
             config

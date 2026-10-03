@@ -136,6 +136,12 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
                 config.model_provider = provider;
                 config.codex_self_exe = self_exe;
             })
+            // Select the API-key fixture contract after installing the config
+            // under test, without changing its project trust or MCP permissions.
+            .with_config(|config| {
+                config.context_strategy = codex_config::types::ContextStrategy::Compaction;
+            })
+            .with_direct_tools()
             .build_with_auto_env(&server)
             .await?;
         let startup = wait_for_event(&fixture.codex, |event| {

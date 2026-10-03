@@ -1923,6 +1923,12 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
     );
 
     let mut config = load_default_config_for_test(&codex_home).await;
+    // API-key routing is incompatible with remote Notes storage. This test
+    // exercises provider auth selection, with native tools and compaction.
+    config.context_strategy = codex_config::types::ContextStrategy::Compaction;
+    config.features.disable(Feature::CodeMode).unwrap();
+    config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
+    config.code_mode.disable_in_process_fallback = false;
     config.model_provider = model_provider;
 
     let auth = CodexAuth::from_auth_storage(
@@ -2177,6 +2183,7 @@ async fn omits_apps_guidance_when_configured_off() {
     .await;
 
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_auth(create_dummy_codex_auth())
         .with_config(move |config| {
             config
@@ -2330,7 +2337,7 @@ async fn omits_environment_context_when_configured_off() {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_direct_tools().with_config(|config| {
         config.include_environment_context = false;
     });
     let codex = builder
@@ -2418,6 +2425,7 @@ async fn includes_configured_effort_in_request() -> anyhow::Result<()> {
         )
         .await;
         let TestCodex { codex, .. } = test_codex()
+            .with_direct_tools()
             .with_model("gpt-5.4")
             .with_pre_build_hook(move |home| {
                 std::fs::write(
@@ -2550,6 +2558,7 @@ async fn configured_reasoning_summary_is_sent() -> anyhow::Result<()> {
     )
     .await;
     let TestCodex { codex, .. } = test_codex()
+        .with_direct_tools()
         .with_config(|config| {
             config.model_reasoning_summary = Some(ReasoningSummary::Concise);
             let _ = config
@@ -2615,6 +2624,7 @@ async fn model_without_summary_parameter_support_omits_configured_summary() -> a
     model.supports_reasoning_summary_parameter = false;
 
     let TestCodex { codex, .. } = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.5")
         .with_config(move |config| {
             config.model_catalog = Some(model_catalog);
@@ -2938,6 +2948,7 @@ async fn configured_verbosity_not_sent_for_models_without_support() -> anyhow::R
     )
     .await;
     let TestCodex { codex, .. } = test_codex()
+        .with_direct_tools()
         .with_model("test-no-verbosity")
         .with_config(|config| {
             config.model_verbosity = Some(Verbosity::High);
@@ -2979,6 +2990,7 @@ async fn configured_verbosity_is_sent() -> anyhow::Result<()> {
     )
     .await;
     let TestCodex { codex, .. } = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.5")
         .with_config(|config| {
             config.model_verbosity = Some(Verbosity::High);

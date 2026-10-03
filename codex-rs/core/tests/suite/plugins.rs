@@ -1253,9 +1253,16 @@ async fn sites_compatibility_guard_in_agent_turn(
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let response = mount_sse_once(
+    let response = mount_sse_sequence(
         &server,
-        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
+        vec![
+            sse(vec![
+                ev_response_created("resp1"),
+                core_test_support::responses::ev_custom_tool_call("sites-skills", "skills", "list"),
+                ev_completed("resp1"),
+            ]),
+            sse(vec![ev_response_created("resp2"), ev_completed("resp2")]),
+        ],
     )
     .await;
     Mock::given(method("GET"))
@@ -1319,6 +1326,7 @@ enabled = true
     let chatgpt_base_url = server.uri();
     let product_sku = product_sku.map(str::to_owned);
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_home(codex_home)
         .with_extensions(skills_extensions())
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
@@ -1346,14 +1354,17 @@ enabled = true
     .await;
 
     let requests = response.requests();
-    let developer_text = requests[0].message_input_texts("developer").join("\n");
+    assert_eq!(requests.len(), 2);
+    // Skill discovery is on demand, not a standing developer-prompt inventory.
+    let skills = requests[1].custom_tool_call_output("sites-skills");
+    let skill_text = skills["output"].as_str().expect("skills list output");
     assert_eq!(
         (
-            developer_text.contains("sites:remote-sites"),
-            developer_text.contains("sites:bundled-sites"),
+            skill_text.contains("sites:remote-sites"),
+            skill_text.contains("sites:bundled-sites"),
         ),
         expected_skills,
-        "unexpected Sites skills in developer prompt: {developer_text:?}"
+        "unexpected Sites skills in native catalog: {skill_text:?}"
     );
     Ok(())
 }

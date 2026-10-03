@@ -2702,7 +2702,9 @@ requires_openai_auth = {requires_openai_auth}
             std::fs::create_dir_all(&explicit_cwd)?;
             std::fs::write(
                 codex_home.join("config.toml"),
-                format!("[tui]\nresume_cwd = \"{configured_mode}\"\n"),
+                format!(
+                    "context_strategy = \"compaction\"\n[tui]\nresume_cwd = \"{configured_mode}\"\n"
+                ),
             )?;
             let cwd_override = has_explicit_cwd.then_some(explicit_cwd.as_path());
             let config = ConfigBuilder::default()

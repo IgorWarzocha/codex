@@ -53,6 +53,7 @@ async fn ordinary_settings_updates_keep_the_running_turn_snapshot() -> Result<()
     )
     .await;
     let test = test_codex()
+        .with_direct_tools()
         .with_model("snapshot-model-a")
         .with_config(|config| {
             // This regression exercises ordinary turn construction without

@@ -1821,7 +1821,10 @@ async fn external_agent_config_import_sends_completion_notification_after_pendin
 async fn external_agent_config_import_creates_session_rollouts() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("follow-up answer").await;
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .write(codex_home.path())?;
     let project_root = codex_home.path().join("repo");
     let source_created_at_text = "2024-01-02T03:04:05Z";
     let source_updated_at_text = "2024-03-01T04:05:06Z";
@@ -2504,6 +2507,8 @@ async fn external_agent_config_import_compacts_huge_session_before_first_follow_
 
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_root_config(
             "compact_prompt = \"Summarize the conversation.\"\nmodel_auto_compact_token_limit = 200",
         )

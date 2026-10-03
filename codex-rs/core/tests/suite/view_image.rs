@@ -653,7 +653,7 @@ async fn view_image_tool_applies_local_sandbox_read_denies() -> anyhow::Result<(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex();
+    let mut builder = test_codex().with_direct_tools();
     let test = builder.build(&server).await?;
     let rel_path = "denied.png";
     let denied_path = test.config.cwd.join(rel_path);
@@ -935,9 +935,12 @@ async fn view_image_unified_budget_hides_detail_but_accepts_legacy_hints() -> an
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.5").with_config(|config| {
-        let _ = config.features.enable(Feature::UnifiedImageBudget);
-    });
+    let mut builder = test_codex()
+        .with_direct_tools()
+        .with_model("gpt-5.5")
+        .with_config(|config| {
+            let _ = config.features.enable(Feature::UnifiedImageBudget);
+        });
     let test = builder.build_with_auto_env(&server).await?;
     let rel_path = "assets/unified-example.png";
     write_workspace_png(

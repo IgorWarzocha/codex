@@ -1,10 +1,15 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ThreadLoadedListResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use core_test_support::load_default_config_for_test;
 use core_test_support::responses;
@@ -30,11 +35,57 @@ const THREAD_HINT: &str =
     "Recent notes (up to 5, most-recent first):\n- /root/notes/latest.md (2 lines, 14 UTF-8 bytes)";
 const BRIDGE_HINT: &str = "unstructured notes/thread_hint fixture result";
 
+#[tokio::test]
+async fn context_strategy_notes_default_rejects_api_key_auth_without_loading_a_thread() -> Result<()>
+{
+    let server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .with_model_provider("openai-custom")
+        .with_provider_name("OpenAI")
+        .with_provider_base_url(&format!("{}/backend-api/codex", server.uri()))
+        .with_provider_config("requires_openai_auth = true\nsupports_websockets = false")
+        .write(codex_home.path())?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", Some("test-api-key"))])
+        .build_initialized()
+        .await?;
+    let id = app
+        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+        .await?;
+    let error = app
+        .read_stream_until_error_message(RequestId::Integer(id))
+        .await?;
+    assert!(
+        error
+            .error
+            .message
+            .contains("context_strategy = 'notes' requires remote notes storage")
+    );
+    let loaded: ThreadLoadedListResponse = app
+        .request(|request_id| ClientRequest::ThreadLoadedList {
+            request_id,
+            params: Default::default(),
+        })
+        .await?;
+    assert!(loaded.data.is_empty());
+    app.start_thread(ThreadStartParams {
+        config: Some(HashMap::from([(
+            "context_strategy".to_string(),
+            json!("compaction"),
+        )])),
+        ..Default::default()
+    })
+    .await?;
+    Ok(())
+}
+
 #[test_case(true, true, 200, THREAD_HINT; "native_hint")]
 #[test_case(true, false, 200, THREAD_HINT; "native_hint_without_experimental_capability")]
 #[test_case(true, true, 200, ""; "no_notes")]
 #[test_case(true, true, 503, THREAD_HINT; "native_failure_does_not_use_bridge")]
-#[test_case(false, true, 200, THREAD_HINT; "bridge_hint")]
+#[test_case(false, true, 200, THREAD_HINT; "legacy_bridge_setting_cannot_disable_notes")]
 #[tokio::test]
 async fn app_server_uses_configured_notes_backend_for_context_window_hints(
     use_history_notes_extension: bool,
@@ -44,13 +95,23 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
 ) -> Result<()> {
     let server = responses::start_mock_server().await;
     let backend = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_once(
+    let response_mock = responses::mount_sse_sequence(
         &server,
-        responses::sse(vec![
-            responses::ev_response_created("resp-1"),
-            responses::ev_assistant_message("msg-1", "done"),
-            responses::ev_completed("resp-1"),
-        ]),
+        vec![
+            responses::sse(vec![
+                responses::ev_response_created("resp-1"),
+                responses::ev_custom_tool_call(
+                    "notes-catalog",
+                    "exec",
+                    "text(ALL_TOOLS.map(tool => tool.name));",
+                ),
+                responses::ev_completed("resp-1"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("msg-1", "done"),
+                responses::ev_completed("resp-2"),
+            ]),
+        ],
     )
     .await;
     // HTTP MCP stays on the app-server host, including with a remote executor.
@@ -124,6 +185,13 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
         serde_json::to_vec(&json!({"models": [model]}))?,
     )?;
     MockResponsesConfig::new(&server.uri())
+        // Exercise the actual Notes and Notebook defaults with their required
+        // backend authentication and unsandboxed runtime, rather than opting out.
+        .with_sandbox_mode("danger-full-access")
+        .with_extra_config(&format!(
+            "[features.code_mode]\ndeno_program = {}",
+            serde_json::to_string(&std::env::var("DENO_PROGRAM").unwrap_or_else(|_| "deno".into()))?
+        ))
         .with_root_config(&format!("chatgpt_base_url = \"{}\"", backend.uri()))
         .with_root_config(&format!(
             "model_catalog_json = {}",
@@ -145,11 +213,17 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
         .with_env_overrides(&[("OPENAI_API_KEY", None)])
         .build_initialized()
         .await?;
+    // The Notebook kernel and selected local executor must begin in the same
+    // directory. This fixture selects an automatic environment explicitly.
+    let cwd = app_server.auto_env_params()?.cwd;
     let thread = app_server
-        .start_thread(ThreadStartParams::default())
+        .start_thread(ThreadStartParams {
+            cwd: Some(cwd.to_string()),
+            ..Default::default()
+        })
         .await?
         .thread;
-    timeout(
+    let completed = timeout(
         Duration::from_secs(10),
         app_server.start_turn_and_wait_for_completion(TurnStartParams {
             thread_id: thread.id.clone(),
@@ -161,26 +235,53 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
         }),
     )
     .await??;
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
 
-    let request = response_mock.single_request();
-    if use_history_notes_extension {
-        for (namespace, tool_name) in [
-            ("history", "list_windows"),
-            ("history", "list_items"),
-            ("history", "read_item"),
-            ("history", "search_contents"),
-            ("notes", "list_files_by_prefix"),
-            ("notes", "read_file"),
-            ("notes", "search_contents"),
-            ("notes", "append_to_file"),
-            ("notes", "write_file"),
-        ] {
-            assert!(
-                request.tool_by_name(namespace, tool_name).is_some(),
-                "app-server should expose {namespace}.{tool_name} to the model"
-            );
-        }
+    let model_requests = response_mock.requests();
+    assert_eq!(model_requests.len(), 2);
+    let request = &model_requests[0];
+    let (catalog, _) = model_requests[1]
+        .custom_tool_call_output_content_and_success("notes-catalog")
+        .expect("Notebook catalog output");
+    let catalog = catalog.expect("Notebook must execute and return its nested tool catalog");
+    assert!(
+        request
+            .instructions_text()
+            .contains("Persistent Deno/TypeScript notebook")
+    );
+    assert!(catalog.contains("collaboration__agent_board"));
+    // MAv2 coordination is direct-model-only by default. The shared board is
+    // callable from Notebook, but spawning and messaging must stay outside exec.
+    for name in ["spawn_agent", "send_message", "followup_task"] {
+        assert!(request.tool_by_name("collaboration", name).is_some());
+        assert!(!catalog.contains(&format!("collaboration__{name}")));
     }
+    assert!(!catalog.contains("collaboration__wait_agent"));
+    assert!(
+        request
+            .tool_by_name("collaboration", "wait_agent")
+            .is_none()
+    );
+    // Remote Notes capability is selected by the authenticated backend, not the
+    // legacy use_history_notes_extension preference. Notes continuity requires it.
+    for (namespace, tool_name) in [
+        ("history", "list_windows"),
+        ("history", "list_items"),
+        ("history", "read_item"),
+        ("history", "search_contents"),
+        ("notes", "list_files_by_prefix"),
+        ("notes", "read_file"),
+        ("notes", "search_contents"),
+        ("notes", "append_to_file"),
+        ("notes", "write_file"),
+    ] {
+        assert!(
+            catalog.contains(&format!("{namespace}__{tool_name}")),
+            "Notebook should expose {namespace}.{tool_name} through exec"
+        );
+        assert!(request.tool_by_name(namespace, tool_name).is_none());
+    }
+    assert!(!catalog.contains("notes__thread_hint"));
     assert!(request.tool_by_name("notes", "thread_hint").is_none());
 
     let input = request.input();
@@ -188,13 +289,13 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
         .message_input_texts("developer")
         .iter()
         .any(|text| text.contains(BRIDGE_HINT));
-    assert_eq!(bridge_hint_present, !use_history_notes_extension);
+    assert!(!bridge_hint_present);
     let requests = server.received_requests().await.expect("recorded requests");
     let native_requests = requests
         .iter()
         .filter(|request| request.url.path() == "/backend-api/codex/alpha/notes/v2/thread_hint")
         .count();
-    assert_eq!(native_requests, usize::from(use_history_notes_extension));
+    assert_eq!(native_requests, 1);
     let bridge_calls = requests
         .iter()
         .filter(|request| request.url.path() == "/mcp")
@@ -204,7 +305,7 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
                 .is_ok_and(|body| body["method"] == "tools/call")
         })
         .count();
-    assert_eq!(bridge_calls, usize::from(!use_history_notes_extension));
+    assert_eq!(bridge_calls, 0);
     let developer_messages = request.message_input_texts("developer");
     let context_window = developer_messages
         .iter()
@@ -219,7 +320,7 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
         .0;
     assert_eq!(
         window_body.contains(THREAD_HINT),
-        use_history_notes_extension && hint_status == 200 && !hint_text.is_empty(),
+        hint_status == 200 && !hint_text.is_empty(),
     );
     assert!(!input.iter().any(|item| {
         item["type"] == "function_call"
@@ -227,21 +328,19 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
             && item["name"] == "thread_hint"
     }));
 
-    if use_history_notes_extension {
-        let event = wait_for_matching_analytics_event(&backend, DEFAULT_READ_TIMEOUT, |event| {
-            event["event_type"] == "codex_thread_hint_status"
-                && event["event_params"]["thread_id"] == thread.id
-        })
-        .await?;
-        assert_eq!(
-            event["event_params"]["status"],
-            if hint_status == 200 {
-                "succeeded"
-            } else {
-                "failed"
-            },
-        );
-    }
+    let event = wait_for_matching_analytics_event(&backend, DEFAULT_READ_TIMEOUT, |event| {
+        event["event_type"] == "codex_thread_hint_status"
+            && event["event_params"]["thread_id"] == thread.id
+    })
+    .await?;
+    assert_eq!(
+        event["event_params"]["status"],
+        if hint_status == 200 {
+            "succeeded"
+        } else {
+            "failed"
+        },
+    );
 
     Ok(())
 }
@@ -359,6 +458,9 @@ async fn history_notes_and_async_message_emit_control_tool_analytics() -> Result
         .with_extra_config(
             "[features.token_budget]\nenabled = true\nuse_history_notes_extension = true",
         )
+        // This test sends direct function calls and verifies their individual
+        // item IDs and exact control-tool counts. Notebook coverage lives above.
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .write(codex_home.path())?;
     mount_analytics_capture(&backend, codex_home.path()).await?;
 
@@ -382,6 +484,8 @@ async fn history_notes_and_async_message_emit_control_tool_analytics() -> Result
             ..Default::default()
         })
         .await?;
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
+    assert_eq!(response_mock.requests().len(), calls.len() + 1);
 
     let request = &response_mock.requests()[0];
     for (namespace, name, field) in [

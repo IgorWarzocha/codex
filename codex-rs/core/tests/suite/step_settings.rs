@@ -147,26 +147,31 @@ fn step_settings_models() -> Vec<ModelInfo> {
 }
 
 fn step_settings_test() -> TestCodexBuilder {
-    test_codex().with_model(MODEL_A).with_config(move |config| {
-        for feature in [
-            Feature::StepModelSwitching,
-            Feature::DefaultModeRequestUserInput,
-            Feature::FastMode,
-        ] {
-            config
-                .features
-                .enable(feature)
-                .expect("test config should allow feature update");
-        }
-        config.model_catalog = Some(ModelsResponse {
-            models: step_settings_models(),
-        });
-        config.model_reasoning_effort = Some(ReasoningEffort::Low);
-        config.model_reasoning_summary = Some(ReasoningSummary::Concise);
-        config.service_tier = None;
-        config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-        config.approvals_reviewer = ApprovalsReviewer::User;
-    })
+    // These fixtures switch models and environments while dispatching native tools.
+    // Code Mode cases opt in through feature or catalog metadata and use sandboxed V8.
+    test_codex()
+        .with_direct_tools()
+        .with_model(MODEL_A)
+        .with_config(move |config| {
+            for feature in [
+                Feature::StepModelSwitching,
+                Feature::DefaultModeRequestUserInput,
+                Feature::FastMode,
+            ] {
+                config
+                    .features
+                    .enable(feature)
+                    .expect("test config should allow feature update");
+            }
+            config.model_catalog = Some(ModelsResponse {
+                models: step_settings_models(),
+            });
+            config.model_reasoning_effort = Some(ReasoningEffort::Low);
+            config.model_reasoning_summary = Some(ReasoningSummary::Concise);
+            config.service_tier = None;
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config.approvals_reviewer = ApprovalsReviewer::User;
+        })
 }
 
 fn direct_tool_settings_test() -> TestCodexBuilder {
@@ -178,6 +183,26 @@ fn direct_tool_settings_test() -> TestCodexBuilder {
                 (model.slug != MODEL_A).then_some(ApplyPatchToolType::Freeform);
         }
     })
+}
+
+fn notes_settings_test() -> TestCodexBuilder {
+    step_settings_test()
+        .with_context_strategy(codex_config::types::ContextStrategy::Notes)
+        .with_auth(
+            CodexAuth::from_external_chatgpt_tokens(
+                "header.e30.signature",
+                "account-123",
+                Some("plus"),
+            )
+            .expect("test backend authentication"),
+        )
+        .with_config(|config| {
+            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            config.model_provider.base_url = Some(format!(
+                "{}/backend-api/codex",
+                base_url.strip_suffix("/v1").unwrap()
+            ));
+        })
 }
 
 fn paused_response(response_id: &str, call_id: &str) -> String {
@@ -669,7 +694,8 @@ async fn custom_tool_output_replay_preserves_originating_budget() -> Result<()> 
     test.submit_text_turn("collect diagnostics").await?;
     let live_output = responses.requests()[1].custom_tool_call_output("call-custom");
     let text = "diagnostic line\n".repeat(500);
-    let live_text = live_output["output"][1]["text"]
+    // A text-only custom result is serialized as a string without a status wrapper.
+    let live_text = live_output["output"]
         .as_str()
         .expect("bounded custom output");
     assert!(live_text.len() < text.len());
@@ -701,10 +727,7 @@ async fn custom_tool_output_replay_preserves_originating_budget() -> Result<()> 
             .and_then(|metadata| metadata.history_truncation_token_limit),
         Some(480)
     );
-    assert_eq!(
-        serde_json::to_value(&saved.item)?["output"][1]["text"],
-        text
-    );
+    assert_eq!(serde_json::to_value(&saved.item)?["output"], text);
 
     let mut replay_config = test.config.clone();
     replay_config.model = Some(MODEL_A.to_string());
@@ -948,7 +971,7 @@ async fn new_context_after_model_switch_uses_captured_extension_window() -> Resu
     .await;
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.prompt_contributor(Arc::new(WindowContributor));
-    let test = step_settings_test()
+    let test = notes_settings_test()
         .with_extensions(Arc::new(extensions.build()))
         .with_config(|config| {
             config.features.enable(Feature::TokenBudget).unwrap();
@@ -1044,7 +1067,7 @@ async fn active_model_switch_updates_core_context_from_captured_settings(
         ],
     )
     .await;
-    let test = step_settings_test()
+    let test = notes_settings_test()
         .with_pre_build_hook(move |home| {
             let config = if explicit_default_template {
                 let default_template = TokenBudgetConfig::default().reminder_message_template;
@@ -1336,7 +1359,7 @@ async fn active_model_switch_updates_multi_agent_policy_from_captured_effort(
     assert_eq!(requests[0].body_json()["model"], MODEL_A);
     assert_eq!(requests[1].body_json()["model"], MODEL_B);
     assert_eq!(requests[1].body_json()["reasoning"]["effort"], "xhigh");
-    let proactive_text = "Proactive multi-agent delegation is active.";
+    let proactive_text = "Explicit-request-only guidance replaced until a developer mode change. Parallel delegation when faster or higher quality. User requests override this hint";
     assert!(!requests[0].body_contains_text(proactive_text));
     assert!(requests[1].body_contains_text(proactive_text));
 
@@ -2301,8 +2324,28 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
     let response_mock = mount_sse_sequence(
         &server,
         vec![
-            paused_response("resp-1", "pause-before-async-message-model-change"),
-            sse_completed("resp-2"),
+            sse(vec![
+                ev_response_created("resp-1"),
+                core_test_support::responses::ev_function_call_with_namespace(
+                    "help-a",
+                    "collaboration",
+                    "agent_board",
+                    r#"{"action":"help","topic":"post"}"#,
+                ),
+                pause_call("pause-before-async-message-model-change"),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                core_test_support::responses::ev_function_call_with_namespace(
+                    "help-b",
+                    "collaboration",
+                    "agent_board",
+                    r#"{"action":"help","topic":"post"}"#,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse_completed("resp-3"),
         ],
     )
     .await;
@@ -2317,6 +2360,8 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                 .enable(Feature::AgentMessageBoard)
                 .expect("test config should allow channel tools");
             config.ephemeral = false;
+            // This catalog case deliberately includes wait_agent's model-owned contract.
+            config.multi_agent_v2.wait_agent_enabled = true;
             config.multi_agent_v2.expose_spawn_agent_model_overrides = false;
             config.multi_agent_v2.non_code_mode_only = true;
             config.code_mode.disable_in_process_fallback = true;
@@ -2395,6 +2440,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
         response_mock
             .requests()
             .iter()
+            .take(2)
             .map(|request| {
                 let body = request.body_json();
                 let tool = |name: &str| {
@@ -2408,14 +2454,15 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                         "parameters": tool["parameters"],
                     }))
                 }).into_iter().collect::<serde_json::Map<String, Value>>();
-                let channel_post = namespace_child_tool(&body, "collaboration", "post").expect("post");
+                let board = namespace_child_tool(&body, "collaboration", "agent_board").expect("agent_board");
+                assert!(namespace_child_tool(&body, "collaboration", "post").is_none());
                 json!({
                     "model": body["model"],
                     "async_description": tool("request_user_input_async")["description"],
                     "async_parameters": tool("request_user_input_async")["parameters"],
                     "multi_agent_messages": multi_agent_messages,
-                    "channel_post_description": channel_post["description"].as_str().expect("post description").lines().next(),
-                    "channel_post_required": channel_post["parameters"]["required"],
+                    "board_description": board["description"],
+                    "board_required": board["parameters"]["required"],
                     "exec_description": tool("exec")["description"],
                     "wait_description": tool("wait")["description"],
                     "wait_parameters": tool("wait")["parameters"],
@@ -2434,8 +2481,8 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                     })))
                     .into_iter()
                     .collect::<serde_json::Map<String, Value>>(),
-                "channel_post_description": format!("post description for {model}."),
-                "channel_post_required": ["text"],
+                "board_description": "Shared agent discussions. action=help lists actions; add topic for arguments\n\nexec tool declaration:\n```ts\ndeclare const tools: { collaboration__agent_board(args: { action: string; [key: string]: unknown; }): Promise<unknown>; };\n```\n\nInput schema: {\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"}},\"required\":[\"action\"],\"additionalProperties\":true}",
+                "board_required": ["action"],
                 "exec_description": format!("Exec description for {model}."),
                 "wait_description": format!("Wait description for {model}."),
                 "wait_parameters": wait_parameters(model),
@@ -2443,6 +2490,26 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
             .to_vec(),
     );
 
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 3);
+    // Board action descriptions follow the captured step, while their owning
+    // schema stays authoritative rather than accepting a catalog replacement.
+    for (request, call_id, model) in [
+        (&requests[1], "help-a", MODEL_A),
+        (&requests[2], "help-b", MODEL_B),
+    ] {
+        let help: Value = serde_json::from_str(
+            &request
+                .function_call_output_text(call_id)
+                .expect("board post help"),
+        )?;
+        assert_eq!(
+            help["description"],
+            format!("post description for {model}.")
+        );
+        assert_eq!(help["parameters"]["required"], json!(["action", "text"]));
+        assert_ne!(help["parameters"], parameters(model));
+    }
     Ok(())
 }
 

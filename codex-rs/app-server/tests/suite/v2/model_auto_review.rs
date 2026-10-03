@@ -58,7 +58,11 @@ async fn app_server(
     requirements: &str,
 ) -> Result<(TempDir, TestAppServer)> {
     let home = TempDir::new()?;
-    config.write(home.path())?;
+    // Reviewer policy fixtures run against an API-key Responses mock.
+    config
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .write(home.path())?;
     std::fs::write(home.path().join("requirements.toml"), requirements)?;
     let server = TestAppServer::builder()
         .with_codex_home(home.path())
@@ -313,6 +317,8 @@ async fn thread_resume_and_fork_upgrade_legacy_protected_model_settings() -> Res
         .await?;
     drop(legacy);
     MockResponsesConfig::new(&responses.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_model("ordinary-model")
         .with_approval_policy("on-request")
         .write(home.path())?;

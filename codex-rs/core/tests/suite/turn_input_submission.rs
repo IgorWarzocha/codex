@@ -914,6 +914,7 @@ async fn turn_input_submission_applies_thread_settings_only_after_accepted_input
     ])
     .await;
     let test = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.4")
         .with_config(|config| {
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);

@@ -972,6 +972,7 @@ async fn astra_settings_release_check_with_direct_and_code_mode_tools() -> Resul
     let rmcp_server_bin = stdio_server_bin()?;
     let home = Arc::new(TempDir::new()?);
     let mut builder = test_codex()
+        .with_v8_runtime()
         .with_model("gpt-6-astra")
         .with_home(home)
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())

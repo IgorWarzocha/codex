@@ -99,7 +99,8 @@ async fn thread_start_provider_model_fallback_applies_to_configured_model() -> R
     let codex_home = TempDir::new()?;
     std::fs::write(
         codex_home.path().join("config.toml"),
-        r#"model_provider = "amazon-bedrock"
+        r#"context_strategy = "compaction"
+model_provider = "amazon-bedrock"
 model = "gpt-5.4-mini"
 "#,
     )?;
@@ -1894,6 +1895,7 @@ fn create_config_toml(
         format!(
             r#"
 model = "mock-model"
+context_strategy = "compaction"
 {top_level_config}
 
 model_provider = "mock_provider"

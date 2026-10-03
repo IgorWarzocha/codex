@@ -17,7 +17,7 @@ async fn ignored_config_fields_emit_startup_and_project_warnings() -> Result<()>
     let home = TempDir::new()?;
     std::fs::write(
         home.path().join("config.toml"),
-        "network_proxy = { nested = 'private_value' }",
+        "context_strategy = 'compaction'\nnetwork_proxy = { nested = 'private_value' }",
     )?;
     std::fs::write(
         home.path().join("requirements.toml"),

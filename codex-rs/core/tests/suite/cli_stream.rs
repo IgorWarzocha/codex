@@ -261,7 +261,8 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let repo_root = repo_root();
+    // Routing is independent of the checkout used to compile test support.
+    let workspace = TempDir::new().unwrap();
     let sse = responses::sse(vec![
         responses::ev_response_created("resp-1"),
         responses::ev_assistant_message("msg-1", "hi"),
@@ -275,15 +276,25 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
     cmd.arg("exec")
         .arg("--skip-git-repo-check")
         .arg("-c")
+        .arg("context_strategy=\"compaction\"")
+        .arg("-c")
+        .arg("features.code_mode.enabled=false")
+        .arg("-c")
+        .arg("features.code_mode.runtime=\"v8\"")
+        .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
         .arg("-C")
-        .arg(&repo_root)
+        .arg(workspace.path())
         .arg("hello?");
     cmd.env("CODEX_HOME", home.path())
         .env("OPENAI_API_KEY", "dummy");
 
     let output = run_cli_command(&mut cmd).unwrap();
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "CLI {cmd:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let request = resp_mock.single_request();
     assert_eq!(request.path(), "/v1/responses");

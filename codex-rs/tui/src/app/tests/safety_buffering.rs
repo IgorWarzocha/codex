@@ -523,7 +523,8 @@ async fn run_safety_retry(
 
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
-    // Keep text-only retry fixtures independent of the optional Code Mode host.
+    // The direct model selector below applies in V8 mode. Notebook intentionally
+    // overrides it and requires full access even before text-only model requests.
     let mut model_catalog = codex_models_manager::bundled_models_response()?;
     for model in model_catalog
         .models
@@ -544,6 +545,7 @@ async fn run_safety_retry(
         codex_home.path().join("config.toml"),
         format!(
             r#"
+context_strategy = "compaction"
 model = "{CURRENT_MODEL}"
 model_provider = "{MODEL_PROVIDER_ID}"
 model_catalog_json = {model_catalog_path}
@@ -557,6 +559,9 @@ stream_max_retries = 0
 
 [features]
 goals = true
+
+[features.code_mode]
+runtime = "v8"
 "#,
             server.uri()
         ),

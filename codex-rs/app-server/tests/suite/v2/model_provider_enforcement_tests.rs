@@ -263,7 +263,10 @@ base_url = "{}/v1"
 async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
     let provider = MockServer::start().await;
     let home = TempDir::new()?;
-    MockResponsesConfig::new(&provider.uri()).write(home.path())?;
+    MockResponsesConfig::new(&provider.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .write(home.path())?;
     let mut server = TestAppServer::builder()
         .with_codex_home(home.path())
         .build_initialized()

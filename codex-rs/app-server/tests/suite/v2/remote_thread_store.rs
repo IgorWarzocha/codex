@@ -652,6 +652,8 @@ fn create_config_toml_with_thread_store(
     store_id: &str,
 ) -> std::io::Result<()> {
     MockResponsesConfig::new(server_uri)
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_root_config(&format!(
             "experimental_thread_store = {{ type = \"in_memory\", id = \"{store_id}\" }}"
         ))

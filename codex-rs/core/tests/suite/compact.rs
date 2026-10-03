@@ -2515,6 +2515,7 @@ async fn previous_model_compaction_resolves_selected_settings() -> Result<()> {
     .await;
     let model_provider = non_openai_model_provider(&server);
     let test = test_codex()
+        .with_direct_tools()
         .with_model_info_override("gpt-5.4", |model| {
             model.comp_hash = Some("hash-a".to_string());
             model.default_reasoning_summary = ReasoningSummary::Detailed;

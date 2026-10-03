@@ -3069,6 +3069,12 @@ fn update_memory_settings_updates_current_thread_memory_mode() -> Result<()> {
         // Seed the previous setting so this test exercises the thread-mode update path.
         app.config.memories.generate_memories = true;
 
+        // This local thread-mode fixture has no backend notes authentication.
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            "context_strategy = \"compaction\"\n",
+        )?;
+
         let mut app_server =
             Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
         let started = app_server.start_thread(&app.config).await?;
@@ -7901,6 +7907,11 @@ async fn in_app_resume_session_cwd_without_metadata_is_non_fatal() -> Result<()>
 async fn remote_resume_keeps_server_only_cwd_out_of_local_config() -> Result<()> {
     // Keep the large setup and resume futures off the Windows test stack.
     let (mut app, _app_event_rx, _op_rx) = Box::pin(make_test_app_with_channels()).await;
+    // The embedded stand-in for the remote server has no backend notes storage.
+    std::fs::write(
+        app.config.codex_home.join("config.toml"),
+        "context_strategy = \"compaction\"\n",
+    )?;
     let local_cwd = app.config.cwd.to_path_buf();
     let local_workspace_roots = Box::pin(app.rebuild_config_for_cwd(local_cwd.clone()))
         .await?
@@ -8012,7 +8023,9 @@ async fn in_app_resume_uses_configured_or_explicit_cwd() -> Result<()> {
     ] {
         std::fs::write(
             codex_home.join("config.toml"),
-            format!("[tui]\nresume_cwd = \"{configured_mode}\"\n"),
+            format!(
+                "context_strategy = \"compaction\"\n[tui]\nresume_cwd = \"{configured_mode}\"\n"
+            ),
         )?;
         for cwd in [
             &launch_cwd,
@@ -9101,6 +9114,12 @@ async fn interrupt_without_active_turn_is_treated_as_handled() {
 async fn override_turn_context_sends_thread_settings_update() {
     Box::pin(async {
         let mut app = make_test_app().await;
+        // Settings transport is exercised locally, without backend notes storage.
+        std::fs::write(
+            app.config.codex_home.join("config.toml"),
+            "context_strategy = \"compaction\"\n",
+        )
+        .expect("write local context strategy");
         let mut app_server =
             crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref())
                 .await

@@ -1409,6 +1409,8 @@ with Path(r"{hook_log_path}").open("a", encoding="utf-8") as handle:
         ),
     )?;
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_extra_config(&format!(
             r#"[hooks]
 
@@ -1612,6 +1614,8 @@ with Path(r"{hook_log_path}").open("a", encoding="utf-8") as handle:
         ),
     )?;
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_extra_config(&format!(
             r#"[hooks]
 

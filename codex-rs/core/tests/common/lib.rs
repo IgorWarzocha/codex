@@ -388,15 +388,34 @@ where
 {
     use tokio::time::Duration;
     use tokio::time::timeout;
+    let mut recent_events = std::collections::VecDeque::with_capacity(8);
     loop {
         // Allow a bit more time to accommodate async startup work (e.g. config IO, tool discovery)
         let ev = timeout(wait_time.max(Duration::from_secs(10)), codex.next_event())
             .await
-            .expect("timeout waiting for event")
-            .expect("stream ended unexpectedly");
+            .unwrap_or_else(|error| {
+                panic!("timeout waiting for event: {error}; recent events: {recent_events:#?}")
+            })
+            .unwrap_or_else(|error| {
+                panic!("stream ended unexpectedly: {error}; recent events: {recent_events:#?}")
+            });
         if predicate(&ev.msg) {
             return ev.msg;
         }
+        if recent_events.len() == 8 {
+            recent_events.pop_front();
+        }
+        // Keep diagnostics bounded even when a tool streams a large result.
+        let mut summary = format!("{:?}", ev.msg);
+        if summary.len() > 2048 {
+            let mut end = 2048;
+            while !summary.is_char_boundary(end) {
+                end -= 1;
+            }
+            summary.truncate(end);
+            summary.push_str(" [truncated]");
+        }
+        recent_events.push_back(summary);
     }
 }
 

@@ -58,6 +58,8 @@ async fn model_guardian_policy_controls_cua(
     .await?;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_url)
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_model(MODEL)
         .with_provider_config("supports_websockets = false")
         .with_approval_policy("on-request")

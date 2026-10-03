@@ -698,6 +698,8 @@ fn service_tier_model_and_tier_id() -> Result<(String, String)> {
 
 fn create_config_toml(codex_home: &std::path::Path, server_uri: &str) -> std::io::Result<()> {
     MockResponsesConfig::new(server_uri)
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_root_config("compact_prompt = \"compact\"\nmodel_auto_compact_token_limit = 200000")
         .with_provider_config("supports_websockets = false")
         .write(codex_home)
@@ -722,6 +724,7 @@ async fn thread_settings_update_preserves_session_profiles() -> Result<()> {
             .build_initialized_with_timeout(DEFAULT_TIMEOUT)
             .await?;
         let mut config = std::collections::HashMap::from([
+            ("context_strategy".to_string(), json!("compaction")),
             ("default_permissions".to_string(), json!("audit")),
             ("features.guardian_approval".to_string(), json!(true)),
         ]);

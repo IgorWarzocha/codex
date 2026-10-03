@@ -571,6 +571,8 @@ async fn metadata_and_mcp_requests_complete_while_unrelated_resume_loads_config(
     calls.tools_enabled.store(/*val*/ true, Ordering::Relaxed);
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_extra_config(&format!(
             "[mcp_servers.resource_server]\nurl = \"{mcp_server_url}/api/codex/ps/mcp\""
         ))
@@ -781,7 +783,10 @@ async fn resume_revalidates_persisted_thread_after_config_load(
 ) -> Result<()> {
     let responses_server = create_mock_responses_server_repeating_assistant("Ready").await;
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&responses_server.uri()).write(codex_home.path())?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .write(codex_home.path())?;
     let filename_timestamp = "2025-01-05T12-00-00";
     let thread_id = create_fake_rollout(
         codex_home.path(),
@@ -1035,7 +1040,10 @@ async fn resume_revalidates_persisted_thread_after_config_load(
 async fn resume_reloads_config_when_saved_workspace_roots_change() -> Result<()> {
     let responses_server = create_mock_responses_server_repeating_assistant("Ready").await;
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&responses_server.uri()).write(codex_home.path())?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .write(codex_home.path())?;
     let filename_timestamp = "2025-01-05T12-00-00";
     let thread_id = create_fake_rollout(
         codex_home.path(),

@@ -334,6 +334,7 @@ async fn required_model_bypasses_extension_approval_when_guardian_v2_is_disabled
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.approval_review_contributor(Arc::new(ApprovedReviewContributor));
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_model(model)
         .with_extensions(Arc::new(extensions.build()))
         .with_pre_build_hook(move |home| {

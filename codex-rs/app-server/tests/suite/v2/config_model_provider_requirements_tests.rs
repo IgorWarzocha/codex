@@ -33,6 +33,7 @@ requires_openai_auth = true
         home.path().join("config.toml"),
         r#"
 model_provider = "openai"
+context_strategy = "compaction"
 [model_providers.gateway]
 name = "Local override"
 base_url = "https://local.example.test"

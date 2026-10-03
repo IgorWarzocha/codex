@@ -116,6 +116,7 @@ async fn response_for_remote_model(
     .await;
 
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(configure);
     let test = builder.build(&server).await?;

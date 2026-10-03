@@ -44,9 +44,10 @@ async fn run_startup_for_test(
 #[tokio::test]
 async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
     let home = tempdir()?;
+    // Both versions of the local server config need unauthenticated history storage.
     std::fs::write(
         home.path().join("config.toml"),
-        "model = \"gpt-5.5\"\nmodel_reasoning_effort = \"low\"\nfeatures.fast_mode = true\n",
+        "context_strategy = \"compaction\"\nmodel = \"gpt-5.5\"\nmodel_reasoning_effort = \"low\"\nfeatures.fast_mode = true\n",
     )?;
     let config = ConfigBuilder::default()
         .codex_home(home.path().to_path_buf())
@@ -99,7 +100,7 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
     );
     std::fs::write(
         home.path().join("config.toml"),
-        "model = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
+        "context_strategy = \"compaction\"\nmodel = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
     )?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut run = Box::pin(run_startup_for_test(
@@ -220,9 +221,10 @@ wire_api = "responses"
 requires_openai_auth = false
 "#,
         )?;
+        // Server defaults are exercised without authenticated backend notes storage.
         std::fs::write(
             server_home.path().join("config.toml"),
-            "model = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
+            "context_strategy = \"compaction\"\nmodel = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
         )?;
         if managed {
             std::fs::write(
@@ -364,9 +366,10 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
             client_home.path().join("config.toml"),
             "model = \"stale-client-model\"\nmodel_reasoning_effort = \"low\"\n",
         )?;
+        // The embedded destination server has no backend notes authentication.
         std::fs::write(
             server_home.path().join("config.toml"),
-            "model_reasoning_effort = \"high\"\nsandbox_mode = \"read-only\"\n",
+            "context_strategy = \"compaction\"\nmodel_reasoning_effort = \"high\"\nsandbox_mode = \"read-only\"\n",
         )?;
         let mut config = ConfigBuilder::default()
             .codex_home(client_home.path().to_path_buf())
@@ -481,9 +484,10 @@ async fn fresh_startup_falls_back_only_for_unsupported_config_read() -> Result<(
         HistoryCapabilities::ConfigReadUnsupported(-32600),
     ] {
         let home = tempdir()?;
+        // The compatibility fixture starts a local thread without backend notes authentication.
         std::fs::write(
             home.path().join("config.toml"),
-            "model = \"client-model\"\nmodel_reasoning_effort = \"low\"\n",
+            "context_strategy = \"compaction\"\nmodel = \"client-model\"\nmodel_reasoning_effort = \"low\"\n",
         )?;
         let config = ConfigBuilder::default()
             .codex_home(home.path().to_path_buf())
@@ -523,9 +527,10 @@ async fn startup_reads_server_defaults_before_starting_thread() -> Result<()> {
         client_home.path().join("config.toml"),
         "model = \"client-model\"\nmodel_reasoning_effort = \"low\"\n",
     )?;
+    // Request ordering must not depend on an unrelated Notes authentication failure.
     std::fs::write(
         server_home.path().join("config.toml"),
-        "model = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
+        "context_strategy = \"compaction\"\nmodel = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
     )?;
     let config = ConfigBuilder::default()
         .codex_home(client_home.path().to_path_buf())

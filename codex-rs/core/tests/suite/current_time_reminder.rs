@@ -370,6 +370,7 @@ async fn system_time_source_adds_current_time_reminder(clock_setup: ClockSetup) 
     )
     .await;
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_model_info_override("gpt-5.5", move |model_info| {
             if matches!(clock_setup, ClockSetup::Configured | ClockSetup::ModelTools) {
                 model_info
@@ -526,6 +527,7 @@ async fn sleep_tool_configuration_controls_registration(
         ));
     }
     let test = test_codex()
+        .with_direct_tools()
         .with_model_info_override("gpt-5.5", |model_info| {
             model_info
                 .experimental_supported_tools

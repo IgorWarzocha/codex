@@ -924,6 +924,10 @@ mod tests {
     #[tokio::test]
     async fn reload_user_config_preserves_promoted_mcp_allowlist_denial() -> anyhow::Result<()> {
         let home = tempfile::tempdir()?;
+        std::fs::write(
+            home.path().join(codex_config::CONFIG_TOML_FILE),
+            "context_strategy = 'compaction'\n",
+        )?;
         let managed_config_path = home.path().join("managed_config.toml");
         std::fs::write(
             &managed_config_path,

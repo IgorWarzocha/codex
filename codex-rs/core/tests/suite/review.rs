@@ -941,6 +941,7 @@ async fn review_uses_custom_review_model_from_config() {
         start_responses_server_with_sse(completed_sse(), /*expected_requests*/ 1).await;
     let codex_home = Arc::new(TempDir::new().unwrap());
     let test = test_codex()
+        .with_direct_tools()
         .with_home(Arc::clone(&codex_home))
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {

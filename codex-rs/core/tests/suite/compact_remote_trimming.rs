@@ -27,6 +27,7 @@ async fn remote_compact_v2_installs_configured_retained_message_budget(
     skip_if_no_network!(Ok(()));
     let harness = TestCodexHarness::with_builder(
         test_codex()
+            .with_direct_tools()
             .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(move |config| {
                 config.compaction_retention_tokens = budget;

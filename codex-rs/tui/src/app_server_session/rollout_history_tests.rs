@@ -325,6 +325,11 @@ async fn cached_legacy_resume_revalidates_history_across_migration_settings() ->
         [(false, false), (false, true), (true, false), (true, true)]
     {
         let codex_home = tempfile::tempdir().expect("tempdir");
+        // Migration revalidation uses local legacy history, not backend notes storage.
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            "context_strategy = \"compaction\"\n",
+        )?;
         // Keep the large setup futures off the test thread's stack.
         let config = Box::pin(build_config(&codex_home)).await;
         let legacy_thread_id = ThreadId::from_string(

@@ -60,9 +60,12 @@ async fn config_personality_none_sends_no_personality() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let mut builder = test_codex().with_model("gpt-5.5").with_config(|config| {
-        config.personality = Some(Personality::None);
-    });
+    let mut builder = test_codex()
+        .with_direct_tools()
+        .with_model("gpt-5.5")
+        .with_config(|config| {
+            config.personality = Some(Personality::None);
+        });
     let test = builder.build(&server).await?;
 
     test.codex
@@ -110,7 +113,7 @@ async fn config_personality_none_strips_baked_personality_section(
 
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let mut builder = test_codex()
+    let mut builder = test_codex().with_direct_tools()
         .with_model_info_override("gpt-5.5", |model_info| {
             if let Some(model_messages) = model_info.model_messages.as_mut() {
                 model_messages.instructions_template = Some("Base instructions\n# Personality\nBaked personality\n## Writing Style\nNested writing style\n# General\nGeneral instructions".to_string());
@@ -157,6 +160,7 @@ async fn config_personality_none_preserves_explicit_base_instructions(
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.5")
         .with_pre_build_hook(move |home| {
             let config = format!(
@@ -192,12 +196,12 @@ async fn config_personality_none_preserves_explicit_base_instructions(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn default_instructions_are_friendly_without_config_toml() -> anyhow::Result<()> {
+async fn default_instructions_use_fork_baseline_without_config_toml() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let mut builder = test_codex().with_model("gpt-5.5");
+    let mut builder = test_codex().with_direct_tools().with_model("gpt-5.5");
     let test = builder.build(&server).await?;
     assert_eq!(test.config.personality, None);
 
@@ -214,9 +218,9 @@ async fn default_instructions_are_friendly_without_config_toml() -> anyhow::Resu
 
     let request = resp_mock.single_request();
     let instructions_text = request.instructions_text();
-    assert!(
-        instructions_text.contains(BUNDLED_FRIENDLY_TEMPLATE),
-        "expected default friendly template, got: {instructions_text:?}"
+    assert_eq!(
+        instructions_text,
+        codex_protocol::models::BASE_INSTRUCTIONS_DEFAULT
     );
     assert!(!request.body_contains_text("<personality_spec>"));
 
@@ -252,10 +256,9 @@ async fn fixed_friendly_personality_ignores_pragmatic_update() -> anyhow::Result
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);
-    assert!(
-        requests[0]
-            .instructions_text()
-            .contains(BUNDLED_FRIENDLY_TEMPLATE)
+    assert_eq!(
+        requests[0].instructions_text(),
+        codex_protocol::models::BASE_INSTRUCTIONS_DEFAULT
     );
     assert_eq!(
         requests[1].instructions_text(),

@@ -44,7 +44,7 @@ async fn remote_project_trust_guards_thread_start_and_preserves_repository_decis
     std::fs::write(project_root.join(".git/HEAD"), "ref: refs/heads/main\n")?;
     std::fs::create_dir(project_cwd.join(".codex"))?;
     let undecided_config = format!(
-        "[{}]\n",
+        "context_strategy = \"compaction\"\n[{}]\n",
         trusted_project_edit(&project_root)
             .key_path
             .trim_end_matches(".trust_level")

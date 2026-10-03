@@ -48,7 +48,7 @@ async fn board_tools_share_multi_agent_namespace(
         .map(|name| format!("tool_namespace = {name:?}"))
         .unwrap_or_default();
     MockResponsesConfig::new(&server.uri())
-        .enable_feature(Feature::AgentMessageBoard)
+        .with_root_config("context_strategy = 'compaction'")
         .disable_feature(Feature::CodeMode)
         .disable_feature(Feature::CodeModeOnly)
         .with_extra_config(&format!(
@@ -88,6 +88,7 @@ async fn board_tools_share_multi_agent_namespace(
     for name in ["get_channels", "post"] {
         assert!(requests[0].tool_by_name(namespace, name).is_none());
     }
+    assert!(requests[0].tool_by_name(namespace, "wait_agent").is_none());
     let result: Value = serde_json::from_str(
         &requests[1]
             .function_call_output_text("list-channels")

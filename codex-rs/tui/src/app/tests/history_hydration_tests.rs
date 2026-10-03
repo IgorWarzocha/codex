@@ -251,6 +251,11 @@ async fn history_hydration_archived_retry_uses_first_attempt_runtime_settings() 
     ] {
         for mode in [TranscriptMode::Terminal, TranscriptMode::Owned] {
             let (mut app, codex_home, mut target) = history_fixture(&[500]).await?;
+            // Archived local rollout retries do not exercise backend notes storage.
+            std::fs::write(
+                codex_home.path().join("config.toml"),
+                "context_strategy = \"compaction\"\n",
+            )?;
             app.config.tui_fullscreen_transcript = !mode.is_owned();
             app.config.tui_alternate_screen = codex_config::types::AltScreenMode::Always;
             app.config.terminal_resize_reflow.max_rows = TerminalResizeReflowMaxRows::Limit(1);

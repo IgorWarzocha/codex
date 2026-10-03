@@ -190,7 +190,10 @@ async fn spawned_subagents_apply_configured_developer_instruction_precedence(
     } else {
         "gpt-5.4"
     };
-    let mut config = MockResponsesConfig::new(&server.uri()).with_model(configured_model);
+    let mut config = MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .with_model(configured_model);
     if role_has_instructions {
         config =
             config.with_root_config(&format!("developer_instructions = {ROLE_INSTRUCTIONS:?}"));
@@ -617,9 +620,9 @@ async fn cold_resume_preserves_effective_developer_instructions_for_worker(
 
     let mut feature_config = match configured_subagent_developer_instructions {
         Some(instructions) => format!(
-            "[features.multi_agent_v2]\nenabled = true\nsubagent_developer_instructions = {instructions:?}"
+            "[features.multi_agent_v2]\nenabled = true\nwait_agent_enabled = true\nsubagent_developer_instructions = {instructions:?}"
         ),
-        None => "[features.multi_agent_v2]\nenabled = true".to_string(),
+        None => "[features.multi_agent_v2]\nenabled = true\nwait_agent_enabled = true".to_string(),
     };
     let codex_home = TempDir::new()?;
     let role_path = codex_home.path().join("worker.toml");
@@ -635,6 +638,8 @@ async fn cold_resume_preserves_effective_developer_instructions_for_worker(
         ));
     }
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_model("gpt-5.5")
         .with_root_config(&format!(
             "developer_instructions = {PARENT_INSTRUCTIONS:?}\nmodel_reasoning_effort = \"high\""

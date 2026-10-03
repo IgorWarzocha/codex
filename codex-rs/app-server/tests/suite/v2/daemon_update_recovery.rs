@@ -478,7 +478,10 @@ async fn managed_shutdown_records_interrupted_turn(outcome: &str) -> Result<()> 
         vec![stream_chunk(Some(compaction_gate), "Compacted")?],
     ])
     .await;
-    create_config_toml(home.path(), mock.uri(), "never")?;
+    app_test_support::MockResponsesConfig::new(mock.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .write(home.path())?;
     let socket = home.path().join("control/server.sock");
     let mut server = spawn_server(home.path(), &socket)?;
     let mut client = connect_daemon_client(

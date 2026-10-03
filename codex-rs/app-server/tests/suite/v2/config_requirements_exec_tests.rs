@@ -49,6 +49,8 @@ decision = "prompt"
 "#,
     )?;
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_approval_policy("on-request")
         .with_sandbox_mode("workspace-write")
         .write(home.path())?;

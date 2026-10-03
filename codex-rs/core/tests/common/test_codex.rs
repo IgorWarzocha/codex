@@ -432,6 +432,28 @@ impl TestCodexBuilder {
         self
     }
 
+    /// Selects sandbox-compatible V8 for tests of Code Mode, not Notebook lifecycle.
+    /// Feature and catalog tool-mode selection remain unchanged.
+    pub fn with_v8_runtime(self) -> Self {
+        self.with_config(|config| {
+            config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
+            config.code_mode.disable_in_process_fallback = false;
+        })
+    }
+
+    /// Selects native tools for fixtures that issue direct calls or inspect native schemas.
+    /// A model catalog can still explicitly select Code Mode using the V8 runtime.
+    pub fn with_direct_tools(self) -> Self {
+        self.with_v8_runtime().with_config(|config| {
+            for feature in [Feature::CodeMode, Feature::CodeModeOnly] {
+                config
+                    .features
+                    .disable(feature)
+                    .expect("test config should allow direct tools");
+            }
+        })
+    }
+
     pub fn with_auth(mut self, auth: CodexAuth) -> Self {
         self.auth = TestAuth::Cached(auth);
         self

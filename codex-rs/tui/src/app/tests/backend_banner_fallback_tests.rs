@@ -33,6 +33,11 @@ fn configure_fallback_model(app: &mut App) {
 pub(super) async fn start_fallback_thread(
     app: &mut App,
 ) -> Result<session_lifecycle_requests::RecordingAppServer> {
+    // Model recovery fixtures use a local server, not authenticated backend notes storage.
+    std::fs::write(
+        app.config.codex_home.join("config.toml"),
+        "context_strategy = \"compaction\"\n",
+    )?;
     let (mut server, requests, proxy) = session_lifecycle_requests::start_recording_app_server(
         &app.config,
         /*blocked_thread_list*/ None,

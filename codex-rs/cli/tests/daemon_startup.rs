@@ -151,10 +151,12 @@ async fn daemon_startup(command: &str) -> Result<()> {
             .success(),
         "failed to prepare CLI test executable"
     );
+    // These startup fixtures use an offline API key, not a Notes backend.
     fs::write(
         home.path().join("config.toml"),
         format!(
             "model = \"gpt-5.6-terra\"\n\
+         context_strategy = \"compaction\"\n\
          features.bedrock_setup_wizard = true\ncli_auth_credentials_store = \"file\"\n\
          suppress_unstable_features_warning = true\nanalytics.enabled = false\n\
          windows.sandbox = \"unelevated\"\n\

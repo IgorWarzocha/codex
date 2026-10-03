@@ -199,6 +199,7 @@ async fn running_thread_uses_refreshed_optional_mcp_startup_grace(
     .await;
 
     let fixture = test_codex()
+        .with_direct_tools()
         .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config.mcp_optional_startup_grace = Duration::from_millis(50);

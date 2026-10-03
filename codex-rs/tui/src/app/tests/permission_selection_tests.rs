@@ -6,6 +6,11 @@ use pretty_assertions::assert_eq;
 #[tokio::test]
 async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+    // Permission adoption uses a local thread with no backend notes authentication.
+    std::fs::write(
+        app.config.codex_home.join("config.toml"),
+        "context_strategy = \"compaction\"\n",
+    )?;
     let mut server = start_config_write_test_app_server(&app).await?;
     let started = server.start_thread(&app.config).await?;
     let thread_id = started.session.thread_id;

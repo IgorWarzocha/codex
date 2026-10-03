@@ -44,6 +44,10 @@ async fn fresh_context_subagent_inherits_disabled_view_image_and_mcp_tools() -> 
     let (mcp_server_url, mcp_server_handle) = start_mcp_server(/*sensitive_action*/ None).await?;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
+        // This sandboxed mock provider has no remote Notes backend. Keep the
+        // direct tool-schema checks on V8 while testing disabled-viewer inheritance.
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_model("gpt-5.4")
         .with_provider_config("supports_websockets = false")
         .with_extra_config(&format!(
@@ -204,6 +208,9 @@ async fn guardian_reviewer_inherits_disabled_view_image() -> Result<()> {
     .await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
+        // The persisted reviewer fixture is a read-only, API-key mock thread.
+        .with_root_config("context_strategy = 'compaction'")
+        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
         .with_provider_config("supports_websockets = false")
         .write(codex_home.path())?;
 

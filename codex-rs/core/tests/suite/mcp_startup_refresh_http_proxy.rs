@@ -55,6 +55,50 @@ const SERVER_URL: &str = "http://mcp-proxy.invalid/api/codex/ps/mcp";
 const DENIED_SERVER_NAME: &str = "denied_mcp";
 const DENIED_SERVER_URL: &str = "http://mcp-proxy.invalid/denied-mcp";
 
+async fn reserve_fixed_callback_port() -> Result<TcpListener> {
+    // This listener must be released before the child binds its configured port.
+    // A port from bind(:0) can then be reused by later listeners or HTTP sockets.
+    #[cfg(target_os = "linux")]
+    let ephemeral_range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")?;
+    #[cfg(not(target_os = "linux"))]
+    let ephemeral_range = {
+        let output = Command::new("sysctl")
+            .args([
+                "-n",
+                "net.inet.ip.portrange.first",
+                "net.inet.ip.portrange.last",
+            ])
+            .output()
+            .await?;
+        anyhow::ensure!(
+            output.status.success(),
+            "failed to read ephemeral port range: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)?
+    };
+    let range = ephemeral_range
+        .split_whitespace()
+        .map(str::parse::<u16>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    anyhow::ensure!(
+        range.len() == 2 && range[0] <= range[1],
+        "invalid ephemeral port range: {ephemeral_range:?}"
+    );
+    let ephemeral_range = range[0]..=range[1];
+    for port in 1024..=u16::MAX {
+        if ephemeral_range.contains(&port) {
+            continue;
+        }
+        match TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(listener) => return Ok(listener),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    anyhow::bail!("no available callback port outside the OS ephemeral range")
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn local_mcp_startup_and_refresh_use_configured_http_client() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -237,7 +281,7 @@ async fn skill_mcp_dependency_oauth_uses_configured_http_client() -> Result<()> 
             .mount(&proxy)
             .await;
 
-        let skill_callback_listener = TcpListener::bind("127.0.0.1:0").await?;
+        let skill_callback_listener = reserve_fixed_callback_port().await?;
         let skill_callback_port = skill_callback_listener.local_addr()?.port();
         let global_callback_listener = TcpListener::bind("127.0.0.1:0").await?;
         let global_callback_port = global_callback_listener.local_addr()?.port();
@@ -278,7 +322,9 @@ async fn skill_mcp_dependency_oauth_uses_configured_http_client() -> Result<()> 
             })
             .unwrap_or_else(|| {
                 panic!(
-                    "skill dependency OAuth registration should use the configured proxy: {requests:#?}"
+                    "skill dependency OAuth registration should use the configured proxy: {requests:#?}\nchild stdout:\n{}\nchild stderr:\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
                 )
             });
         let registration: Value = serde_json::from_slice(&registration_request.body)?;
@@ -297,6 +343,13 @@ async fn skill_mcp_dependency_oauth_uses_configured_http_client() -> Result<()> 
         return Ok(());
     }
 
+    // Dependency login failures are warnings. Retain them in this isolated child's
+    // stderr so a missing proxy request reports the actual OAuth failure.
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(std::io::stderr)
+        .try_init()
+        .expect("isolated OAuth child should own its tracing subscriber");
     let skill_callback_port = std::env::var(SKILL_CALLBACK_PORT_ENV_VAR)?.parse::<u16>()?;
     let global_callback_port = std::env::var(SKILL_GLOBAL_CALLBACK_PORT_ENV_VAR)?.parse::<u16>()?;
     let responses_server = responses::start_mock_server().await;

@@ -1947,7 +1947,10 @@ async fn guardian_reuse_respects_effective_policy_and_personality(
             /*max_attempts*/ 1,
         )
         .await;
-        assert!(matches!(outcome, GuardianReviewOutcome::Completed(_)));
+        assert!(
+            matches!(outcome, GuardianReviewOutcome::Completed(_)),
+            "review {index}: {outcome:?}"
+        );
     }
     let requests = responses.requests();
     assert_eq!(requests.len(), 3);
