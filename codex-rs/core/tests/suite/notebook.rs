@@ -23,6 +23,104 @@ use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event_match;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn default_notebook_rejects_sandboxed_sampling_before_provider_request() -> Result<()> {
+    let server = start_mock_server().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path_regex(".*/responses$"))
+        .respond_with(wiremock::ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let test = test_codex().build_with_auto_env(&server).await?;
+    assert!(test.config.features.enabled(Feature::CodeMode));
+    assert_eq!(test.config.code_mode.runtime, CodeModeRuntime::Notebook);
+    test.codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Continue with restricted permissions.".to_string(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                permission_profile: Some(PermissionProfile::workspace_write()),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    let error = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::Error(error) => Some(error.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(
+        error.message.contains("danger-full-access"),
+        "{}",
+        error.message
+    );
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "permission rejection must precede sampling"
+    );
+    assert!(!test.home.path().join("notebook").exists());
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn default_notebook_emits_native_view_image_result() -> Result<()> {
+    let server = start_mock_server().await;
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_custom_tool_call(
+                    "view-image",
+                    "exec",
+                    "image(await tools.view_image({path: 'image.bin', detail: 'original'}));",
+                ),
+                ev_completed("image-response"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "Done."),
+                ev_completed("done"),
+            ]),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
+        })
+        .build(&server)
+        .await?;
+    assert_eq!(test.config.code_mode.runtime, CodeModeRuntime::Notebook);
+    assert!(test.config.features.enabled(Feature::CodeMode));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)?;
+    // MIME must come from the validated bytes, not the file extension.
+    std::fs::write(test.cwd_path().join("image.bin"), png.into_inner())?;
+    test.submit_turn("Inspect the local image.").await?;
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    let output = requests[1].custom_tool_call_output("view-image");
+    let items = output["output"]
+        .as_array()
+        .expect("multimodal Notebook output");
+    assert!(
+        items.iter().any(|item| {
+            item["type"] == "input_image"
+                && item["image_url"]
+                    .as_str()
+                    .is_some_and(|url| url.starts_with("data:image/png;base64,"))
+        }),
+        "{output}"
+    );
+    assert!(!output.to_string().contains("Script error"), "{output}");
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 #[test_case::test_case(PermissionProfile::workspace_write(); "sandboxed")]
 #[test_case::test_case(PermissionProfile::Disabled; "full_access")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

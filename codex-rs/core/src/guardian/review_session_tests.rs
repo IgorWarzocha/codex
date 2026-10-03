@@ -20,6 +20,63 @@ use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
 use pretty_assertions::assert_eq;
 
+#[test_case::test_case(false; "notebook derived host only")]
+#[test_case::test_case(true; "explicit host only")]
+#[tokio::test]
+async fn guardian_config_uses_sandboxed_runtime_for_notebook_parent(explicit_host_only: bool) {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!("[features.code_mode_host]\ndisable_in_process_fallback = {explicit_host_only}"),
+    )
+    .unwrap();
+    let parent = crate::config::ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(home.path().to_path_buf())
+        .fallback_cwd(Some(home.path().to_path_buf()))
+        .build()
+        .await
+        .unwrap();
+    assert_eq!(
+        parent.code_mode.runtime,
+        codex_features::CodeModeRuntime::Notebook
+    );
+    let isolated = crate::guardian::test_host::build_reviewer_config(&parent).unwrap();
+    let permissions = isolated.permissions.permission_profile().clone();
+    let features = isolated.features.clone();
+    let reviewer = build_guardian_review_session_config(
+        isolated,
+        None,
+        "test-reviewer",
+        None,
+        ReasoningSummaryConfig::default(),
+        None,
+        ResolvedModelMessages::bundled(),
+    )
+    .unwrap();
+    assert_eq!(
+        reviewer.code_mode.runtime,
+        codex_features::CodeModeRuntime::V8
+    );
+    assert_eq!(
+        reviewer.code_mode.disable_in_process_fallback,
+        explicit_host_only
+    );
+    assert_eq!(reviewer.permissions.permission_profile(), &permissions);
+    assert_ne!(
+        permissions,
+        codex_protocol::models::PermissionProfile::Disabled
+    );
+    assert_eq!(
+        reviewer.permissions.approval_policy.value(),
+        AskForApproval::Never
+    );
+    assert_eq!(reviewer.features, features);
+    assert_eq!(
+        parent.code_mode.runtime,
+        codex_features::CodeModeRuntime::Notebook
+    );
+}
+
 #[tokio::test]
 async fn run_review_preserves_evidence_during_parent_compaction() {
     const EVIDENCE: &str = "The inspected repository is public.";

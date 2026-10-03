@@ -1610,6 +1610,22 @@ impl Config {
         &self.sqlite
     }
 
+    /// Change an internal session's runtime without dropping explicit host-only policy.
+    pub(crate) fn set_code_mode_runtime(
+        &mut self,
+        runtime: codex_features::CodeModeRuntime,
+    ) -> std::io::Result<()> {
+        let config_toml: ConfigToml = self
+            .config_layer_stack
+            .effective_config()
+            .try_into()
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        self.code_mode.disable_in_process_fallback =
+            code_mode_disables_in_process_fallback(&config_toml, runtime);
+        self.code_mode.runtime = runtime;
+        Ok(())
+    }
+
     /// Resolves the configured, reviewer-catalog, or bundled Guardian policy.
     pub fn resolve_guardian_policy<'a>(
         &'a self,
@@ -2777,14 +2793,6 @@ fn resolve_feature_enabled(feature: Option<&codex_config::config_toml::FeatureTo
 
 fn resolve_code_mode_config(config_toml: &ConfigToml) -> std::io::Result<CodeModeConfig> {
     let base = code_mode_toml_config(config_toml.features.as_ref());
-    let host = config_toml
-        .features
-        .as_ref()
-        .and_then(|features| features.code_mode_host.as_ref())
-        .and_then(|feature| match feature {
-            FeatureToml::Enabled(_) => None,
-            FeatureToml::Config(config) => Some(config),
-        });
 
     let notebook_max_heap_mib = base
         .and_then(|config| config.notebook_max_heap_mib)
@@ -2823,11 +2831,24 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> std::io::Result<CodeMod
             .and_then(|config| config.direct_only_tool_namespaces.as_ref())
             .cloned()
             .unwrap_or_default(),
-        disable_in_process_fallback: runtime == codex_features::CodeModeRuntime::Notebook
-            || host
-                .and_then(|config| config.disable_in_process_fallback)
-                .unwrap_or_default(),
+        disable_in_process_fallback: code_mode_disables_in_process_fallback(config_toml, runtime),
     })
+}
+
+fn code_mode_disables_in_process_fallback(
+    config_toml: &ConfigToml,
+    runtime: codex_features::CodeModeRuntime,
+) -> bool {
+    runtime == codex_features::CodeModeRuntime::Notebook
+        || config_toml
+            .features
+            .as_ref()
+            .and_then(|features| features.code_mode_host.as_ref())
+            .and_then(|feature| match feature {
+                FeatureToml::Enabled(_) => None,
+                FeatureToml::Config(config) => config.disable_in_process_fallback,
+            })
+            .unwrap_or_default()
 }
 
 fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config {

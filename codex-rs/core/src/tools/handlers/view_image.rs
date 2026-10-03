@@ -186,6 +186,9 @@ impl ViewImageHandler {
         image::load_from_memory(&file_bytes).map_err(|_| {
             FunctionCallError::RespondToModel(VIEW_IMAGE_INVALID_MESSAGE.to_string())
         })?;
+        let format = image::guess_format(&file_bytes).map_err(|_| {
+            FunctionCallError::RespondToModel(VIEW_IMAGE_INVALID_MESSAGE.to_string())
+        })?;
 
         let can_request_original_detail =
             can_request_original_image_detail(&step_context.settings.model_info);
@@ -198,7 +201,9 @@ impl ViewImageHandler {
         };
 
         // The history insertion path owns image preparation and resizing.
-        let image_url = data_url_from_bytes("application/octet-stream", &file_bytes);
+        // Notebook's image() accepts only image MIME types. Use the detected
+        // format rather than the file extension, preserving the original bytes.
+        let image_url = data_url_from_bytes(format.to_mime_type(), &file_bytes);
 
         let item = TurnItem::ImageView(ImageViewItem {
             id: call_id,

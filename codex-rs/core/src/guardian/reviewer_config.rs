@@ -24,6 +24,11 @@ pub fn build_guardian_review_session_config(
     personality: Option<codex_protocol::config_types::Personality>,
     model_messages: ResolvedModelMessages<'_>,
 ) -> anyhow::Result<Config> {
+    // A private reviewer stays sandboxed even when its parent uses unrestricted
+    // Notebook. Preserve the tool-mode selection, but use its sandboxed runtime.
+    if guardian_config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook {
+        guardian_config.set_code_mode_runtime(codex_features::CodeModeRuntime::V8)?;
+    }
     guardian_config.model = Some(active_model.to_owned());
     guardian_config.model_reasoning_effort = reasoning_effort;
     guardian_config.model_reasoning_summary = Some(reasoning_summary);
