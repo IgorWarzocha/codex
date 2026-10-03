@@ -139,7 +139,7 @@ jobs:
       - name: Build same-commit native helper and private audio runtime
         run: |
           set -euo pipefail
-          args=(--jobs="$BAZEL_BUILD_JOBS" --local_cpu_resources="$BAZEL_BUILD_JOBS" --disk_cache= --remote_cache= --remote_executor=)
+          args=(--jobs="$BAZEL_BUILD_JOBS" --local_resources="cpu=$BAZEL_BUILD_JOBS" --disk_cache= --remote_cache= --remote_executor=)
           if [[ "$TARGET" == *-windows-msvc ]]; then
             # Git Bash must not rewrite Bazel labels into Windows filesystem paths.
             export MSYS2_ARG_CONV_EXCL='*'
