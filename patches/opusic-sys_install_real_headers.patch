@@ -2,13 +2,16 @@
 # CMake preserves source symlinks when installing PUBLIC_HEADER files.
 --- a/opus/CMakeLists.txt
 +++ b/opus/CMakeLists.txt
-@@ -287,3 +287,12 @@
-+# Build-script runfiles can expose these headers as symlinks. Resolve them
-+# before installation so the output remains valid after runfiles cleanup.
+@@ -287,3 +287,15 @@
++# Install regular files, not symlinks into temporary build-script runfiles.
++# CMake's REALPATH does not resolve Windows file symlinks. COPYONLY reads the
++# contents instead and preserves them without newline or variable conversion.
 +set(Opus_INSTALL_HEADER "")
 +foreach(header IN LISTS Opus_PUBLIC_HEADER)
-+  get_filename_component(real_header "${header}" REALPATH)
-+  list(APPEND Opus_INSTALL_HEADER "${real_header}")
++  get_filename_component(header_name "${header}" NAME)
++  set(install_header "${CMAKE_CURRENT_BINARY_DIR}/install-headers/${header_name}")
++  configure_file("${header}" "${install_header}" COPYONLY)
++  list(APPEND Opus_INSTALL_HEADER "${install_header}")
 +endforeach()
 +set(Opus_PUBLIC_HEADER "${Opus_INSTALL_HEADER}")
 +
