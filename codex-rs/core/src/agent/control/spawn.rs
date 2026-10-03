@@ -316,6 +316,21 @@ impl LocalAgentControl {
     /// A provided parent enables owner-validated reloads; `None` preserves sender-driven reloads.
     pub(crate) async fn ensure_v2_agent_loaded(
         &self,
+        config: Config,
+        thread_id: ThreadId,
+        parent: Option<Arc<CodexThread>>,
+    ) -> CodexResult<()> {
+        let _runtime_guard = match self.runtime.registry.runtime_gate(thread_id) {
+            Some(gate) => Some(self.runtime.track_runtime_guard(gate.lock_owned().await)),
+            None => None,
+        };
+        self.ensure_v2_agent_loaded_under_gate(config, thread_id, parent)
+            .await
+    }
+
+    /// Caller holds the registered runtime gate through loading and any resulting delivery.
+    pub(super) async fn ensure_v2_agent_loaded_under_gate(
+        &self,
         mut config: Config,
         thread_id: ThreadId,
         parent: Option<Arc<CodexThread>>,

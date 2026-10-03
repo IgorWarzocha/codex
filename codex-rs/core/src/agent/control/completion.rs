@@ -1,16 +1,22 @@
 //! Delivers terminal child results and completion activity to the agent tree.
 //!
-//! Sessions capture terminal state; the controller owns routing and queue-only delivery.
+//! Sessions capture terminal state; the controller owns routing and completion delivery.
 //! Delivery remains best effort, with tracing recorded only after the parent accepts it.
 
 use super::LocalAgentControl;
+use super::residency::V2RuntimeGuard;
 use crate::TurnStartOptions;
 use crate::agent::api::AgentTurnOutcome;
 use crate::agent_communication::AgentCommunicationContext;
 use crate::agent_communication::AgentCommunicationKind;
 use crate::session_prefix::format_guardian_interruption_message;
 use crate::session_prefix::format_inter_agent_completion_message;
+use crate::thread_manager::ThreadManagerState;
 use codex_protocol::AgentPath;
+use codex_protocol::ThreadId;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
+use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::SubAgentActivityItem;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::CodexErrorInfo;
@@ -20,9 +26,60 @@ use codex_protocol::protocol::SubAgentActivityKind;
 use codex_protocol::protocol::SubAgentSource;
 use codex_rollout_trace::AgentResultTracePayload;
 use codex_rollout_trace::ThreadTraceContext;
+use std::sync::Arc;
 use tracing::debug;
 
 impl LocalAgentControl {
+    /// Restore only an automatically evicted, unstopped parent. The terminal task owns this
+    /// wait after releasing its active reservation. No detached retry or polling is needed.
+    pub(super) async fn completion_parent_guard(
+        &self,
+        parent: ThreadId,
+        state: &Arc<ThreadManagerState>,
+    ) -> CodexResult<V2RuntimeGuard> {
+        let mut activity = self.runtime.residency.watch_activity();
+        loop {
+            let gate = self
+                .runtime
+                .registry
+                .runtime_gate(parent)
+                .ok_or(CodexErr::ThreadNotFound(parent))?;
+            let guard = tokio::select! {
+                biased;
+                _ = self.runtime.shutdown.cancelled() => {
+                    return Err(CodexErr::InvalidRequest("agent runtime is shutting down".into()));
+                }
+                guard = gate.lock_owned() => guard,
+            };
+            if state.get_thread(parent).await.is_err()
+                && let Some(config) = self.runtime.registry.evicted_completion_config(parent)
+            {
+                match self
+                    .ensure_v2_agent_loaded_under_gate((*config).clone(), parent, None)
+                    .await
+                {
+                    Err(err)
+                        if matches!(err.details(), CodexErrorDetails::AgentLimitReached { .. }) =>
+                    {
+                        // Release the gate so an explicit Stop or close can revoke eligibility.
+                        drop(guard);
+                        tokio::select! {
+                            _ = self.runtime.shutdown.cancelled() => {
+                                return Err(CodexErr::InvalidRequest("agent runtime is shutting down".into()));
+                            }
+                            update = activity.changed() => {
+                                update.map_err(|_| CodexErr::InternalAgentDied)?;
+                            }
+                        }
+                        continue;
+                    }
+                    result => result?,
+                }
+            }
+            return Ok(self.runtime.track_runtime_guard(guard));
+        }
+    }
+
     /// Routes a captured terminal outcome without retaining the child's live turn context.
     pub(crate) async fn notify_parent_of_terminal_turn(
         &self,
@@ -121,7 +178,10 @@ impl LocalAgentControl {
                 parent_thread_id,
                 communication,
                 context,
-                TurnStartOptions::default(),
+                TurnStartOptions {
+                    resume_parent_on_completion: true,
+                    ..Default::default()
+                },
             )
             .await
         {

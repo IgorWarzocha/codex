@@ -47,6 +47,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
+use codex_protocol::protocol::W3cTraceContext;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::ReadThreadParams;
@@ -57,6 +58,7 @@ use std::sync::Weak;
 use tracing::warn;
 use uuid::Uuid;
 
+pub(crate) use self::residency::V2ResidencyPin;
 pub(crate) use self::runtime::AgentControlInit;
 pub(crate) use self::runtime::AgentTreeMembership;
 pub(crate) use self::runtime::AgentTreeShutdownState;
@@ -168,6 +170,11 @@ impl LocalAgentControl {
         start_options: TurnStartOptions,
     ) -> CodexResult<String> {
         let state = self.runtime.upgrade()?;
+        let _completion_guard = if start_options.resume_parent_on_completion {
+            Some(self.completion_parent_guard(agent_id, &state).await?)
+        } else {
+            None
+        };
         if communication.trigger_turn {
             let thread = state.get_thread(agent_id).await?;
             thread
@@ -271,7 +278,10 @@ impl LocalAgentControl {
                 self.runtime.mailboxes.enqueue(
                     agent_id,
                     Some(submission_id.clone()),
-                    vec![communication],
+                    vec![crate::agent::api::AgentMailboxMessage {
+                        communication,
+                        start_options,
+                    }],
                 )?;
                 if let Some(communication) = communication_for_log {
                     crate::agent_communication::emit_agent_communication_send(
@@ -325,16 +335,37 @@ impl LocalAgentControl {
 
     /// Interrupt the current task for an existing agent thread.
     pub(crate) async fn interrupt_agent(&self, agent_id: ThreadId) -> CodexResult<String> {
+        self.send_lifecycle_op(agent_id, Op::Interrupt).await
+    }
+
+    /// Serialize explicit lifecycle operations with eviction and automatic reload.
+    pub(crate) async fn send_lifecycle_op(
+        &self,
+        agent_id: ThreadId,
+        op: Op,
+    ) -> CodexResult<String> {
+        self.send_lifecycle_op_with_trace(agent_id, op, None).await
+    }
+
+    pub(crate) async fn send_lifecycle_op_with_trace(
+        &self,
+        agent_id: ThreadId,
+        op: Op,
+        trace: Option<W3cTraceContext>,
+    ) -> CodexResult<String> {
+        let _runtime_guard = match self.runtime.registry.runtime_gate(agent_id) {
+            Some(gate) => Some(self.runtime.track_runtime_guard(gate.lock_owned().await)),
+            None => None,
+        };
+        self.runtime.registry.block_evicted_completion(agent_id);
+        self.runtime.notify_residency_activity();
         let state = self.runtime.upgrade()?;
         self.handle_thread_request_result(
             agent_id,
             &state,
             state
-                .send_op(
-                    agent_id,
-                    Op::Interrupt,
-                    /*parent_turn_id*/ None,
-                    /*root_turn_id*/ None,
+                .send_op_with_trace(
+                    agent_id, op, trace, /*parent_turn_id*/ None, /*root_turn_id*/ None,
                 )
                 .await,
         )

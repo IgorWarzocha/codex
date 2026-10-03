@@ -1,4 +1,5 @@
 use crate::agent::types::AgentMetadata;
+use crate::config::Config;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
@@ -39,6 +40,9 @@ struct ActiveAgents {
 struct RegisteredAgent {
     path: String,
     evicted_environments: Option<Vec<TurnEnvironmentSelection>>,
+    /// Only natural completion before automatic eviction authorizes a result-driven reload.
+    evicted_completion_config: Option<Arc<Config>>,
+    runtime_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl RegisteredAgent {
@@ -46,6 +50,8 @@ impl RegisteredAgent {
         Self {
             path,
             evicted_environments: None,
+            evicted_completion_config: None,
+            runtime_gate: Arc::default(),
         }
     }
 }
@@ -173,6 +179,7 @@ impl AgentRegistry {
         &self,
         thread_id: ThreadId,
         environments: Vec<TurnEnvironmentSelection>,
+        completion_config: Option<Arc<Config>>,
     ) {
         let mut active_agents = self
             .active_agents
@@ -180,6 +187,7 @@ impl AgentRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(agent) = active_agents.thread_paths.get_mut(&thread_id) {
             agent.evicted_environments = Some(environments);
+            agent.evicted_completion_config = completion_config;
         }
     }
 
@@ -204,6 +212,38 @@ impl AgentRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(agent) = active_agents.thread_paths.get_mut(&thread_id) {
             agent.evicted_environments = None;
+            agent.evicted_completion_config = None;
+        }
+    }
+
+    pub(crate) fn runtime_gate(&self, thread_id: ThreadId) -> Option<Arc<tokio::sync::Mutex<()>>> {
+        self.active_agents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .thread_paths
+            .get(&thread_id)
+            .map(|agent| Arc::clone(&agent.runtime_gate))
+    }
+
+    pub(crate) fn evicted_completion_config(&self, thread_id: ThreadId) -> Option<Arc<Config>> {
+        self.active_agents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .thread_paths
+            .get(&thread_id)
+            .and_then(|agent| agent.evicted_completion_config.clone())
+    }
+
+    /// Called with the runtime gate held. Stop must also fence a known unloaded recipient.
+    pub(crate) fn block_evicted_completion(&self, thread_id: ThreadId) {
+        if let Some(agent) = self
+            .active_agents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .thread_paths
+            .get_mut(&thread_id)
+        {
+            agent.evicted_completion_config = None;
         }
     }
 
@@ -237,15 +277,21 @@ impl AgentRegistry {
         if let Some(agent_nickname) = agent_metadata.agent_nickname.clone() {
             active_agents.used_agent_nicknames.insert(agent_nickname);
         }
-        if let Some(previous_agent) = active_agents
+        let previous_path = active_agents
             .thread_paths
-            .insert(thread_id, RegisteredAgent::new(key.clone()))
-            && previous_agent.path != key
+            .get(&thread_id)
+            .map(|agent| agent.path.clone());
+        if let Some(previous_path) = previous_path
+            && previous_path != key
         {
-            active_agents
-                .agent_tree
-                .remove(previous_agent.path.as_str());
+            active_agents.agent_tree.remove(previous_path.as_str());
         }
+        // Reloading the same identity must not replace the gate that admitted its startup.
+        active_agents
+            .thread_paths
+            .entry(thread_id)
+            .or_insert_with(|| RegisteredAgent::new(key.clone()))
+            .path = key.clone();
         if let Some(previous_metadata) = active_agents.agent_tree.insert(key, agent_metadata)
             && let Some(previous_thread_id) = previous_metadata.agent_id
             && previous_thread_id != thread_id

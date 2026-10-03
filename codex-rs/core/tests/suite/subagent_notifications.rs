@@ -2867,6 +2867,30 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
     const REQUESTER_CALL_ID: &str = "spawn-routing-requester";
     const FOLLOWUP_CALL_ID: &str = "request-peer-followup";
 
+    // Child results can now start a root continuation. Require fresh turns so an
+    // on-start trigger is applied and queued completions cannot satisfy the wrong wait.
+    async fn submit_fresh_turn(test: &TestCodex, request: TurnInputRequest) -> Result<()> {
+        let turn_id = timeout(Duration::from_secs(5), async {
+            loop {
+                let submission = test.codex.start_turn_if_idle(request.clone()).await?;
+                match submission {
+                    codex_core::StartIfIdleSubmission::Started { turn_id } => {
+                        break Ok::<_, anyhow::Error>(turn_id);
+                    }
+                    codex_core::StartIfIdleSubmission::NotSubmitted {
+                        reason: codex_core::NotSubmittedReason::NotIdle,
+                    } => tokio::task::yield_now().await,
+                    other => anyhow::bail!("fresh root turn was not admitted: {other:?}"),
+                }
+            }
+        })
+        .await??;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(completed) if completed.turn_id == turn_id)
+        }).await;
+        Ok(())
+    }
+
     let server = start_mock_server().await;
     let mut builder = test_codex()
         .with_config(configure_legacy_tool_fixture)
@@ -3036,7 +3060,18 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
         );
     }
 
-    submit_turn_with_trigger(&test, SPAWN_REQUESTER_PROMPT, "composer").await?;
+    submit_fresh_turn(
+        &test,
+        TurnInputRequest::user_input(vec![UserInput::Text {
+            text: SPAWN_REQUESTER_PROMPT.to_string(),
+            text_elements: Vec::new(),
+        }])
+        .on_start(TurnStartOptions {
+            turn_trigger: Some("composer".to_string()),
+            ..Default::default()
+        }),
+    )
+    .await?;
     let requester_thread_id = created_threads.recv().await?;
     let requester_thread = test.thread_manager.get_thread(requester_thread_id).await?;
     let requester_turn_id = wait_for_event_match(requester_thread.as_ref(), |event| match event {
@@ -3140,7 +3175,19 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
         ]),
     )
     .await;
-    test.submit_turn(READ_RESULT_PROMPT).await?;
+    submit_fresh_turn(
+        &test,
+        TurnInputRequest::user_input(vec![UserInput::Text {
+            text: READ_RESULT_PROMPT.to_string(),
+            text_elements: Vec::new(),
+        }])
+        .with_thread_settings(ThreadSettingsOverrides {
+            approval_policy: Some(AskForApproval::Never),
+            permission_profile: Some(PermissionProfile::Disabled),
+            ..Default::default()
+        }),
+    )
+    .await?;
     let root_request = root_result_request
         .requests()
         .into_iter()

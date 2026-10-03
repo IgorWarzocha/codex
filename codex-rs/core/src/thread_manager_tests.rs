@@ -78,6 +78,7 @@ impl codex_extension_api::ThreadInstructionsProvider for ParentInstructionsProvi
 async fn live_fork_keeps_instructions_when_source_is_unloaded_during_setup() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -164,6 +165,7 @@ async fn thread_analytics_opt_out_overrides_shared_client() {
         .await;
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.chatgpt_base_url = server.uri();
     config.model_provider.base_url = Some(server.uri());
     let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
@@ -297,6 +299,7 @@ fn thread_id_generator_defaults_to_standard_ids() {
 async fn reserved_thread_id_is_used_without_changing_normal_id_generation() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -355,6 +358,7 @@ async fn reserved_thread_id_is_used_without_changing_normal_id_generation() {
 async fn thread_id_generator_applies_to_roots_children_and_forks() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -426,6 +430,7 @@ async fn thread_id_generator_applies_to_roots_children_and_forks() {
 async fn thread_id_generator_does_not_replace_resumed_thread_id() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -494,6 +499,7 @@ async fn thread_id_generator_does_not_replace_resumed_thread_id() {
 async fn child_session_inherits_client_mcp_extensions() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -843,6 +849,7 @@ async fn ignores_session_prefix_messages_when_truncating() {
         .build_initial_context_with_world_state(&step_context, &world_state)
         .await
         .0;
+    let prefix_len = items.len();
     items.push(user_msg("feature request"));
     items.push(assistant_msg("ack"));
     items.push(user_msg("second question"));
@@ -866,12 +873,11 @@ async fn ignores_session_prefix_messages_when_truncating() {
     );
     let got_items = truncated.get_rollout_items();
 
-    let expected: Vec<RolloutItem> = vec![
-        RolloutItem::ResponseItem(items[0].clone().into()),
-        RolloutItem::ResponseItem(items[1].clone().into()),
-        RolloutItem::ResponseItem(items[2].clone().into()),
-        RolloutItem::ResponseItem(items[3].clone().into()),
-    ];
+    let expected: Vec<RolloutItem> = items[..prefix_len + 2]
+        .iter()
+        .cloned()
+        .map(|item| RolloutItem::ResponseItem(item.into()))
+        .collect();
 
     assert_eq!(
         serde_json::to_value(got_items).unwrap(),
@@ -883,6 +889,7 @@ async fn ignores_session_prefix_messages_when_truncating() {
 async fn shutdown_all_threads_bounded_submits_shutdown_to_every_thread() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -920,6 +927,8 @@ async fn shutdown_all_threads_bounded_submits_shutdown_to_every_thread() {
 async fn code_mode_session_provider_is_shared_across_threads() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
+    config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -1017,6 +1026,7 @@ async fn mcp_invalidation_refreshes_threads_that_are_still_starting() {
 
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -1076,6 +1086,7 @@ async fn mcp_invalidation_refreshes_threads_that_are_still_starting() {
 async fn start_thread_keeps_internal_threads_hidden_from_normal_lookups() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -1165,6 +1176,7 @@ async fn spawn_internal_guardian_session_preserves_windows_sandbox_proxy_setting
 async fn fork_internal_session_uses_only_the_selected_history() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -1264,6 +1276,7 @@ async fn spawn_internal_session_preserves_parent_lineage_without_forking_history
 
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.rollout_budget = Some(RolloutBudgetConfig {
         limit_tokens: 100,
         reminder_at_remaining_tokens: vec![75, 50, 25],
@@ -1892,6 +1905,7 @@ async fn start_thread_seeds_extension_data_for_mcp_and_lifecycle_contributors() 
 async fn selected_capability_roots_round_trip_through_fork() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config.context_strategy = crate::config::ContextStrategy::Compaction;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -2971,6 +2985,10 @@ fn mixed_response_and_legacy_user_event_history_is_mid_turn() {
 async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_for_legacy_history() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config
+        .features
+        .disable(Feature::MultiAgentV2)
+        .expect("select legacy interruption markers");
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
@@ -3184,6 +3202,10 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
 async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_source() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
+    config
+        .features
+        .disable(Feature::MultiAgentV2)
+        .expect("select legacy interruption markers");
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");

@@ -19,6 +19,7 @@ use tracing::warn;
 #[derive(Default)]
 pub(super) struct V2Residency {
     state: Mutex<V2ResidencyState>,
+    activity: tokio::sync::watch::Sender<()>,
 }
 
 #[derive(Default)]
@@ -30,6 +31,40 @@ struct V2ResidencyState {
 pub(super) struct V2ResidencySlot {
     residency: Arc<V2Residency>,
     active: bool,
+}
+
+/// A capacity waiter may skip an idle runtime while this gate is held. Notify after
+/// unlocking even if startup or delivery is cancelled, not just when slots change.
+pub(super) struct V2RuntimeGuard {
+    gate: Option<tokio::sync::OwnedMutexGuard<()>>,
+    residency: Arc<V2Residency>,
+}
+
+impl Drop for V2RuntimeGuard {
+    fn drop(&mut self) {
+        drop(self.gate.take());
+        self.residency.activity.send_replace(());
+    }
+}
+
+/// Submissions transfer this pin to the queue. Failed or cancelled senders must
+/// wake capacity waiters just like a handler releasing the last resident pin.
+pub(crate) struct V2ResidencyPin {
+    gate: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    residency: Arc<V2Residency>,
+}
+
+impl std::fmt::Debug for V2ResidencyPin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("V2ResidencyPin").finish_non_exhaustive()
+    }
+}
+
+impl Drop for V2ResidencyPin {
+    fn drop(&mut self) {
+        drop(self.gate.take());
+        self.residency.activity.send_replace(());
+    }
 }
 
 impl V2ResidencySlot {
@@ -79,16 +114,32 @@ impl LocalAgentControl {
 }
 
 impl LocalAgentRuntime {
+    pub(super) fn track_runtime_guard(
+        &self,
+        gate: tokio::sync::OwnedMutexGuard<()>,
+    ) -> V2RuntimeGuard {
+        V2RuntimeGuard {
+            gate: Some(gate),
+            residency: Arc::clone(&self.residency),
+        }
+    }
+
+    pub(crate) fn notify_residency_activity(&self) {
+        self.residency.activity.send_replace(());
+    }
     /// Pins and touches the registered runtime without waiting for unrelated eviction.
     pub(crate) async fn pin_v2_residency(
         &self,
         state: &ThreadManagerState,
         thread: &Arc<CodexThread>,
-    ) -> CodexResult<Option<tokio::sync::OwnedRwLockReadGuard<()>>> {
+    ) -> CodexResult<Option<V2ResidencyPin>> {
         if !is_resident_candidate(thread) {
             return Ok(None);
         }
-        let guard = Arc::clone(&thread.residency_gate).read_owned().await;
+        let guard = V2ResidencyPin {
+            gate: Some(Arc::clone(&thread.residency_gate).read_owned().await),
+            residency: Arc::clone(&self.residency),
+        };
         let thread_id = thread.session.thread_id;
         if !Arc::ptr_eq(thread, &state.get_thread(thread_id).await?) {
             return Err(CodexErr::ThreadNotFound(thread_id));
@@ -99,6 +150,9 @@ impl LocalAgentRuntime {
 }
 
 impl V2Residency {
+    pub(super) fn watch_activity(&self) -> tokio::sync::watch::Receiver<()> {
+        self.activity.subscribe()
+    }
     async fn reserve_slot(
         self: Arc<Self>,
         manager: &Arc<ThreadManagerState>,
@@ -165,6 +219,21 @@ impl V2Residency {
                     }
                 }
             };
+            let runtime_guard = if let Some(runtime_gate) = candidate_thread
+                .session
+                .services
+                .local_agent_runtime
+                .registry
+                .runtime_gate(candidate_thread_id)
+            {
+                let Ok(guard) = runtime_gate.try_lock_owned() else {
+                    continue;
+                };
+                Some(guard)
+            } else {
+                // Private delegates need no registered identity or automatic reload capability.
+                None
+            };
             let Ok(residency_guard) =
                 Arc::clone(&candidate_thread.residency_gate).try_write_owned()
             else {
@@ -184,7 +253,22 @@ impl V2Residency {
             let residency = Arc::clone(self);
             let teardown = membership.clone().into_teardown_guard();
             let eviction = tokio::spawn(async move {
+                let _runtime_guard = runtime_guard;
                 let _residency_guard = residency_guard;
+                // Shutdown used for memory cleanup is not a user Stop. Capture eligibility
+                // before it changes the live session's status and cancellation state.
+                let completion_config = if matches!(
+                    candidate_thread.agent_status().await,
+                    AgentStatus::Completed(_)
+                ) && candidate_thread
+                    .session
+                    .can_wake_for_pending_work(false, true)
+                    .await
+                {
+                    Some(candidate_thread.config().await)
+                } else {
+                    None
+                };
                 candidate_thread.ensure_rollout_materialized().await;
                 if let Err(err) = candidate_thread.shutdown_and_wait().await {
                     warn!(
@@ -201,7 +285,7 @@ impl V2Residency {
                     .drain_mailbox()
                     .await
                     .into_iter()
-                    .map(|mail| mail.communication)
+                    .map(|mail| mail.into_message())
                     .collect();
                 // A concurrent tree shutdown deliberately discards its unread mail.
                 let _ = candidate_thread
@@ -224,7 +308,11 @@ impl V2Residency {
                     .services
                     .local_agent_runtime
                     .registry
-                    .save_evicted_environments(candidate_thread_id, environments);
+                    .save_evicted_environments(
+                        candidate_thread_id,
+                        environments,
+                        completion_config,
+                    );
                 // Keep publication excluded until both entries have been removed.
                 threads.remove(&candidate_thread_id);
                 residency.remove(candidate_thread_id);
@@ -254,6 +342,7 @@ impl V2Residency {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .residents
             .retain(|resident_thread_id| *resident_thread_id != thread_id);
+        self.activity.send_replace(());
     }
 
     fn commit_slot(&self, thread_id: ThreadId) {
@@ -263,6 +352,8 @@ impl V2Residency {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.pending_slots = state.pending_slots.saturating_sub(1);
         touch_resident(&mut state.residents, thread_id);
+        drop(state);
+        self.activity.send_replace(());
     }
 
     fn release_pending_slot(&self) {
@@ -271,6 +362,8 @@ impl V2Residency {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.pending_slots = state.pending_slots.saturating_sub(1);
+        drop(state);
+        self.activity.send_replace(());
     }
 }
 

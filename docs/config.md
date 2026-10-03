@@ -30,8 +30,9 @@ codex settings set code-mode v8
 or runtime options. A model that explicitly requires Code Mode can still select
 it. Notebook requires a single local environment, full-access permissions and
 Deno. Selecting it never grants access. `multi-agent off` disables both tool
-generations. `subagent-wait` independently controls the V2 wait tool, not automatic
-delivery of child results.
+generations. `subagent-wait` independently controls the V2 wait tool, which is off
+by default. It is not required for automatic child-result delivery or resumption
+of an idle parent. Stop and session shutdown prevent that automatic resumption.
 
 `/experimental` includes Beta features and selected UnderDevelopment features
 with public metadata from the feature registry. Internal, removed, deprecated

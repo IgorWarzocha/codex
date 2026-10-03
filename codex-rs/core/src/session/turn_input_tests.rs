@@ -168,6 +168,30 @@ async fn steering_does_not_wait_for_realtime_history() {
 }
 
 #[tokio::test]
+async fn shutdown_never_admits_completion_wake() {
+    let (session, _turn, _rx) = make_session_and_context_with_rx().await;
+    super::super::handlers::shutdown_session_runtime(&session).await;
+    session
+        .input_queue
+        .enqueue_mailbox_communication(
+            InterAgentCommunication::new(
+                AgentPath::root().join("worker").unwrap(),
+                AgentPath::root(),
+                Vec::new(),
+                "shutdown result".to_string(),
+                false,
+            ),
+            TurnStartOptions {
+                resume_parent_on_completion: true,
+                ..Default::default()
+            },
+        )
+        .await;
+    session.maybe_start_turn_for_pending_work().await;
+    assert!(session.active_turn.lock().await.is_none());
+}
+
+#[tokio::test]
 async fn accepted_input_applies_thread_settings() {
     let (session, turn_context, _rx) = make_session_and_context_with_rx().await;
     let config = session.get_config().await;

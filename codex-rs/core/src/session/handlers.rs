@@ -84,11 +84,12 @@ pub async fn inter_agent_communication(
     start_options: codex_protocol::turn_input::TurnStartOptions,
 ) {
     let trigger_turn = communication.trigger_turn;
+    let completion = start_options.resume_parent_on_completion;
     sess.input_queue
         .enqueue_mailbox_communication(communication, start_options)
         .await;
     crate::agent_communication::emit_agent_communication_receive(&sub_id);
-    if trigger_turn || sess.has_outstanding_durable_sleep() {
+    if trigger_turn || completion || sess.has_outstanding_durable_sleep() {
         sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id)
             .await;
     }
@@ -451,9 +452,8 @@ pub(super) async fn submission_loop(
                 match update {
                     Ok(true) => {
                         sess.input_queue.notify_mailbox();
-                        if sess.has_outstanding_durable_sleep() {
-                            sess.maybe_start_turn_for_pending_work().await;
-                        }
+                        sess.input_queue.refresh_mailbox().await;
+                        sess.maybe_start_turn_for_pending_work().await;
                     }
                     Ok(false) => {}
                     Err(_) => mailbox = None,

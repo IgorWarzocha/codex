@@ -161,6 +161,10 @@ pub enum CyberAccessProgram {
 /// child input, Core also compares root lineage to detect ambiguity.
 #[derive(Clone, Debug, Default)]
 pub struct TurnStartOptions {
+    /// Internal V2 result delivery may resume an idle parent unless it was stopped.
+    /// Unlike `trigger_turn`, this is not a new task. Only automatic residency eviction
+    /// of a naturally completed recipient authorizes loading an absent runtime.
+    pub resume_parent_on_completion: bool,
     /// Source classification for this request. Recorded on new turns and captured
     /// as input provenance when steering, without changing the active turn's trigger.
     pub turn_trigger: Option<String>,

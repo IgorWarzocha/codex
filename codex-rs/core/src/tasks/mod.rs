@@ -4,6 +4,9 @@ mod regular;
 mod review;
 mod user_shell;
 
+#[cfg(test)]
+mod completion_wake_tests;
+
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -28,6 +31,8 @@ use crate::codex_thread::BackgroundTerminalInfo;
 use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::hook_runtime::run_turn_interrupt_hooks;
+use crate::session::InputQueue;
+use crate::session::PendingMailboxCommunication;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn::run_hooks_and_record_inputs;
@@ -73,6 +78,12 @@ const TASK_COMPACT_METRIC: &str = "codex.task.compact";
 static ACTIVE_TURNS: Gauge = Gauge::new("core.turns.active");
 
 pub(crate) type SessionTaskResult = CodexResult<Option<String>>;
+
+/// A synthetic start owns its original mail until registration commits the turn.
+struct TaskStartReservation {
+    turn_state: Arc<Mutex<TurnState>>,
+    mail: Vec<PendingMailboxCommunication>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InterruptedTurnHistoryMarker {
@@ -280,16 +291,42 @@ impl Session {
         self.start_task(turn_context, input, task).await;
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "record the started turn atomically with its active reservation"
-    )]
     pub(crate) async fn start_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
     ) {
+        self.start_task_with_reservation(turn_context, input, task, None)
+            .await;
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "record the started turn atomically with its active reservation"
+    )]
+    async fn start_task_with_reservation<T: SessionTask>(
+        self: &Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        input: Vec<TurnInput>,
+        task: T,
+        reservation: Option<TaskStartReservation>,
+    ) {
+        let (reservation, mut pending_mail) = match reservation {
+            Some(reservation) => (Some(reservation.turn_state), reservation.mail),
+            None => (None, Vec::new()),
+        };
+        if let Some(expected) = &reservation
+            && self
+                .active_turn
+                .lock()
+                .await
+                .as_ref()
+                .is_none_or(|turn| !Arc::ptr_eq(&turn.turn_state, expected))
+        {
+            self.input_queue.restore_mailbox(pending_mail).await;
+            return;
+        }
         self.activate_plugin_selection(&turn_context).await;
         // Inherited or recovered roots are applied before task start. Otherwise this
         // task owns its turn, including background work. Later mail cannot change it.
@@ -312,18 +349,24 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
-        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
         let turn_state = {
             let mut active = self.active_turn.lock().await;
+            if let Some(expected) = &reservation
+                && active
+                    .as_ref()
+                    .is_none_or(|turn| !Arc::ptr_eq(&turn.turn_state, expected))
+            {
+                drop(active);
+                self.input_queue.restore_mailbox(pending_mail).await;
+                return;
+            }
             self.record_started_turn(&turn_context.sub_id).await;
             let turn = active.get_or_insert_with(ActiveTurn::default);
             debug_assert!(turn.task.is_none());
             Arc::clone(&turn.turn_state)
         };
+        pending_mail.extend(self.input_queue.drain_mailbox().await);
         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
-        self.input_queue
-            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
-            .await;
         self.emit_turn_start_lifecycle(
             turn_context.as_ref(),
             Some(&token_usage_at_turn_start),
@@ -332,8 +375,26 @@ impl Session {
         .await;
 
         let mut active = self.active_turn.lock().await;
-        let turn = active.get_or_insert_with(ActiveTurn::default);
-        debug_assert!(turn.task.is_none());
+        // Stop may remove the reservation during lifecycle callbacks. Never recreate it.
+        let Some(turn) = active
+            .as_mut()
+            .filter(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state) && turn.task.is_none())
+        else {
+            drop(active);
+            self.input_queue.restore_mailbox(pending_mail).await;
+            return;
+        };
+        // Only a committed task consumes per-mail startup metadata. Cancellation restores
+        // the original envelopes, so Stop cannot be bypassed through a lost completion flag.
+        self.input_queue
+            .extend_pending_input_for_turn_state(
+                turn_state.as_ref(),
+                pending_mail
+                    .into_iter()
+                    .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
+                    .collect(),
+            )
+            .await;
         let agent_execution_guard = self.services.agent_control.admit_turn(
             turn_context.multi_agent_version,
             &turn_context.session_source,
@@ -431,7 +492,7 @@ impl Session {
     /// Starts a regular turn when the session is idle and pending work is waiting.
     ///
     /// Pending work includes mailbox mail marked with `trigger_turn`, or any mailbox mail while
-    /// an outstanding durable sleep is attached to the thread.
+    /// an outstanding durable sleep is attached to the thread, or a V2 child result when not stopped.
     ///
     /// This helper generates a fresh sub-id for the synthetic turn before delegating to the
     /// explicit-sub-id variant.
@@ -447,22 +508,29 @@ impl Session {
     /// Starts a regular turn with the provided sub-id when pending work should wake an idle
     /// session.
     ///
-    /// The turn is created only when the session is idle and mailbox mail either requests a turn
-    /// or can wake an outstanding durable sleep.
+    /// Explicit tasks and durable sleep keep their existing wake behavior. Child results may
+    /// resume a naturally idle parent, but cannot override Stop even with durable sleep attached.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "pending-work admission and Stop must share the active reservation lock"
+    )]
     pub(crate) async fn maybe_start_turn_for_pending_work_with_sub_id(
         self: &Arc<Self>,
         sub_id: String,
     ) {
-        if !self.input_queue.has_pending_mailbox_items().await
-            || (!self.input_queue.has_trigger_turn_mailbox_items().await
-                && !self.has_outstanding_durable_sleep())
-        {
-            return;
-        }
-
         let turn_state = {
             let mut active_turn = self.active_turn.lock().await;
-            if active_turn.is_some() {
+            if active_turn.is_some() || !self.input_queue.has_pending_mailbox_items().await {
+                return;
+            }
+            // Recheck mail under the reservation lock. A competing wake may already have
+            // consumed it and completed its turn while this caller was waiting for the lock.
+            let explicit_wake = self.input_queue.has_trigger_turn_mailbox_items().await;
+            let completion_wake = self.input_queue.has_completion_mailbox_items().await;
+            if !self
+                .can_wake_for_pending_work(explicit_wake, completion_wake)
+                .await
+            {
                 return;
             }
             let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
@@ -483,12 +551,15 @@ impl Session {
         {
             return;
         }
-        let (input, mut start_options) =
-            self.input_queue.get_pending_input(&self.active_turn).await;
-        if !input.iter().any(
-            |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
-        ) {
-            // Queue-only mail wakes durable sleep without selecting a new task's settings.
+        // A fresh reservation has no turn-local input. Do not drain a replacement turn's
+        // steers if Stop or explicit input supersedes this reservation during startup.
+        let pending_mail = self.input_queue.drain_mailbox().await;
+        let mut start_options = InputQueue::mailbox_start_options(&pending_mail);
+        if !pending_mail
+            .iter()
+            .any(|mail| mail.communication.trigger_turn)
+        {
+            // Sleep and child-result continuations retain the previous turn's treatment.
             start_options.cyber_access_program = self
                 .reference_context_item()
                 .await
@@ -507,10 +578,8 @@ impl Session {
             turn_context.turn_metadata_state.set_turn_trigger(trigger);
         }
         if let Some(id) = start_options.parent_turn_id {
-            if let Some(initiating_agent_path) = input.iter().find_map(|item| {
-                let TurnInput::InterAgentCommunication(communication) = item else {
-                    return None;
-                };
+            if let Some(initiating_agent_path) = pending_mail.iter().find_map(|mail| {
+                let communication = &mail.communication;
                 communication
                     .trigger_turn
                     .then(|| communication.author.clone())
@@ -526,12 +595,16 @@ impl Session {
         }
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
-        // Task completion must still save this mail if pre-turn compaction fails.
-        self.input_queue
-            .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
-            .await;
-        self.start_task(turn_context, Vec::new(), RegularTask::new())
-            .await;
+        self.start_task_with_reservation(
+            turn_context,
+            Vec::new(),
+            RegularTask::new(),
+            Some(TaskStartReservation {
+                turn_state,
+                mail: pending_mail,
+            }),
+        )
+        .await;
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {
@@ -559,6 +632,9 @@ impl Session {
             // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
             self.input_queue.clear_pending(&active_turn).await;
         }
+        self.services
+            .local_agent_runtime
+            .notify_residency_activity();
         if reason == TurnAbortReason::Interrupted && aborted_turn {
             self.maybe_start_turn_for_pending_work().await;
         }
@@ -581,6 +657,7 @@ impl Session {
                     reason,
                     TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
                 ) {
+                    self.block_completion_wake().await;
                     self.mark_interrupted();
                 }
                 active.take()
@@ -610,6 +687,10 @@ impl Session {
         // Let interrupted tasks observe cancellation before dropping pending approvals, or an
         // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
         self.input_queue.clear_pending(&active_turn).await;
+
+        self.services
+            .local_agent_runtime
+            .notify_residency_activity();
 
         if reason == TurnAbortReason::Interrupted {
             self.maybe_start_turn_for_pending_work().await;
@@ -650,6 +731,9 @@ impl Session {
         let turn_state = {
             let mut active = self.active_turn.lock().await;
             active.as_mut().and_then(|active_turn| {
+                if active_turn.task.as_ref()?.turn_context.sub_id != turn_context.sub_id {
+                    return None;
+                }
                 let task = active_turn.task.take()?;
                 task.handle.detach();
                 Some(Arc::clone(&active_turn.turn_state))
@@ -858,7 +942,8 @@ impl Session {
         let saved_guardian_completion =
             matches!(event, EventMsg::TurnComplete(_)) && self.is_private_guardian_reviewer().await;
         if !saved_guardian_completion {
-            self.send_event(turn_context.as_ref(), event.clone()).await;
+            self.send_event_without_parent_notification(turn_context.as_ref(), event.clone())
+                .await;
         }
 
         let cleared_active_turn = {
@@ -867,6 +952,9 @@ impl Session {
                 && active_turn.task.is_none()
                 && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
             {
+                if idle_cause != ThreadIdleCause::Completed {
+                    self.block_completion_wake().await;
+                }
                 *active = None;
                 true
             } else {
@@ -875,9 +963,15 @@ impl Session {
         };
         if saved_guardian_completion {
             // The parent can request another review as soon as it receives this event.
-            self.send_event(turn_context.as_ref(), event).await;
+            self.send_event(turn_context.as_ref(), event.clone()).await;
         }
         if cleared_active_turn {
+            self.services
+                .local_agent_runtime
+                .notify_residency_activity();
+            // A completed child can now be evicted to make room for its naturally idle parent.
+            self.maybe_notify_parent_of_terminal_turn(turn_context.as_ref(), &event)
+                .await;
             self.emit_thread_idle_lifecycle_if_idle(idle_cause).await;
         }
         // Private reviewers already flushed the terminal event before delivering it.
@@ -892,6 +986,12 @@ impl Session {
 
     async fn take_active_turn(&self, reason: &TurnAbortReason) -> Option<ActiveTurn> {
         let mut active = self.active_turn.lock().await;
+        if matches!(
+            reason,
+            TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
+        ) {
+            self.block_completion_wake().await;
+        }
         if matches!(
             reason,
             TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited

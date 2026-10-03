@@ -7,6 +7,12 @@ impl LocalAgentControl {
     /// Submit a shutdown request for a live agent without marking it explicitly closed in
     /// persisted spawn-edge state.
     pub(crate) async fn shutdown_live_agent(&self, agent_id: ThreadId) -> CodexResult<String> {
+        let _runtime_guard = match self.runtime.registry.runtime_gate(agent_id) {
+            Some(gate) => Some(self.runtime.track_runtime_guard(gate.lock_owned().await)),
+            None => None,
+        };
+        self.runtime.registry.block_evicted_completion(agent_id);
+        self.runtime.notify_residency_activity();
         let state = self.runtime.upgrade()?;
         let result = if let Ok(thread) = state.get_thread(agent_id).await {
             thread

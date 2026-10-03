@@ -1,9 +1,9 @@
 //! Core-owned queue metadata; forwarding transfers the residency guard with the operation.
 
+use crate::agent::control::V2ResidencyPin;
 use codex_extension_api::ExtensionDataInit;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::W3cTraceContext;
-use tokio::sync::OwnedRwLockReadGuard;
 
 #[derive(Debug)]
 #[expect(dead_code, reason = "Turn ancestry is retained in Debug diagnostics.")]
@@ -17,5 +17,5 @@ pub(crate) struct Submission {
     pub parent_turn_id: Option<String>,
     pub root_turn_id: Option<String>,
     /// Keeps a V2 recipient resident until this submission is handled or dropped.
-    pub residency_guard: Option<OwnedRwLockReadGuard<()>>,
+    pub residency_guard: Option<V2ResidencyPin>,
 }

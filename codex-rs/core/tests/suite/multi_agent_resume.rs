@@ -31,6 +31,9 @@ use tokio::time::sleep;
 #[path = "multi_agent_restore_tests.rs"]
 mod restore_tests;
 
+#[path = "multi_agent_completion_tests.rs"]
+mod completion_tests;
+
 const COLLABORATION_NAMESPACE: &str = "collaboration";
 const SPAWN_CALL_ID: &str = "spawn-worker";
 const NESTED_CALL_ID: &str = "spawn-grandchild";
@@ -171,6 +174,46 @@ fn configure_multi_agent_v2_with_role(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Result<()> {
+    // A terminal child can now start a root continuation. Admit each fixture prompt
+    // only as a fresh turn and wait for its ID, never an older queued completion.
+    async fn submit_fresh_turn(
+        test: &core_test_support::test_codex::TestCodex,
+        prompt: &str,
+    ) -> Result<()> {
+        let turn_id = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let submission = test
+                    .codex
+                    .start_turn_if_idle(
+                        TurnInputRequest::user_input(vec![UserInput::Text {
+                            text: prompt.to_string(),
+                            text_elements: Vec::new(),
+                        }])
+                        .with_thread_settings(ThreadSettingsOverrides {
+                            approval_policy: Some(codex_protocol::protocol::AskForApproval::Never),
+                            permission_profile: Some(PermissionProfile::Disabled),
+                            ..Default::default()
+                        }),
+                    )
+                    .await?;
+                match submission {
+                    codex_core::StartIfIdleSubmission::Started { turn_id } => {
+                        break Ok::<_, anyhow::Error>(turn_id);
+                    }
+                    codex_core::StartIfIdleSubmission::NotSubmitted {
+                        reason: codex_core::NotSubmittedReason::NotIdle,
+                    } => tokio::task::yield_now().await,
+                    other => anyhow::bail!("fresh root turn was not admitted: {other:?}"),
+                }
+            }
+        })
+        .await??;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(completed) if completed.turn_id == turn_id)
+        }).await;
+        Ok(())
+    }
+
     let server = start_mock_server().await;
     let spawn_args = serde_json::to_string(&json!({
         "message": INITIAL_TASK,
@@ -267,28 +310,35 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     .await;
 
     let initial_model_provider_base_url = format!("{}/v1", server.uri());
-    let mut initial_builder = test_codex().with_config(move |config| {
+    let mut initial_builder = test_codex().with_direct_tools().with_config(move |config| {
         configure_multi_agent_v2_with_role(config, &initial_model_provider_base_url);
     });
     let initial = initial_builder.build_with_auto_env(&server).await?;
     let root_thread_id = initial.session_configured.thread_id;
-    initial
-        .codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: INITIAL_PROMPT.to_string(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                permission_profile: Some(PermissionProfile::Disabled),
-                ..Default::default()
-            }),
-        )
-        .await?;
-    wait_for_event(&initial.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+    // Acknowledge autonomous result-only continuations without consuming any mocked
+    // user task or collaboration tool response. Explicit task mocks keep priority.
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/responses"))
+        .and(move |request: &wiremock::Request| {
+            decoded_body(request)
+                .and_then(|body| serde_json::from_slice::<Value>(&body).ok())
+                .is_some_and(|body| {
+                    body["client_metadata"]["thread_id"] == json!(root_thread_id)
+                        && body["input"]
+                            .as_array()
+                            .and_then(|items| items.last())
+                            .is_some_and(|item| {
+                                item["type"] == "agent_message" && item["recipient"] == "/root"
+                            })
+                })
+        })
+        .respond_with(sse_response(sse(vec![ev_completed(
+            "resp-root-child-result",
+        )])))
+        .with_priority(10)
+        .mount(&server)
+        .await;
+    submit_fresh_turn(&initial, INITIAL_PROMPT).await?;
 
     let deadline = Instant::now() + Duration::from_secs(2);
     let worker_thread_id = loop {
@@ -373,7 +423,7 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
         ]),
     )
     .await;
-    initial.submit_turn(SIBLING_PROMPT).await?;
+    submit_fresh_turn(&initial, SIBLING_PROMPT).await?;
 
     let grandchild = nested_mock.last_request().expect("grandchild").body_json();
     let nested_id = &grandchild["client_metadata"]["thread_id"];
@@ -446,7 +496,7 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     .await;
 
     let resumed_model_provider_base_url = format!("{}/v1", server.uri());
-    let mut resume_builder = test_codex().with_config(move |config| {
+    let mut resume_builder = test_codex().with_direct_tools().with_config(move |config| {
         configure_multi_agent_v2_with_role(config, &resumed_model_provider_base_url);
     });
     let resumed = resume_builder.restart(&server, &initial).await?;
@@ -485,9 +535,9 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
         ]),
     )
     .await;
-    resumed.codex.submit(Op::Compact).await?;
+    let compact_turn_id = resumed.codex.submit(Op::Compact).await?;
     wait_for_event(&resumed.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        matches!(event, EventMsg::TurnComplete(completed) if completed.turn_id == compact_turn_id)
     })
     .await;
 
@@ -520,7 +570,7 @@ openai_base_url = "{redirected_base_url}"
         ]),
     )
     .await;
-    resumed.submit_turn(QUEUE_PROMPT).await?;
+    submit_fresh_turn(&resumed, QUEUE_PROMPT).await?;
 
     let reloaded_worker = resumed
         .thread_manager
@@ -532,7 +582,7 @@ openai_base_url = "{redirected_base_url}"
         resumed.codex.config().await.model_provider,
         "cold reload must preserve the parent's complete model provider",
     );
-    resumed.submit_turn(FOLLOWUP_PROMPT).await?;
+    submit_fresh_turn(&resumed, FOLLOWUP_PROMPT).await?;
     wait_for_event(reloaded_worker.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
@@ -555,14 +605,14 @@ openai_base_url = "{redirected_base_url}"
         ]),
     )
     .await;
-    resumed.codex.submit(Op::Compact).await?;
+    let compact_turn_id = resumed.codex.submit(Op::Compact).await?;
     wait_for_event(&resumed.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        matches!(event, EventMsg::TurnComplete(completed) if completed.turn_id == compact_turn_id)
     })
     .await;
     let roster_request =
         mount_sse_once(&server, sse(vec![ev_completed("resp-loaded-first-roster")])).await;
-    resumed.submit_turn("inspect the agent roster").await?;
+    submit_fresh_turn(&resumed, "inspect the agent roster").await?;
     assert!(roster_request.single_request().body_contains_text(
         r#"<subagents>
     <agent name="/root/worker" />
@@ -676,7 +726,7 @@ openai_base_url = "{redirected_base_url}"
         &interrupt_args,
     )
     .await;
-    resumed.submit_turn(INTERRUPT_PROMPT).await?;
+    submit_fresh_turn(&resumed, INTERRUPT_PROMPT).await?;
     assert!(
         resumed
             .thread_manager
@@ -711,7 +761,7 @@ openai_base_url = "{redirected_base_url}"
         ]),
     )
     .await;
-    resumed.submit_turn(SIBLING_FOLLOWUP_PROMPT).await?;
+    submit_fresh_turn(&resumed, SIBLING_FOLLOWUP_PROMPT).await?;
 
     let surviving_sibling = resumed
         .thread_manager

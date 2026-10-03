@@ -62,6 +62,7 @@ pub use agent::api::AgentConfigUpdate;
 pub use agent::api::AgentControl;
 pub use agent::api::AgentInfo;
 pub use agent::api::AgentInput;
+pub use agent::api::AgentMailboxMessage;
 pub use agent::api::AgentTarget;
 pub use agent::api::AgentTurnOutcome;
 pub use agent::api::DeliveryReceipt;

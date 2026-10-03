@@ -92,6 +92,8 @@ pub(crate) struct SessionState {
     pub(crate) reasoning_effort_pin: ReasoningEffortPin,
     /// Set under the state lock before shutdown takes the last warmup handle.
     pub(crate) shutting_down: bool,
+    /// Stop also applies while idle. Only admission of a new task clears this latch.
+    pub(crate) completion_wake_blocked: bool,
     /// Background model warmup scheduled at startup or while resuming an idle thread.
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
     /// Retained after completion so later turns do not repeat speculative captures.
@@ -135,6 +137,7 @@ impl SessionState {
             auto_compact_window: AutoCompactWindow::new_with_ids(auto_compact_window_ids),
             reasoning_effort_pin: ReasoningEffortPin::Unset,
             shutting_down: false,
+            completion_wake_blocked: false,
             startup_prewarm: None,
             shell_snapshot_prewarm: None,
             current_time_reminder: CurrentTimeReminderState::default(),

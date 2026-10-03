@@ -274,7 +274,9 @@ pub(crate) use self::environment::ThreadEnvironmentDefaults;
 #[cfg(test)]
 use self::handlers::submission_dispatch_span;
 use self::handlers::submission_loop;
+pub(crate) use self::input_queue::InputQueue;
 pub(crate) use self::input_queue::InputQueueActivity;
+pub(crate) use self::input_queue::PendingMailboxCommunication;
 pub(crate) use self::input_queue::TurnInput;
 pub(crate) use self::input_queue::TurnInputQueue;
 pub(crate) use self::input_queue::UserInputMetadata;
@@ -749,9 +751,16 @@ impl Session {
         // strategy and backend just like a fresh or resumed thread.
         token_budget::apply_context_strategy(Arc::make_mut(&mut config), auth.as_ref())?;
         let configured_config = Arc::clone(&config);
-        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
-            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
-        });
+        // Isolation is authoritative even when the configured default enables V2 agents.
+        let multi_agent_version = if inherited_multi_agent_version
+            == Some(MultiAgentVersion::Disabled)
+        {
+            inherited_multi_agent_version
+        } else {
+            config.multi_agent_version_override().or_else(|| {
+                resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
+            })
+        };
         let history_mode = conversation_history.get_history_mode(
             requested_history_mode.unwrap_or_else(|| thread_store.default_history_mode()),
         );
@@ -991,7 +1000,7 @@ impl SessionIo {
         trace: Option<W3cTraceContext>,
         parent_turn_id: Option<String>,
         root_turn_id: Option<String>,
-        residency_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        residency_guard: Option<crate::agent::control::V2ResidencyPin>,
     ) -> CodexResult<String> {
         let id = new_submission_id();
         let WithTurnExtensionData {
@@ -2290,6 +2299,26 @@ impl Session {
 
     /// Persist the event to rollout and send it to clients.
     pub(crate) async fn send_event(&self, turn_context: &TurnContext, msg: EventMsg) {
+        self.send_event_with_parent_notification(turn_context, msg, true)
+            .await;
+    }
+
+    /// Terminal task cleanup must release the child's active reservation before restoring a parent.
+    pub(crate) async fn send_event_without_parent_notification(
+        &self,
+        turn_context: &TurnContext,
+        msg: EventMsg,
+    ) {
+        self.send_event_with_parent_notification(turn_context, msg, false)
+            .await;
+    }
+
+    async fn send_event_with_parent_notification(
+        &self,
+        turn_context: &TurnContext,
+        msg: EventMsg,
+        notify_parent: bool,
+    ) {
         let legacy_source = msg.clone();
         if let EventMsg::Error(error) = &legacy_source
             && error
@@ -2332,8 +2361,10 @@ impl Session {
                 .track_guardian_session_event(self.thread_id, &event);
         }
         self.send_event_raw(event).await;
-        self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
-            .await;
+        if notify_parent {
+            self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
+                .await;
+        }
         self.maybe_mirror_event_text_to_realtime(&legacy_source)
             .await;
         self.maybe_clear_realtime_handoff_for_event(&legacy_source)
@@ -2353,7 +2384,7 @@ impl Session {
     }
 
     /// Forwards terminal turn events from spawned MultiAgentV2 children to their direct parent.
-    async fn maybe_notify_parent_of_terminal_turn(
+    pub(crate) async fn maybe_notify_parent_of_terminal_turn(
         &self,
         turn_context: &TurnContext,
         msg: &EventMsg,

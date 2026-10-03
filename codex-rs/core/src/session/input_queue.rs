@@ -1,4 +1,5 @@
 use crate::agent::api::AgentControl;
+use crate::agent::api::AgentMailboxMessage;
 use crate::agent_communication::PENDING_MAILBOX_MESSAGES;
 use crate::state::ActiveTurn;
 use crate::state::MailboxDeliveryPhase;
@@ -104,6 +105,15 @@ pub(crate) struct PendingMailboxCommunication {
     _diagnostics_guard: GaugeGuard,
 }
 
+impl PendingMailboxCommunication {
+    pub(crate) fn into_message(self) -> AgentMailboxMessage {
+        AgentMailboxMessage {
+            communication: self.communication,
+            start_options: self.start_options,
+        }
+    }
+}
+
 impl InputQueue {
     pub(crate) fn new() -> Self {
         let (activity_tx, _) = watch::channel(InputQueueActivity::Mailbox);
@@ -132,18 +142,20 @@ impl InputQueue {
         self.activity_tx.send_replace(InputQueueActivity::Mailbox);
     }
 
+    pub(crate) async fn refresh_mailbox(&self) {
+        let mut pending = self.mailbox_pending_mails.lock().await;
+        self.read_mailbox(&mut pending);
+    }
+
     fn read_mailbox(&self, pending: &mut VecDeque<PendingMailboxCommunication>) {
         if let Some((thread_id, control, _)) = &self.controller {
-            pending.extend(
-                control
-                    .take_mailbox(*thread_id)
-                    .into_iter()
-                    .map(|communication| PendingMailboxCommunication {
-                        communication,
-                        start_options: TurnStartOptions::default(),
-                        _diagnostics_guard: PENDING_MAILBOX_MESSAGES.track(),
-                    }),
-            );
+            pending.extend(control.take_mailbox(*thread_id).into_iter().map(|message| {
+                PendingMailboxCommunication {
+                    communication: message.communication,
+                    start_options: message.start_options,
+                    _diagnostics_guard: PENDING_MAILBOX_MESSAGES.track(),
+                }
+            }));
         }
     }
 
@@ -234,6 +246,14 @@ impl InputQueue {
             .any(|mail| mail.communication.trigger_turn)
     }
 
+    pub(crate) async fn has_completion_mailbox_items(&self) -> bool {
+        self.mailbox_pending_mails
+            .lock()
+            .await
+            .iter()
+            .any(|mail| mail.start_options.resume_parent_on_completion)
+    }
+
     pub(crate) async fn drain_mailbox(&self) -> Vec<PendingMailboxCommunication> {
         let mut pending = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut pending);
@@ -242,6 +262,27 @@ impl InputQueue {
 
     pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
         let pending_mails = self.drain_mailbox().await;
+        let start_options = Self::mailbox_start_options(&pending_mails);
+        let items = pending_mails
+            .into_iter()
+            .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
+            .collect();
+        (items, start_options)
+    }
+
+    /// Returns startup-owned mail before newer arrivals, preserving each delivery's options.
+    pub(crate) async fn restore_mailbox(&self, mails: Vec<PendingMailboxCommunication>) {
+        let mut pending = self.mailbox_pending_mails.lock().await;
+        self.read_mailbox(&mut pending);
+        for mail in mails.into_iter().rev() {
+            pending.push_front(mail);
+        }
+        self.activity_tx.send_replace(InputQueueActivity::Mailbox);
+    }
+
+    pub(crate) fn mailbox_start_options(
+        pending_mails: &[PendingMailboxCommunication],
+    ) -> TurnStartOptions {
         // A later follow-up supersedes the earlier choice, including an omitted choice.
         let mut start_options = pending_mails
             .iter()
@@ -267,11 +308,7 @@ impl InputQueue {
                     .filter(|id| !id.trim().is_empty())
             })
             .map(str::to_string);
-        let items = pending_mails
-            .into_iter()
-            .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
-            .collect();
-        (items, start_options)
+        start_options
     }
 
     pub(crate) async fn turn_state_for_sub_id(

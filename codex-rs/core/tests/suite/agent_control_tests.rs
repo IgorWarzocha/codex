@@ -100,13 +100,16 @@ impl AgentControl for TestAgentControl {
         Box::pin(async { Err(CodexErr::InvalidRequest("host send rejection".to_string())) })
     }
 
-    fn take_mailbox(
-        &self,
-        _agent: ThreadId,
-    ) -> Vec<codex_protocol::protocol::InterAgentCommunication> {
+    fn take_mailbox(&self, _agent: ThreadId) -> Vec<codex_core::AgentMailboxMessage> {
         let messages = std::mem::take(&mut *self.mail.lock().expect("mail lock"));
         self.mailbox_state.send_if_modified(std::mem::take);
         messages
+            .into_iter()
+            .map(|communication| codex_core::AgentMailboxMessage {
+                communication,
+                start_options: Default::default(),
+            })
+            .collect()
     }
 
     fn watch_mailbox(&self, _agent: ThreadId) -> tokio::sync::watch::Receiver<bool> {

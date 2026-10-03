@@ -255,7 +255,7 @@ impl CodexThread {
     }
 
     pub async fn submit(&self, op: Op) -> CodexResult<String> {
-        self.io.submit(op).await
+        self.submit_with_trace(op, None).await
     }
 
     /// Returns the session telemetry handle for thread-scoped production instrumentation.
@@ -392,6 +392,17 @@ impl CodexThread {
         op: Op,
         trace: Option<W3cTraceContext>,
     ) -> CodexResult<String> {
+        if self.multi_agent_version() == Some(MultiAgentVersion::V2)
+            && matches!(op, Op::Interrupt | Op::Shutdown)
+        {
+            return self
+                .session
+                .services
+                .local_agent_runtime
+                .control(self.session.services.agent_control.identity())
+                .send_lifecycle_op_with_trace(self.session.thread_id, op, trace)
+                .await;
+        }
         self.io
             .submit_with_trace(
                 op, trace, /*parent_turn_id*/ None, /*root_turn_id*/ None,

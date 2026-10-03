@@ -1,12 +1,12 @@
 //! Retains queue-only mail while local sessions are unloaded.
 //! Eviction transfers mail before releasing the recipient's residency guard.
 
+use crate::agent::api::AgentMailboxMessage;
 use crate::agent_communication::PENDING_MAILBOX_MESSAGES;
 use codex_diagnostics::GaugeGuard;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
-use codex_protocol::protocol::InterAgentCommunication;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::PoisonError;
@@ -28,7 +28,7 @@ struct Mailbox {
 
 struct StoredMail {
     id: Option<String>,
-    communication: InterAgentCommunication,
+    message: AgentMailboxMessage,
     _diagnostics_guard: GaugeGuard,
 }
 
@@ -37,7 +37,7 @@ impl Mailboxes {
         &self,
         agent: ThreadId,
         id: Option<String>,
-        messages: Vec<InterAgentCommunication>,
+        messages: Vec<AgentMailboxMessage>,
     ) -> Result<()> {
         let mut mailboxes = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let mailbox = mailboxes
@@ -47,16 +47,16 @@ impl Mailboxes {
             .or_default();
         mailbox
             .pending
-            .extend(messages.into_iter().map(|communication| StoredMail {
+            .extend(messages.into_iter().map(|message| StoredMail {
                 id: id.clone(),
-                communication,
+                message,
                 _diagnostics_guard: PENDING_MAILBOX_MESSAGES.track(),
             }));
         mailbox.state.send_replace(!mailbox.pending.is_empty());
         Ok(())
     }
 
-    pub(super) fn take(&self, agent: ThreadId) -> Vec<InterAgentCommunication> {
+    pub(super) fn take(&self, agent: ThreadId) -> Vec<AgentMailboxMessage> {
         let mut mailboxes = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(mailbox) = mailboxes
             .as_mut()
@@ -73,7 +73,7 @@ impl Mailboxes {
                 if let Some(id) = mail.id {
                     crate::agent_communication::emit_agent_communication_receive(&id);
                 }
-                mail.communication
+                mail.message
             })
             .collect()
     }

@@ -1718,8 +1718,23 @@ impl ThreadManagerState {
         parent_turn_id: Option<String>,
         root_turn_id: Option<String>,
     ) -> CodexResult<String> {
+        self.send_op_with_trace(thread_id, op, None, parent_turn_id, root_turn_id)
+            .await
+    }
+
+    pub(crate) async fn send_op_with_trace(
+        &self,
+        thread_id: ThreadId,
+        op: Op,
+        trace: Option<codex_protocol::protocol::W3cTraceContext>,
+        parent_turn_id: Option<String>,
+        root_turn_id: Option<String>,
+    ) -> CodexResult<String> {
         let thread = self.get_thread(thread_id).await?;
-        let residency_guard = if matches!(op, Op::InterAgentCommunication { .. }) {
+        let residency_guard = if matches!(
+            op,
+            Op::InterAgentCommunication { .. } | Op::Interrupt | Op::Shutdown
+        ) {
             thread
                 .session
                 .services
@@ -1737,13 +1752,7 @@ impl ThreadManagerState {
         }
         thread
             .io
-            .submit_with_trace(
-                op,
-                /*trace*/ None,
-                parent_turn_id,
-                root_turn_id,
-                residency_guard,
-            )
+            .submit_with_trace(op, trace, parent_turn_id, root_turn_id, residency_guard)
             .await
     }
 

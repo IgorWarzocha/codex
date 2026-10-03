@@ -178,6 +178,7 @@ async fn cold_root_resume_overlaps_child_reads_and_applies_identities_in_graph_o
     let server = start_mock_server().await;
     let initial_url = format!("{}/v1", server.uri());
     let initial = test_codex()
+        .with_direct_tools()
         .with_config(move |config| {
             configure_multi_agent_v2_with_role(config, &initial_url);
             config
@@ -259,6 +260,7 @@ async fn cold_root_resume_overlaps_child_reads_and_applies_identities_in_graph_o
     });
     let resume_url = format!("{}/v1", server.uri());
     let mut resume_builder = test_codex()
+        .with_direct_tools()
         .with_thread_store(store)
         .with_config(move |config| {
             configure_multi_agent_v2_with_role(config, &resume_url);

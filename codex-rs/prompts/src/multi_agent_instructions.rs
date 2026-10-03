@@ -8,7 +8,7 @@ use codex_protocol::models::ContentItemKind;
 const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "`model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrides require `fork_turns: \"none\"` or a positive integer string. Omitted or `\"all\"`: parent model and effort inherited";
 const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
     "`wait_agent`: waits of minutes preferred over busy polling";
-const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = "Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved";
+const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = "Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved. Continue independent work after delegating. When only child results remain, end your turn without claiming the task is finished. Child completion resumes an idle parent unless stopped or shut down. Do not poll for completion";
 const AGENT_MESSAGE_BOARD_USAGE_HINT_TEXT: &str = "In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, and findings. Parents pass relevant channel names and thread IDs in assignments. Children read and update those threads. Board posts do not assign work or wake idle agents.";
 const DIRECT_AGENT_COORDINATION_USAGE_HINT_TEXT: &str = "Use direct messages for targeted coordination. Use `followup_task` to start work for idle agents";
 

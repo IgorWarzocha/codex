@@ -174,10 +174,7 @@ impl AgentControl for LocalAgentControl {
         })
     }
 
-    fn take_mailbox(
-        &self,
-        agent: ThreadId,
-    ) -> Vec<codex_protocol::protocol::InterAgentCommunication> {
+    fn take_mailbox(&self, agent: ThreadId) -> Vec<crate::agent::api::AgentMailboxMessage> {
         self.runtime.mailboxes.take(agent)
     }
 

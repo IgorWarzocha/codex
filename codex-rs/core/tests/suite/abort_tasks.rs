@@ -45,6 +45,7 @@ async fn interrupt_long_running_tool_emits_turn_aborted() {
     mount_sse_once(&server, body).await;
 
     let fixture = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.4")
         .build(&server)
         .await
@@ -85,6 +86,7 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
     )
     .await;
     let test = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.4")
         .build_with_auto_env(&server)
         .await
@@ -174,6 +176,7 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
     )
     .await;
     let resumed = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.4")
         .resume(&recovery_server, Arc::clone(&test.home), rollout_path)
         .await
@@ -232,6 +235,7 @@ async fn interrupt_tool_records_history_entries() {
     let response_mock = mount_sse_sequence(&server, vec![first_body, follow_up_body]).await;
 
     let fixture = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.4")
         .build(&server)
         .await
@@ -301,8 +305,10 @@ async fn interrupt_tool_records_history_entries() {
 
 /// After an interrupt we persist a model-visible `<turn_aborted>` marker in the conversation
 /// history. This test asserts that the marker is included in the next `/responses` request.
+#[test_case::test_case(false, "user"; "legacy")]
+#[test_case::test_case(true, "developer"; "v2")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn interrupt_persists_turn_aborted_marker_in_next_request() {
+async fn interrupt_persists_turn_aborted_marker_in_next_request(v2: bool, marker_role: &str) {
     let command = "sleep 60";
     let call_id = "call-turn-aborted-marker";
 
@@ -325,7 +331,20 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request() {
     let response_mock = mount_sse_sequence(&server, vec![first_body, follow_up_body]).await;
 
     let fixture = test_codex()
+        .with_direct_tools()
         .with_model("gpt-5.4")
+        .with_config(move |config| {
+            let result = if v2 {
+                config
+                    .features
+                    .enable(codex_features::Feature::MultiAgentV2)
+            } else {
+                config
+                    .features
+                    .disable(codex_features::Feature::MultiAgentV2)
+            };
+            result.expect("select the interruption marker protocol");
+        })
         .build(&server)
         .await
         .unwrap();
@@ -360,9 +379,9 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request() {
     assert_eq!(requests.len(), 2, "expected two calls to the responses API");
 
     let follow_up_request = &requests[1];
-    let user_texts = follow_up_request.message_input_texts("user");
+    let marker_texts = follow_up_request.message_input_texts(marker_role);
     assert!(
-        user_texts
+        marker_texts
             .iter()
             .any(|text| text.contains("<turn_aborted>")),
         "expected <turn_aborted> marker in follow-up request"

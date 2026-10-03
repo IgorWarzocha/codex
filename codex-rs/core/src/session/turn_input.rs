@@ -134,6 +134,7 @@ impl PreparedTurnInputSettings {
         kind: TurnStartKind,
     ) -> CodexResult<Option<Arc<TurnContext>>> {
         let TurnStartOptions {
+            resume_parent_on_completion: _,
             turn_trigger,
             final_output_json_schema,
             service_tier,
@@ -634,7 +635,29 @@ async fn steer(
 impl Session {
     /// Called under the active-turn lock before running any task or lifecycle callback.
     pub(crate) async fn record_started_turn(&self, turn_id: &str) {
-        self.state.lock().await.last_started_turn_id = Some(turn_id.to_string());
+        let mut state = self.state.lock().await;
+        state.last_started_turn_id = Some(turn_id.to_string());
+        state.completion_wake_blocked = false;
+    }
+
+    pub(crate) async fn block_completion_wake(&self) {
+        self.state.lock().await.completion_wake_blocked = true;
+    }
+
+    /// Called under the active-turn lock, so Stop and wake reservation are ordered.
+    pub(crate) async fn can_wake_for_pending_work(
+        &self,
+        explicit_wake: bool,
+        completion_wake: bool,
+    ) -> bool {
+        let state = self.state.lock().await;
+        !state.shutting_down
+            && (explicit_wake
+                || if completion_wake {
+                    !state.completion_wake_blocked
+                } else {
+                    self.has_outstanding_durable_sleep()
+                })
     }
 
     pub(crate) async fn route_realtime_text_input(
