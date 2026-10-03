@@ -1,4 +1,5 @@
 use anyhow::Result;
+use codex_config::types::ContextStrategy;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadConfigSnapshot;
 use codex_core::TurnInputRequest;
@@ -7,6 +8,7 @@ use codex_core::config::AgentRoleConfig;
 use codex_core::config::CurrentTimeReminderConfig;
 use codex_features::Feature;
 use codex_history::RolloutItem;
+use codex_login::CodexAuth;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
@@ -21,7 +23,6 @@ use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MULTI_AGENT_MODE_OPEN_TAG;
-use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentActivityKind;
 use codex_protocol::protocol::SubAgentSource;
@@ -501,6 +502,11 @@ async fn setup_turn_one_with_custom_spawned_child(
 
     let configured_reasoning_effort = turn_reasoning_effort.clone();
     let mut builder = configure_test(test_codex().with_config(move |config| {
+        // These fixtures exercise the legacy namespace, not the default V2 surface.
+        config
+            .features
+            .disable(Feature::MultiAgentV2)
+            .expect("test config should allow feature update");
         config
             .features
             .enable(Feature::Collab)
@@ -691,6 +697,10 @@ async fn subagent_start_replaces_session_start_and_injects_context(
             trust_discovered_hooks(config);
             config
                 .features
+                .disable(Feature::MultiAgentV2)
+                .expect("test config should allow feature update");
+            config
+                .features
                 .enable(Feature::Collab)
                 .expect("test config should allow feature update");
         })
@@ -844,6 +854,10 @@ async fn subagent_stop_replaces_stop_and_skips_internal_subagents() -> Result<()
         })
         .with_config(|config| {
             trust_discovered_hooks(config);
+            config
+                .features
+                .disable(Feature::MultiAgentV2)
+                .expect("test config should allow feature update");
             config
                 .features
                 .enable(Feature::Collab)
@@ -1055,6 +1069,10 @@ async fn spawned_child_receives_forked_parent_context(
         .with_model_info_override(INHERITED_MODEL, |model| model.comp_hash = None)
         .with_history_mode(history_mode)
         .with_config(|config| {
+            config
+                .features
+                .disable(Feature::MultiAgentV2)
+                .expect("test config should allow feature update");
             config
                 .features
                 .enable(Feature::Collab)
@@ -1477,6 +1495,26 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    let window_setup = if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
+        Some(
+            mount_sse_sequence(
+                &server,
+                vec![
+                    sse(vec![
+                        ev_function_call("initialize-window", "new_context", "{}"),
+                        ev_completed("initialize-window"),
+                    ]),
+                    sse(vec![
+                        ev_assistant_message("window-ready", "Window ready."),
+                        ev_completed("window-ready"),
+                    ]),
+                ],
+            )
+            .await,
+        )
+    } else {
+        None
+    };
     let seed_turn = mount_sse_once_match(
         &server,
         |req: &wiremock::Request| body_contains(req, TURN_0_FORK_PROMPT),
@@ -1624,10 +1662,6 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             }
         }
         if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow feature update");
             config.model_context_window = Some(128_000);
         }
         if matches!(selection, FullHistoryV2ModelSelection::ConfiguredDefault) {
@@ -1673,7 +1707,16 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         config.agent_default_subagent_reasoning_effort = Some(V2_DEFAULT_REASONING_EFFORT);
     });
     if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
-        builder = builder.with_history_mode(ThreadHistoryMode::Paginated);
+        let backend_url = format!("{}/backend-api/codex", server.uri());
+        builder = builder
+            .with_history_mode(ThreadHistoryMode::Paginated)
+            .with_context_strategy(ContextStrategy::Notes)
+            .with_auth(CodexAuth::from_external_chatgpt_tokens(
+                "header.e30.signature",
+                "account-123",
+                Some("plus"),
+            )?)
+            .with_config(move |config| config.model_provider.base_url = Some(backend_url));
     }
     if matches!(selection, FullHistoryV2ModelSelection::CurrentTimeReminders) {
         #[derive(Default)]
@@ -1701,12 +1744,12 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             builder.with_external_time_provider(std::sync::Arc::new(FailFirstClockRead::default()));
     }
     let test = builder.build(&server).await?;
-    if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
-        test.codex.submit(Op::Compact).await?;
-        wait_for_event(&test.codex, |event| {
-            matches!(event, EventMsg::TurnComplete(_))
-        })
-        .await;
+    if let Some(window_setup) = window_setup {
+        // Establish the inherited checkpoint through the supported notes strategy,
+        // not the legacy TokenBudget flag and an unmocked summary request.
+        test.submit_turn("Start a fresh notes window before the fork test.")
+            .await?;
+        assert_eq!(window_setup.requests().len(), 2);
     }
 
     test.submit_turn(TURN_0_FORK_PROMPT).await?;
@@ -2593,6 +2636,7 @@ async fn plaintext_multi_agent_v2_completion_sends_agent_message(
             config.model_provider.request_max_retries = Some(0);
             config.model_provider.stream_max_retries = Some(0);
             config.model_provider.supports_websockets = false;
+            config.multi_agent_v2.wait_agent_enabled = true;
         })
         .with_history_mode(history_mode)
         .build(&server)
@@ -3305,6 +3349,10 @@ async fn spawn_agent_rejects_reasoning_effort_unsupported_by_role_model() -> Res
         .with_config(|config| {
             config
                 .features
+                .disable(Feature::MultiAgentV2)
+                .expect("test config should allow feature update");
+            config
+                .features
                 .enable(Feature::Collab)
                 .expect("test config should allow feature update");
             let role_path = config.codex_home.join("model-only-role.toml");
@@ -3369,6 +3417,10 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
     .await;
 
     let mut builder = test_codex().with_config(|config| {
+        config
+            .features
+            .disable(Feature::MultiAgentV2)
+            .expect("test config should allow feature update");
         config
             .features
             .enable(Feature::Collab)

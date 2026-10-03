@@ -1,10 +1,15 @@
-//! Verifies V2 catalog tool messages change only their selected description or parameter schema.
+//! Verifies V2 catalog messages change selected tool fields or board action help.
 
+use anyhow::Context;
 use anyhow::Result;
+use codex_agent_message_board_extension::AGENT_BOARD_TOOL_NAME;
 use codex_core::config::AgentRoleConfig;
+use codex_features::CodeModeRuntime;
 use codex_features::Feature;
 use codex_protocol::openai_models::ToolMessages;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
+use core_test_support::responses;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse_completed;
 use core_test_support::responses::start_mock_server;
@@ -154,6 +159,8 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 }
                 config.multi_agent_v2.tool_namespace =
                     (!matches!(exposure, Exposure::Plain)).then(|| "delegation".to_string());
+                // Exercise catalog overrides for the optional wait tool as well.
+                config.multi_agent_v2.wait_agent_enabled = true;
                 config.multi_agent_v2.hide_spawn_agent_metadata = false;
                 config.multi_agent_v2.expose_spawn_agent_model_overrides = true;
                 config.multi_agent_v2.usage_hint_text = Some("Local delegation hint.".to_string());
@@ -312,11 +319,43 @@ async fn channel_catalog_descriptions_change_only_selected_tools(exposure: Expos
     let server = start_mock_server().await;
     let response = mount_sse_sequence(
         &server,
-        vec![
-            sse_completed("default"),
-            sse_completed("all"),
-            sse_completed("sparse"),
-        ],
+        messages
+            .iter()
+            .flat_map(|_| {
+                let calls = if matches!(exposure, Exposure::CodeMode) {
+                    vec![responses::ev_custom_tool_call(
+                        "board-help",
+                        "exec",
+                        &format!(
+                            "const results = [await tools.delegation__agent_board({{action:'help'}})]; \
+                             for (const topic of {}) {{ \
+                                 results.push(await tools.delegation__agent_board({{action:'help', topic}})); \
+                             }} text(results);",
+                            json!(names)
+                        ),
+                    )]
+                } else {
+                    std::iter::once(responses::ev_function_call_with_namespace(
+                        "board-help",
+                        "delegation",
+                        AGENT_BOARD_TOOL_NAME,
+                        r#"{"action":"help"}"#,
+                    ))
+                    .chain(names.into_iter().map(|name| {
+                        responses::ev_function_call_with_namespace(
+                            name,
+                            "delegation",
+                            AGENT_BOARD_TOOL_NAME,
+                            &json!({"action":"help", "topic":name}).to_string(),
+                        )
+                    }))
+                    .collect()
+                };
+                let mut events = calls;
+                events.push(responses::ev_completed("help"));
+                [responses::sse(events), sse_completed("done")]
+            })
+            .collect(),
     )
     .await;
     for message in &messages {
@@ -324,10 +363,16 @@ async fn channel_catalog_descriptions_change_only_selected_tools(exposure: Expos
         let test = test_codex()
             .with_model_info_override("gpt-5.2", move |model| {
                 model.multi_agent_version = Some(MultiAgentVersion::V2);
+                model.tool_mode = Some(if matches!(exposure, Exposure::CodeMode) {
+                    ToolMode::CodeMode
+                } else {
+                    ToolMode::Direct
+                });
                 model.model_messages.as_mut().expect("model messages").tools = message;
             })
             .with_config(move |config| {
-                config.ephemeral = false;
+                config.ephemeral = true;
+                config.multi_agent_v2.message_board_in_memory = true;
                 config
                     .features
                     .enable(Feature::MultiAgentV2)
@@ -337,52 +382,81 @@ async fn channel_catalog_descriptions_change_only_selected_tools(exposure: Expos
                     .enable(Feature::AgentMessageBoard)
                     .expect("enable channels");
                 config.multi_agent_v2.tool_namespace = Some("delegation".into());
-                if matches!(exposure, Exposure::CodeMode) {
-                    config
-                        .features
-                        .enable(Feature::CodeMode)
-                        .expect("enable Code Mode");
-                    config.code_mode.disable_in_process_fallback = true;
-                    config.multi_agent_v2.non_code_mode_only = false;
-                }
+                config.multi_agent_v2.non_code_mode_only = false;
+                config.code_mode.runtime = CodeModeRuntime::V8;
+                config.features.disable(Feature::CodeMode).unwrap();
+                config.features.disable(Feature::CodeModeOnly).unwrap();
+                config.features.disable(Feature::CodeModePrewarm).unwrap();
             })
             .build_with_auto_env(&server)
             .await?;
-        test.submit_turn("Inspect the available tools.").await?;
+        test.submit_turn("Read the board action index and each action's help.")
+            .await?;
+        test.codex.shutdown_and_wait().await?;
     }
 
     let requests = response.requests();
-    assert_eq!(requests.len(), messages.len());
+    assert_eq!(requests.len(), messages.len() * 2);
     let default = requests[0].body_json()["tools"].clone();
-    for (request, message) in requests.iter().zip(&messages).skip(1) {
-        let mut expected = default.clone();
-        let channel_tools = expected
-            .as_array_mut()
-            .expect("tools")
-            .iter_mut()
-            .find(|tool| tool["name"] == "delegation")
-            .expect("delegation namespace")["tools"]
-            .as_array_mut()
-            .expect("namespace tools");
-        for name in names {
-            let tool = channel_tools
-                .iter_mut()
-                .find(|tool| tool["name"] == name)
-                .expect(name);
-            let bundled = tool["description"].as_str().expect("bundled description");
-            if let Some(description) = message["multi_agent"][name]["description"].as_str() {
-                let declaration = if matches!(exposure, Exposure::CodeMode) {
-                    let offset = bundled
-                        .find("\n\nexec tool declaration:")
-                        .expect("Code Mode declaration");
-                    &bundled[offset..]
-                } else {
-                    ""
-                };
-                tool["description"] = json!(format!("{description}{declaration}"));
-            }
+    let first = requests[0].body_json();
+    let facade = responses::namespace_child_tool(&first, "delegation", AGENT_BOARD_TOOL_NAME)
+        .context("compact board facade")?;
+    if matches!(exposure, Exposure::CodeMode) {
+        assert!(
+            facade["description"]
+                .as_str()
+                .context("facade description")?
+                .contains("delegation__agent_board")
+        );
+    }
+    for name in names {
+        assert!(responses::namespace_child_tool(&first, "delegation", name).is_none());
+    }
+
+    let mut bundled_help: Option<Vec<Value>> = None;
+    for (pair, message) in requests.chunks_exact(2).zip(&messages) {
+        // Neither the facade nor the Code Mode declarations absorb action catalog overrides.
+        for request in pair {
+            assert_eq!(request.body_json()["tools"], default);
         }
-        assert_eq!(request.body_json()["tools"], expected);
+        let help: Vec<Value> = if matches!(exposure, Exposure::CodeMode) {
+            let (output, success) = pair[1]
+                .custom_tool_call_output_content_and_success("board-help")
+                .context("Code Mode help output")?;
+            assert_ne!(success, Some(false));
+            serde_json::from_str(&output.context("Code Mode help text")?)?
+        } else {
+            std::iter::once("board-help")
+                .chain(names)
+                .map(|id| {
+                    let output = pair[1]
+                        .function_call_output_text(id)
+                        .with_context(|| format!("board help output for {id}"))?;
+                    serde_json::from_str(&output).context("board help JSON")
+                })
+                .collect::<Result<_>>()?
+        };
+        assert_eq!(help.len(), names.len() + 1);
+        assert_eq!(
+            help[0]["actions"],
+            json!([names.as_slice(), &["help"]].concat())
+        );
+        for (action_help, name) in help.iter().skip(1).zip(names) {
+            assert_eq!(action_help["action"], name);
+        }
+        if let Some(bundled) = &bundled_help {
+            let mut expected: Vec<Value> = bundled.clone();
+            for (action_help, name) in expected.iter_mut().skip(1).zip(names) {
+                if let Some(description) = message["multi_agent"][name]["description"].as_str() {
+                    action_help["description"] = json!(description);
+                }
+            }
+            // Compare the entire help result: parameters are never catalog-overridable,
+            // and missing/null descriptions and unselected siblings retain bundled text.
+            assert_eq!(help, expected);
+        } else {
+            bundled_help = Some(help);
+        }
     }
     Ok(())
 }
