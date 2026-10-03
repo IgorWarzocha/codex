@@ -1,0 +1,17 @@
+# Install header contents, not links into Bazel's temporary build-script runfiles.
+# CMake preserves source symlinks when installing PUBLIC_HEADER files.
+--- a/opus/CMakeLists.txt
++++ b/opus/CMakeLists.txt
+@@ -287,3 +287,12 @@
++# Build-script runfiles can expose these headers as symlinks. Resolve them
++# before installation so the output remains valid after runfiles cleanup.
++set(Opus_INSTALL_HEADER "")
++foreach(header IN LISTS Opus_PUBLIC_HEADER)
++  get_filename_component(real_header "${header}" REALPATH)
++  list(APPEND Opus_INSTALL_HEADER "${real_header}")
++endforeach()
++set(Opus_PUBLIC_HEADER "${Opus_INSTALL_HEADER}")
++
+ if(MSVC)
+   if(OPUS_STATIC_RUNTIME)
+     if(CMAKE_BUILD_TYPE MATCHES DEBUG)
