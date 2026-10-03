@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import plistlib
 import struct
 import subprocess
 import tempfile
@@ -11,7 +12,24 @@ from pathlib import Path
 from unittest.mock import patch as mock_patch
 
 import patch
+import regions
 from asar import Asar, UnsupportedBundle
+
+
+MAIN = ".vite/build/main-test.js"
+PRELOAD = ".vite/build/preload.js"
+INITIAL = "webview/assets/app-initial-test.js"
+TEXT = (
+    "async getProjectAwareDeveloperInstructions(e){return native({baseInstructions:e})}"
+)
+RPC = (
+    "async function nativeStart({codexResponseHandoffPrefix:e=``,prompt:s,manager:i,transport:c})"
+    "{let m={...s==null?{}:{prompt:s},transport:c};await i.sendRequest(`thread/realtime/start`,m)}"
+)
+CALL = (
+    "async function nativeCall({codexSessionId:e,conversationId:t,initialItems:n,offerSdp:r,prompt:i,realtimeSessionOverrides:o})"
+    "{return o?{instructions:i}:{instructions:i}}"
+)
 
 
 def fixture(path: Path, files: dict[str, bytes]) -> None:
@@ -64,15 +82,16 @@ class PatcherTests(unittest.TestCase):
                 {
                     "name": "openai-codex-electron",
                     "productName": "Codex",
-                    "version": patch.VERSION,
+                    "version": "unrelated-new-build",
                 }
             ).encode(),
-            patch.MAIN: b"const e=require('original');",
-            patch.PRELOAD: b"e.contextBridge.exposeInMainWorld(`electronBridge`,z);",
-            patch.PARAMETERS: (
-                "function mi(e,{ambientParameters:t,explicitParameters:n,liveParameters:r,systemHints:i})"
-                "{return {" + patch.ANCHOR + "}}"
+            MAIN: (
+                "const e=require('original');class Owner{"
+                + TEXT
+                + "async isNonGitWorkspace(){}};"
             ).encode(),
+            PRELOAD: b'let e=require("electron");e.contextBridge.exposeInMainWorld(`electronBridge`,z);',
+            INITIAL: (RPC + CALL + "var untouched=1;").encode(),
             "untouched": b"native transport and tools remain byte-identical",
         }
         fixture(self.source, self.files)
@@ -86,23 +105,27 @@ class PatcherTests(unittest.TestCase):
 
     def trust_fixture(self):
         # Synthetic archives exercise our decisions, not external compatibility.
-        return mock_patch.object(patch, "SUPPORTED_SHA256", patch.digest(self.source))
+        fingerprints = {
+            kind: {regions.CodeRegion(kind, source).fingerprint}
+            for kind, source in (("text", TEXT), ("rpc", RPC), ("call", CALL))
+        }
+        return mock_patch.object(regions, "FINGERPRINTS", fingerprints)
 
     def test_archive_round_trip_preserves_original_entries_and_rehashes_changed_blocks(
         self,
     ):
         original = Asar(self.source)
         content = b"replacement with multiple integrity blocks"
-        original.write(self.output, {patch.MAIN: content})
+        original.write(self.output, {MAIN: content})
         result = Asar(self.output)
-        self.assertEqual(result.read(patch.MAIN), content)
+        self.assertEqual(result.read(MAIN), content)
         for name, entry in original.entries.items():
-            if name == patch.MAIN:
+            if name == MAIN:
                 continue
             self.assertEqual(result.entries[name], entry)
             if "offset" in entry:
                 self.assertEqual(result.read(name), original.read(name))
-        integrity = result.entries[patch.MAIN]["integrity"]
+        integrity = result.entries[MAIN]["integrity"]
         self.assertEqual(integrity["hash"], hashlib.sha256(content).hexdigest())
         self.assertEqual(
             integrity["blocks"],
@@ -120,21 +143,31 @@ class PatcherTests(unittest.TestCase):
         with self.trust_fixture():
             self.assertEqual(
                 self.run_cli(
-                    "--prompt-file", str(prompt), "--output", str(self.output)
+                    "--personality-file", str(prompt), "--output", str(self.output)
                 ),
                 0,
             )
         self.assertEqual(self.source.read_bytes(), before)
         result = Asar(self.output)
         self.assertEqual(
-            result.read(patch.PARAMETERS),
-            self.files[patch.PARAMETERS].replace(
-                patch.ANCHOR.encode(), patch.REPLACEMENT.encode()
+            result.read(INITIAL),
+            self.files[INITIAL]
+            .replace(
+                RPC.encode(),
+                regions.append_voice(regions.CodeRegion("rpc", RPC)).encode(),
+            )
+            .replace(
+                CALL.encode(),
+                regions.append_voice(regions.CodeRegion("call", CALL)).encode(),
             ),
         )
-        self.assertTrue(result.read(patch.MAIN).endswith(self.files[patch.MAIN]))
-        self.assertTrue(result.read(patch.PRELOAD).endswith(self.files[patch.PRELOAD]))
-        self.assertIn(json.dumps(str(prompt)).encode(), result.read(patch.MAIN))
+        expected_main = self.files[MAIN].replace(
+            TEXT.encode(),
+            regions.append_text(regions.CodeRegion("text", TEXT)).encode(),
+        )
+        self.assertTrue(result.read(MAIN).endswith(expected_main))
+        self.assertTrue(result.read(PRELOAD).endswith(self.files[PRELOAD]))
+        self.assertIn(json.dumps(str(prompt)).encode(), result.read(MAIN))
         self.assertEqual(result.read("untouched"), self.files["untouched"])
 
     def test_check_is_read_only(self):
@@ -144,37 +177,56 @@ class PatcherTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), before)
         self.assertFalse(self.output.exists())
 
-    def test_rejects_unknown_identity_hash_and_duplicate_anchor_before_output(self):
-        for fault in ("version", "hash", "anchor"):
+    def test_rejects_unknown_identity_region_code_and_ambiguous_owners_before_output(
+        self,
+    ):
+        for fault in ("identity", "text", "rpc", "call", "ambiguous"):
             with self.subTest(fault=fault):
                 files = dict(self.files)
-                if fault == "version":
+                if fault == "identity":
                     files["package.json"] = files["package.json"].replace(
-                        patch.VERSION.encode(), b"99.0"
+                        b"openai-codex-electron", b"another-app"
                     )
-                elif fault == "anchor":
-                    files[patch.PARAMETERS] *= 2
+                elif fault == "ambiguous":
+                    files[INITIAL] *= 2
+                else:
+                    owner = MAIN if fault == "text" else INITIAL
+                    original = {"text": TEXT, "rpc": RPC, "call": CALL}[fault]
+                    files[owner] = files[owner].replace(
+                        original.encode(), (original[:-1] + ";changed()}").encode()
+                    )
                 fixture(self.source, files)
                 with self.trust_fixture():
-                    if fault == "hash":
-                        with mock_patch.object(patch, "SUPPORTED_SHA256", "0" * 64):
-                            self.assertEqual(self.run_cli("--check"), 1)
-                    else:
-                        self.assertEqual(self.run_cli("--check"), 1)
+                    self.assertEqual(self.run_cli("--check"), 1)
                 self.assertFalse(self.output.exists())
+
+    def test_unrelated_code_version_and_chunk_filename_changes_are_accepted(self):
+        files = dict(self.files)
+        files["package.json"] = files["package.json"].replace(
+            b"unrelated-new-build", b"yet-another-build"
+        )
+        files["unrelated.js"] = b"arbitrary unrelated update"
+        files[".vite/build/main-renamed.js"] = files.pop(MAIN) + b"unrelated();"
+        files["webview/assets/app-initial-renamed.js"] = (
+            files.pop(INITIAL) + b"unrelated();"
+        )
+        fixture(self.source, files)
+        with self.trust_fixture():
+            self.assertEqual(self.run_cli("--output", str(self.output)), 0)
+        self.assertEqual(Asar(self.output).read("unrelated.js"), files["unrelated.js"])
 
     def test_rejects_in_place_existing_output_and_symlink_without_clobber(self):
         with self.trust_fixture():
             self.assertEqual(
                 self.run_cli(
-                    "--prompt-file", "/tmp/custom.md", "--output", str(self.source)
+                    "--personality-file", "/tmp/custom.md", "--output", str(self.source)
                 ),
                 1,
             )
             self.output.write_bytes(b"keep me")
             self.assertEqual(
                 self.run_cli(
-                    "--prompt-file", "/tmp/custom.md", "--output", str(self.output)
+                    "--personality-file", "/tmp/custom.md", "--output", str(self.output)
                 ),
                 1,
             )
@@ -183,7 +235,7 @@ class PatcherTests(unittest.TestCase):
             self.output.symlink_to(self.directory / "absent")
             self.assertEqual(
                 self.run_cli(
-                    "--prompt-file", "/tmp/custom.md", "--output", str(self.output)
+                    "--personality-file", "/tmp/custom.md", "--output", str(self.output)
                 ),
                 1,
             )
@@ -201,6 +253,85 @@ class PatcherTests(unittest.TestCase):
         for prompt in (protected, protected.resolve(), alias, Path("relative.md")):
             with self.subTest(prompt=prompt), self.assertRaises(ValueError):
                 patch.validate_prompt_path(prompt)
+
+    def test_mac_integrity_metadata_matches_new_header_and_preserves_other_fields(self):
+        source = self.directory / "Info.plist"
+        output = self.directory / "patched.Info.plist"
+        document = {
+            "CFBundleName": "native app",
+            "NativeKey": [1, 2],
+            "ElectronAsarIntegrity": {
+                "Resources/app.asar": {
+                    "algorithm": "SHA256",
+                    "hash": Asar(self.source).header_sha256,
+                },
+                "unrelated": {"algorithm": "SHA256", "hash": "unchanged"},
+            },
+        }
+        original = plistlib.dumps(document, fmt=plistlib.FMT_BINARY)
+        source.write_bytes(original)
+        with self.trust_fixture():
+            self.assertEqual(
+                self.run_cli(
+                    "--info-plist",
+                    str(source),
+                    "--output-info-plist",
+                    str(output),
+                    "--output",
+                    str(self.output),
+                ),
+                0,
+            )
+        document["ElectronAsarIntegrity"]["Resources/app.asar"]["hash"] = Asar(
+            self.output
+        ).header_sha256
+        self.assertEqual(plistlib.loads(output.read_bytes()), document)
+        self.assertTrue(output.read_bytes().startswith(b"bplist00"))
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_mismatched_mac_integrity_rejects_before_outputs_and_failed_second_output_rolls_back(
+        self,
+    ):
+        source = self.directory / "Info.plist"
+        output = self.directory / "patched.Info.plist"
+        document = {
+            "ElectronAsarIntegrity": {
+                "Resources/app.asar": {"algorithm": "SHA256", "hash": "wrong"}
+            }
+        }
+        source.write_bytes(plistlib.dumps(document))
+        with self.trust_fixture():
+            self.assertEqual(
+                self.run_cli(
+                    "--info-plist",
+                    str(source),
+                    "--output-info-plist",
+                    str(output),
+                    "--output",
+                    str(self.output),
+                ),
+                1,
+            )
+        self.assertFalse(self.output.exists())
+        self.assertFalse(output.exists())
+        document["ElectronAsarIntegrity"]["Resources/app.asar"]["hash"] = Asar(
+            self.source
+        ).header_sha256
+        source.write_bytes(plistlib.dumps(document))
+        impossible = self.directory / "missing-parent" / "Info.plist"
+        with self.trust_fixture():
+            self.assertEqual(
+                self.run_cli(
+                    "--info-plist",
+                    str(source),
+                    "--output-info-plist",
+                    str(impossible),
+                    "--output",
+                    str(self.output),
+                ),
+                1,
+            )
+        self.assertFalse(self.output.exists())
 
     def test_rejects_truncation_out_of_bounds_and_partial_overlap(self):
         self.source.write_bytes(b"bad")
@@ -221,14 +352,19 @@ class PatcherTests(unittest.TestCase):
         fixture(alternate, self.files)
         alternate.replace(self.source)
         with self.assertRaisesRegex(UnsupportedBundle, "changed during patching"):
-            original.write(self.output, {patch.MAIN: b"replacement"})
+            original.write(self.output, {MAIN: b"replacement"})
         self.assertFalse(self.output.exists())
 
-    def test_runtime_loader_with_real_files_and_native_payload_expression(self):
+    def test_runtime_loader_with_real_files_and_production_transformations(self):
+        transformed = {
+            "text": regions.append_text(regions.CodeRegion("text", TEXT)),
+            "rpc": regions.append_voice(regions.CodeRegion("rpc", RPC)),
+            "call": regions.append_voice(regions.CodeRegion("call", CALL)),
+        }
         subprocess.run(
             ["node", "--test", str(patch.HERE / "test_runtime.cjs")],
             check=True,
-            env={**os.environ, "CODEX_VOICE_EXPRESSION": patch.REPLACEMENT},
+            env={**os.environ, "CODEX_TRANSFORMED_REGIONS": json.dumps(transformed)},
         )
 
 

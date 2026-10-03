@@ -1,13 +1,20 @@
-/* codex-user-voice-prompt-v1 */
+/* codex-user-personality-v2 */
 (() => {
   const { contextBridge, ipcRenderer } = require("electron");
-  contextBridge.exposeInMainWorld("codexUserVoicePrompt", {
-    read: () => {
-      const result = ipcRenderer.sendSync("codex-user-voice-prompt:read");
+  contextBridge.exposeInMainWorld("codexUserPersonality", {
+    append: (native) => {
+      const result = ipcRenderer.sendSync("codex-user-personality:read");
       if (!result || result.ok !== true || typeof result.text !== "string") {
-        throw new Error(`User voice prompt: ${result?.error ?? "loader unavailable"}`);
+        throw new Error(
+          `Codex personality: ${result?.error ?? "loader unavailable"}`,
+        );
       }
-      return result.text;
+      if (!result.text) return native;
+      if (typeof native !== "string")
+        throw new Error(
+          "Cannot append personality: native instructions are unavailable",
+        );
+      return native + "\n\n" + result.text;
     },
   });
 })();

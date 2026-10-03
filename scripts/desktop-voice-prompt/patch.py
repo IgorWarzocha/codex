@@ -1,40 +1,21 @@
 #!/usr/bin/env python3
-"""Opt-in Codex desktop voice prompt patcher. Never installs or edits its input."""
+"""Append user communication preferences to Codex desktop text and voice instructions."""
 
 import argparse
-import hashlib
 import json
+import os
+import plistlib
 import sys
 from pathlib import Path
 
 from asar import Asar, UnsupportedBundle
+from regions import BundleLayout, append_text, append_voice, inspect_regions
 
 
-SUPPORTED_SHA256 = "529af3396e94c0e20b8a62b1d5862a565e89e1af2407b590e9b5ab1f1017af0d"
-VERSION = "26.930.21537"
-MAIN = ".vite/build/main-C3nRcJ3D.js"
-PRELOAD = ".vite/build/preload.js"
-PARAMETERS = "webview/assets/voice-session-parameters-c40a620b8266.js"
-ANCHOR = (
-    "bidi_system_prompt_override:w,structured_system_prompt_personality_override:void 0"
-)
-REPLACEMENT = (
-    "bidi_system_prompt_override:b===`wingman`?globalThis.codexUserVoicePrompt.read():w,"
-    "structured_system_prompt_personality_override:void 0"
-)
-MARKER = b"codex-user-voice-prompt-v1"
 HERE = Path(__file__).resolve().parent
 
 
-def digest(path: Path) -> str:
-    with path.open("rb") as source:
-        result = hashlib.sha256()
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            result.update(block)
-    return result.hexdigest()
-
-
-def verify_bundle(bundle: Asar) -> None:
+def verify_bundle(bundle: Asar) -> tuple[str, BundleLayout]:
     try:
         package = json.loads(bundle.read("package.json"))
     except (ValueError, UnicodeError) as error:
@@ -42,30 +23,19 @@ def verify_bundle(bundle: Asar) -> None:
     if not isinstance(package, dict) or (
         package.get("name"),
         package.get("productName"),
-        package.get("version"),
-    ) != ("openai-codex-electron", "Codex", VERSION):
-        raise UnsupportedBundle(f"only Codex desktop {VERSION} is supported")
-    if digest(bundle.path) != SUPPORTED_SHA256:
-        raise UnsupportedBundle("ASAR SHA256 is not the verified pristine bundle")
-    main, preload, parameters = (
-        bundle.read(name) for name in (MAIN, PRELOAD, PARAMETERS)
-    )
-    if any(MARKER in source for source in (main, preload, parameters)):
-        raise UnsupportedBundle("bundle is already patched")
-    if not main.startswith(b"const e=require("):
-        raise UnsupportedBundle("unsupported main-process module")
-    if b"contextBridge.exposeInMainWorld(`electronBridge`,z)" not in preload:
-        raise UnsupportedBundle("unsupported sandboxed preload bridge")
-    if parameters.count(ANCHOR.encode()) != 1 or (
-        b"function mi(e,{ambientParameters:t,explicitParameters:n,liveParameters:r,systemHints:i})"
-        not in parameters
-    ):
-        raise UnsupportedBundle("unsupported native voice parameter builder")
+    ) != ("openai-codex-electron", "Codex"):
+        raise UnsupportedBundle("archive does not identify itself as Codex desktop")
+    version = package.get("version")
+    if not isinstance(version, str) or not version:
+        raise UnsupportedBundle("package.json has no app version")
+    return version, inspect_regions(bundle)
 
 
 def validate_prompt_path(path: Path) -> Path:
     if not path.is_absolute():
-        raise ValueError("--prompt-file must be an absolute path on the app's machine")
+        raise ValueError(
+            "--personality-file must be an absolute path on the app's machine"
+        )
     # This task explicitly excludes Igor's Pi-owned prompt, including symlink aliases.
     protected = Path.home() / ".pi/agent/REALTIME-SYSTEM-PROMPT.md"
     if path.resolve() == protected.resolve():
@@ -75,22 +45,68 @@ def validate_prompt_path(path: Path) -> Path:
     return path
 
 
-def replacements(bundle: Asar, prompt: Path) -> dict[str, bytes]:
+def mac_info(path: Path, bundle: Asar):
+    raw = path.read_bytes()
+    try:
+        document = plistlib.loads(raw)
+    except plistlib.InvalidFileException as error:
+        raise UnsupportedBundle("invalid macOS Info.plist") from error
+    integrity = (
+        document.get("ElectronAsarIntegrity") if isinstance(document, dict) else None
+    )
+    entry = integrity.get("Resources/app.asar") if isinstance(integrity, dict) else None
+    if not isinstance(entry, dict) or entry.get("algorithm") != "SHA256":
+        raise UnsupportedBundle("unfamiliar macOS ASAR integrity metadata")
+    if entry.get("hash") != bundle.header_sha256:
+        raise UnsupportedBundle(
+            "Info.plist integrity hash does not match the input ASAR"
+        )
+    return document, plistlib.FMT_BINARY if raw.startswith(
+        b"bplist00"
+    ) else plistlib.FMT_XML
+
+
+def write_outputs(bundle, layout, prompt, output, info, output_info):
+    created = []
+    try:
+        bundle.write(output, replacements(bundle, layout, prompt))
+        created.append(output)
+        if info is not None:
+            document, format = info
+            document["ElectronAsarIntegrity"]["Resources/app.asar"]["hash"] = Asar(
+                output
+            ).header_sha256
+            data = plistlib.dumps(document, fmt=format, sort_keys=False)
+            with output_info.open("xb") as target:
+                created.append(output_info)
+                target.write(data)
+                target.flush()
+                os.fsync(target.fileno())
+    except (OSError, ValueError):
+        for path in reversed(created):
+            path.unlink(missing_ok=True)
+        raise
+
+
+def replacements(
+    bundle: Asar, layout: BundleLayout, prompt: Path | None
+) -> dict[str, bytes]:
+    config = {"path": str(prompt) if prompt else None, "required": prompt is not None}
     main = (
         (HERE / "runtime-main.js")
         .read_text()
-        .replace(
-            "__CODEX_VOICE_PROMPT_PATH__", json.dumps(str(prompt), ensure_ascii=True)
-        )
+        .replace("__CODEX_PERSONALITY_CONFIG__", json.dumps(config, ensure_ascii=True))
     )
     preload = (HERE / "runtime-preload.js").read_bytes()
-    parameters = bundle.read(PARAMETERS)
-    if parameters.count(ANCHOR.encode()) != 1:
-        raise UnsupportedBundle("voice prompt anchor must occur exactly once")
+    native_main = bundle.read(layout.main).decode("utf-8")
+    initial = bundle.read(layout.initial).decode("utf-8")
+    native_main = native_main.replace(layout.text.source, append_text(layout.text))
+    for region in (layout.rpc, layout.call):
+        initial = initial.replace(region.source, append_voice(region))
     return {
-        MAIN: main.encode() + bundle.read(MAIN),
-        PRELOAD: preload + bundle.read(PRELOAD),
-        PARAMETERS: parameters.replace(ANCHOR.encode(), REPLACEMENT.encode()),
+        layout.main: main.encode() + native_main.encode(),
+        layout.preload: preload + bundle.read(layout.preload),
+        layout.initial: initial.encode(),
     }
 
 
@@ -103,29 +119,68 @@ def main(argv=None) -> int:
         "--check", action="store_true", help="verify support without writing"
     )
     parser.add_argument(
-        "--prompt-file", type=Path, help="absolute user-owned prompt path"
+        "--personality-file",
+        type=Path,
+        help="absolute user-owned personality path; otherwise use the app's CODEX_HOME/codex_personality.md",
     )
     parser.add_argument("--output", type=Path, help="new ASAR path, never overwritten")
+    parser.add_argument(
+        "--info-plist",
+        type=Path,
+        help="original macOS app Info.plist with ASAR integrity metadata",
+    )
+    parser.add_argument(
+        "--output-info-plist", type=Path, help="new Info.plist path, never overwritten"
+    )
     args = parser.parse_args(argv)
-    if args.check and (args.prompt_file or args.output):
-        parser.error("--check cannot be combined with --prompt-file or --output")
-    if not args.check and (args.prompt_file is None or args.output is None):
-        parser.error("patching requires --prompt-file and --output")
+    if args.check and (args.personality_file or args.output or args.output_info_plist):
+        parser.error("--check cannot be combined with personality or output arguments")
+    if not args.check and args.output is None:
+        parser.error("patching requires --output")
+    if not args.check and bool(args.info_plist) != bool(args.output_info_plist):
+        parser.error(
+            "macOS patching requires both --info-plist and --output-info-plist"
+        )
     try:
         bundle = Asar(args.asar)
-        verify_bundle(bundle)
+        version, layout = verify_bundle(bundle)
+        info = mac_info(args.info_plist, bundle) if args.info_plist else None
         if args.check:
-            print(f"Supported: Codex {VERSION}, native wingman voice parameter builder")
+            print(
+                f"Compatible: Codex {version}, verified native text and voice instruction code"
+            )
             return 0
-        prompt = validate_prompt_path(args.prompt_file)
+        prompt = (
+            validate_prompt_path(args.personality_file)
+            if args.personality_file
+            else None
+        )
         if args.output.resolve() == args.asar.resolve():
             raise ValueError(
                 "output must differ from input; in-place patching is not supported"
             )
-        bundle.write(args.output, replacements(bundle, prompt))
+        inputs = {args.asar.resolve()}
+        if args.info_plist:
+            inputs.add(args.info_plist.resolve())
+        outputs = [args.output] + (
+            [args.output_info_plist] if args.output_info_plist else []
+        )
+        if len({path.resolve() for path in outputs}) != len(outputs) or any(
+            path.resolve() in inputs for path in outputs
+        ):
+            raise ValueError("outputs must be distinct from each other and all inputs")
+        if any(path.exists() or path.is_symlink() for path in outputs):
+            raise FileExistsError("an output path already exists")
+        write_outputs(bundle, layout, prompt, args.output, info, args.output_info_plist)
         print(f"Created {args.output}. Input unchanged. Not installed.")
-        print(f"Voice reads {prompt} on parameter preparation, including prewarm.")
+        print(
+            f"Text and voice append preferences from {prompt or '$CODEX_HOME/codex_personality.md'} at runtime."
+        )
         print("Keep the matching app.asar.unpacked directory when installing manually.")
+        if info is not None:
+            print(
+                f"Created {args.output_info_plist} with the new ASAR integrity hash. macOS code signing still requires a separate step."
+            )
         return 0
     except (OSError, ValueError, RecursionError) as error:
         print(f"Cannot patch: {error}", file=sys.stderr)

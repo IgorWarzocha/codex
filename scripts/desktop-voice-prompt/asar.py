@@ -32,7 +32,9 @@ class Asar:
             ):
                 raise UnsupportedBundle("unsupported ASAR pickle header")
             try:
-                self.header = json.loads(source.read(json_size))
+                raw_header = source.read(json_size)
+                self.header_sha256 = hashlib.sha256(raw_header).hexdigest()
+                self.header = json.loads(raw_header)
             except (ValueError, UnicodeError) as error:
                 raise UnsupportedBundle("invalid ASAR JSON header") from error
         self.data_offset = 8 + header_size
