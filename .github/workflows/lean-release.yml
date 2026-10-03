@@ -97,6 +97,9 @@ jobs:
           set -euo pipefail
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
           df -h .
+      - name: Test Windows receipt permissions before native compilation
+        if: runner.os == 'Windows'
+        run: python -m unittest discover -s third_party/voice -p test_windows_crt.py -v
       - name: Verify native voice runner and report resource budget
         run: |
           set -euo pipefail

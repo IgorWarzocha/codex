@@ -65,13 +65,15 @@ def stage(root: Path, target: str, helper: Path):
     if missing:
         raise ValueError(f"Unbundled Windows imports: {sorted(missing)}")
     manifest_path = root / "runtime.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("target") != target or manifest.get("developmentOnly") is not True:
         raise ValueError("expected staged development runtime")
     manifest["libraries"].append(
         {"path": "bin/vcruntime140.dll", "sha256": pin["dllSha256"]}
     )
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    # Release staging preserves Bazel's read-only output mode.
+    manifest_path.chmod(manifest_path.stat().st_mode | 0o200)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
