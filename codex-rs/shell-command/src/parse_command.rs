@@ -224,7 +224,7 @@ mod tests {
             &vec_str(&["bash", "-lc", inner]),
             vec![ParsedCommand::ListFiles {
                 cmd: "rg --files webview/src".to_string(),
-                path: Some("webview".to_string()),
+                path: Some("webview/src".to_string()),
             }],
         );
     }
@@ -615,7 +615,7 @@ mod tests {
             vec![ParsedCommand::Search {
                 cmd: "grep -R CODEX_SANDBOX_ENV_VAR -n core/src/spawn.rs".to_string(),
                 query: Some("CODEX_SANDBOX_ENV_VAR".to_string()),
-                path: Some("spawn.rs".to_string()),
+                path: Some("core/src/spawn.rs".to_string()),
             }],
         );
     }
@@ -708,7 +708,7 @@ mod tests {
             &shlex_split_safe("cd codex-rs && rg --files"),
             vec![ParsedCommand::ListFiles {
                 cmd: "rg --files".to_string(),
-                path: None,
+                path: Some("codex-rs".to_string()),
             }],
         );
     }
@@ -721,8 +721,42 @@ mod tests {
             vec![ParsedCommand::Search {
                 cmd: "rg -n codex_api codex-rs -S".to_string(),
                 query: Some("codex_api".to_string()),
-                path: Some("codex-rs".to_string()),
+                path: Some("/Users/pakrym/code/codex/codex-rs".to_string()),
             }],
+        );
+    }
+
+    #[test]
+    fn discovery_metadata_preserves_cd_paths_and_output_bases() {
+        let script = "cd packages && cd -- child && rg needle src | head -5";
+        let parsed = parse_shell_script(script);
+        assert!(
+            matches!(&parsed[..], [ParsedCommand::Search { query: Some(query), path: Some(path), .. }] if query == "needle" && path == "packages/child/src")
+        );
+        assert_eq!(
+            discovery_output_cwds(script),
+            vec![ContentSearchOutput {
+                cwd: "packages/child".to_string(),
+                filenames_only: false
+            }]
+        );
+        let absolute = parse_shell_script("cd packages && ls /etc");
+        assert!(
+            matches!(&absolute[..], [ParsedCommand::ListFiles { path: Some(path), .. }] if path == "/etc")
+        );
+        assert!(discovery_output_cwds("cd $(pwd) && rg needle src").is_empty());
+        assert!(discovery_output_cwds("rg --files scoped").is_empty());
+        assert!(discovery_output_cwds("find scoped -name '*.rs'").is_empty());
+        assert_eq!(
+            discovery_output_cwds("cd scoped && rg -l needle ."),
+            vec![ContentSearchOutput {
+                cwd: "scoped".to_string(),
+                filenames_only: true
+            }]
+        );
+        let nested = parse_shell_script("ls scoped/deep");
+        assert!(
+            matches!(&nested[..], [ParsedCommand::ListFiles { path: Some(path), .. }] if path == "scoped/deep")
         );
     }
 
@@ -1214,8 +1248,7 @@ mod tests {
             &shlex_split_safe("ls --time-style=long-iso ./dist"),
             vec![ParsedCommand::ListFiles {
                 cmd: "ls '--time-style=long-iso' ./dist".to_string(),
-                // short_display_path drops "dist" and shows "." as the last useful segment
-                path: Some(".".to_string()),
+                path: Some("./dist".to_string()),
             }],
         );
     }
@@ -1226,7 +1259,7 @@ mod tests {
             &shlex_split_safe("fd -t f src/"),
             vec![ParsedCommand::ListFiles {
                 cmd: "fd -t f src/".to_string(),
-                path: Some("src".to_string()),
+                path: Some("src/".to_string()),
             }],
         );
 
@@ -1479,22 +1512,7 @@ pub fn parse_command_impl(command: &[String]) -> Vec<ParsedCommand> {
             }
             continue;
         }
-        let parsed = summarize_main_tokens(tokens);
-        let parsed = match parsed {
-            ParsedCommand::Read { cmd, name, path } => {
-                if let Some(base) = &cwd {
-                    let full = join_paths(base, &path.to_string_lossy());
-                    ParsedCommand::Read {
-                        cmd,
-                        name,
-                        path: PathBuf::from(full),
-                    }
-                } else {
-                    ParsedCommand::Read { cmd, name, path }
-                }
-            }
-            other => other,
-        };
+        let parsed = resolve_parsed_path(summarize_main_tokens(tokens), cwd.as_deref());
         commands.push(parsed);
     }
 
@@ -1829,11 +1847,11 @@ fn parse_grep_like(main_cmd: &[String], args: &[String]) -> ParsedCommand {
         operands.push(arg);
     }
     // Do not shorten the query: grep patterns may legitimately contain slashes
-    // and should be preserved verbatim. Only paths should be shortened.
+    // and should be preserved verbatim. Path metadata must preserve operands too.
     let has_pattern = pattern.is_some();
     let query = pattern.or_else(|| operands.first().cloned().map(String::from));
     let path_index = if has_pattern { 0 } else { 1 };
-    let path = operands.get(path_index).map(|s| short_display_path(s));
+    let path = operands.get(path_index).map(|s| (*s).clone());
     ParsedCommand::Search {
         cmd: shlex_join(main_cmd),
         query,
@@ -1951,12 +1969,12 @@ fn parse_fd_query_and_path(tail: &[String]) -> (Option<String>, Option<String>) 
     match non_flags.as_slice() {
         [one] => {
             if is_pathish(one) {
-                (None, Some(short_display_path(one)))
+                (None, Some((*one).clone()))
             } else {
                 (Some((*one).clone()), None)
             }
         }
-        [q, p, ..] => (Some((*q).clone()), Some(short_display_path(p))),
+        [q, p, ..] => (Some((*q).clone()), Some((*p).clone())),
         _ => (None, None),
     }
 }
@@ -1967,7 +1985,7 @@ fn parse_find_query_and_path(tail: &[String]) -> (Option<String>, Option<String>
     let mut path: Option<String> = None;
     for a in &args_no_connector {
         if !a.starts_with('-') && *a != "!" && *a != "(" && *a != ")" {
-            path = Some(short_display_path(a));
+            path = Some((*a).clone());
             break;
         }
     }
@@ -2026,22 +2044,7 @@ pub fn parse_shell_script(script: &str) -> Vec<ParsedCommand> {
                 }
                 continue;
             }
-            let parsed = summarize_main_tokens(&tokens);
-            let parsed = match parsed {
-                ParsedCommand::Read { cmd, name, path } => {
-                    if let Some(base) = &cwd {
-                        let full = join_paths(base, &path.to_string_lossy());
-                        ParsedCommand::Read {
-                            cmd,
-                            name,
-                            path: PathBuf::from(full),
-                        }
-                    } else {
-                        ParsedCommand::Read { cmd, name, path }
-                    }
-                }
-                other => other,
-            };
+            let parsed = resolve_parsed_path(summarize_main_tokens(&tokens), cwd.as_deref());
             commands.push(parsed);
         }
 
@@ -2310,8 +2313,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
                 ],
                 _ => &[],
             };
-            let path =
-                first_non_flag_operand(tail, flags_with_vals).map(|p| short_display_path(&p));
+            let path = first_non_flag_operand(tail, flags_with_vals);
             ParsedCommand::ListFiles {
                 cmd: shlex_join(main_cmd),
                 path,
@@ -2321,8 +2323,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
             let path = first_non_flag_operand(
                 tail,
                 &["-L", "-P", "-I", "--charset", "--filelimit", "--sort"],
-            )
-            .map(|p| short_display_path(&p));
+            );
             ParsedCommand::ListFiles {
                 cmd: shlex_join(main_cmd),
                 path,
@@ -2339,8 +2340,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
                     "--exclude",
                     "--time-style",
                 ],
-            )
-            .map(|p| short_display_path(&p));
+            );
             ParsedCommand::ListFiles {
                 cmd: shlex_join(main_cmd),
                 path,
@@ -2373,14 +2373,14 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
                 .filter(|p| !p.starts_with('-'))
                 .collect();
             if has_files_flag {
-                let path = non_flags.first().map(|s| short_display_path(s));
+                let path = non_flags.first().map(|s| (*s).clone());
                 ParsedCommand::ListFiles {
                     cmd: shlex_join(main_cmd),
                     path,
                 }
             } else {
                 let query = non_flags.first().cloned().map(String::from);
-                let path = non_flags.get(1).map(|s| short_display_path(s));
+                let path = non_flags.get(1).map(|s| (*s).clone());
                 ParsedCommand::Search {
                     cmd: shlex_join(main_cmd),
                     query,
@@ -2394,8 +2394,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
                 let path = first_non_flag_operand(
                     sub_tail,
                     &["--exclude", "--exclude-from", "--pathspec-from-file"],
-                )
-                .map(|p| short_display_path(&p));
+                );
                 ParsedCommand::ListFiles {
                     cmd: shlex_join(main_cmd),
                     path,
@@ -2457,7 +2456,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
                 .filter(|p| !p.starts_with('-'))
                 .collect();
             let query = non_flags.first().cloned().map(String::from);
-            let path = non_flags.get(1).map(|s| short_display_path(s));
+            let path = non_flags.get(1).map(|s| (*s).clone());
             ParsedCommand::Search {
                 cmd: shlex_join(main_cmd),
                 query,
@@ -2751,6 +2750,84 @@ fn is_abs_like(path: &str) -> bool {
         _ => {}
     }
     false
+}
+
+fn resolve_parsed_path(parsed: ParsedCommand, cwd: Option<&str>) -> ParsedCommand {
+    let Some(cwd) = cwd else { return parsed };
+    match parsed {
+        ParsedCommand::Read { cmd, name, path } => ParsedCommand::Read {
+            cmd,
+            name,
+            path: PathBuf::from(join_paths(cwd, &path.to_string_lossy())),
+        },
+        ParsedCommand::ListFiles { cmd, path } => ParsedCommand::ListFiles {
+            cmd,
+            path: Some(path.map_or_else(|| cwd.to_string(), |path| join_paths(cwd, &path))),
+        },
+        ParsedCommand::Search { cmd, query, path } => ParsedCommand::Search {
+            cmd,
+            query,
+            path: Some(path.map_or_else(|| cwd.to_string(), |path| join_paths(cwd, &path))),
+        },
+        other => other,
+    }
+}
+
+/// Working directories for output paths from simple content-search commands.
+/// Uses the same word-only parser and `cd` semantics as command metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentSearchOutput {
+    pub cwd: String,
+    pub filenames_only: bool,
+}
+
+pub fn discovery_output_cwds(script: &str) -> Vec<ContentSearchOutput> {
+    let Some(tree) = try_parse_shell(script) else {
+        return Vec::new();
+    };
+    let Some(commands) = try_parse_word_only_commands_sequence(&tree, script) else {
+        return Vec::new();
+    };
+    let mut cwd = String::new();
+    let mut bases = Vec::new();
+    for tokens in commands {
+        if let Some((head, tail)) = tokens.split_first()
+            && head == "cd"
+        {
+            let Some(target) = cd_target(tail) else {
+                return Vec::new();
+            };
+            cwd = join_paths(&cwd, &target);
+        } else if matches!(
+            tokens.first().map(String::as_str),
+            Some(
+                "rg" | "rga"
+                    | "ripgrep-all"
+                    | "grep"
+                    | "egrep"
+                    | "fgrep"
+                    | "ag"
+                    | "ack"
+                    | "pt"
+                    | "git"
+            )
+        ) && matches!(summarize_main_tokens(&tokens), ParsedCommand::Search { .. })
+        {
+            let base = ContentSearchOutput {
+                cwd: cwd.clone(),
+                filenames_only: tokens.iter().any(|token| {
+                    matches!(
+                        token.as_str(),
+                        "-l" | "-L" | "--files-with-matches" | "--files-without-match"
+                    )
+                }),
+            };
+            if !bases.contains(&base) {
+                bases.push(base);
+            }
+        }
+    }
+    bases
 }
 
 fn join_paths(base: &str, rel: &str) -> String {

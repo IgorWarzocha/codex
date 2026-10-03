@@ -75,6 +75,9 @@ use tempfile::TempDir;
 #[path = "agents_md_refresh.rs"]
 mod refresh;
 
+#[path = "agents_md_nested.rs"]
+mod nested;
+
 const GLOBAL_AGENTS_FILENAME: &str = "AGENTS.md";
 const GLOBAL_AGENTS_OVERRIDE_FILENAME: &str = "AGENTS.override.md";
 const GLOBAL_INSTRUCTIONS: &str = "global instructions";

@@ -779,6 +779,12 @@ impl ToolRegistry {
                     }
                 }
                 tool.on_tool_result_accepted(&invocation, result.result.as_ref());
+                invocation
+                    .session
+                    .services
+                    .agents_md_manager
+                    .observe_tool_result(&invocation, result.result.as_ref())
+                    .await;
                 dispatch_trace.record_completed(
                     &invocation,
                     &result.call_id,

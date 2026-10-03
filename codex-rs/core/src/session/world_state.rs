@@ -16,6 +16,7 @@ use crate::context::world_state::ModelCatalogState;
 use crate::context::world_state::ModelInstructionsState;
 use crate::context::world_state::MultiAgentModeState;
 use crate::context::world_state::MultiAgentUsageHintState;
+use crate::context::world_state::NestedAgentsMdState;
 use crate::context::world_state::PermissionsState;
 use crate::context::world_state::PersistentModeState;
 use crate::context::world_state::PluginsInstructionsState;
@@ -164,6 +165,17 @@ impl Session {
                 .and_then(|instructions| instructions.end.as_deref()),
         ));
         world_state.add_section(AgentsMdState::new(step_context.loaded_agents_md.as_deref()));
+        let nested = self
+            .services
+            .agents_md_manager
+            .load_nested(
+                &turn_context.config,
+                &step_context.environments,
+                step_context.loaded_agents_md.as_deref(),
+                &turn_context.sub_id,
+            )
+            .await?;
+        world_state.add_section(NestedAgentsMdState(nested));
         let exec_policy = self
             .services
             .exec_policy

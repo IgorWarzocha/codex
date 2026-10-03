@@ -1796,6 +1796,12 @@ impl Session {
         let context = crate::guardian::GuardianReviewContext::from(turn_context);
         let (_, reviewer) = crate::guardian::resolve_review_model(self, &context).await;
         let reviewer_compaction_hash = reviewer.comp_hash.clone();
+        if let Some(snapshot) = &world_state_baseline {
+            self.services
+                .agents_md_manager
+                .restore_nested_targets(snapshot)
+                .await;
+        }
         {
             let mut state = self.state.lock().await;
             state.replace_annotated_history(

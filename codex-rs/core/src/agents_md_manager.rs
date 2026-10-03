@@ -3,7 +3,11 @@
 
 use crate::agents_md::LoadedAgentsMd;
 use crate::agents_md::load_project_instructions;
+use crate::agents_md::nested::InstructionTarget;
+use crate::agents_md::nested::NestedAgentsMd;
+use crate::agents_md::nested::load_nested_instructions;
 use crate::config::Config;
+use crate::context::world_state::WorldStateSnapshot;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use codex_extension_api::Instructions;
 use codex_extension_api::ThreadInstructionsProvider;
@@ -14,9 +18,12 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_utils_string::approx_bytes_for_tokens;
 use codex_utils_string::approx_tokens_from_byte_count;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
+
+mod discovery;
 
 /// Owns instruction sources, refresh serialization, and the applied snapshot.
 pub(crate) struct AgentsMdManager {
@@ -36,6 +43,20 @@ pub(crate) struct SessionInstructions {
 struct AgentsMdState {
     instructions: SessionInstructions,
     cache: AgentsMdCache,
+    nested_targets: Vec<InstructionTarget>,
+    discovery_processes: HashMap<i64, discovery::DiscoveryCommand>,
+    nested_revision: u64,
+    nested_cache: Option<(NestedCacheKey, NestedAgentsMd)>,
+}
+
+#[derive(PartialEq)]
+struct NestedCacheKey {
+    turn_id: String,
+    selections: Vec<TurnEnvironmentSelection>,
+    trust: Option<TrustLevel>,
+    max_bytes: usize,
+    startup: Option<LoadedAgentsMd>,
+    revision: u64,
 }
 
 #[derive(Default)]
@@ -54,6 +75,10 @@ impl AgentsMdManager {
             state: Mutex::new(AgentsMdState {
                 instructions,
                 cache: AgentsMdCache::default(),
+                nested_targets: Vec::new(),
+                discovery_processes: HashMap::new(),
+                nested_revision: 0,
+                nested_cache: None,
             }),
         }
     }
@@ -145,6 +170,63 @@ impl AgentsMdManager {
 
     pub(crate) async fn get_loaded(&self) -> Option<Arc<LoadedAgentsMd>> {
         self.state.lock().await.cache.loaded.clone()
+    }
+
+    /// Refresh after native filesystem tools or a new turn, not every sampling request.
+    /// Visibility and content dedup belong to world state, including after window resets.
+    pub(crate) async fn load_nested(
+        &self,
+        config: &Config,
+        environments: &TurnEnvironmentSnapshot,
+        startup: Option<&LoadedAgentsMd>,
+        turn_id: &str,
+    ) -> CodexResult<NestedAgentsMd> {
+        let _guard = self
+            .refresh_lock
+            .acquire()
+            .await
+            .map_err(|_| CodexErr::Fatal("instruction refresh semaphore closed".to_string()))?;
+        let (key, targets) = {
+            let state = self.state.lock().await;
+            let key = NestedCacheKey {
+                turn_id: turn_id.to_string(),
+                selections: environments
+                    .turn_environments()
+                    .map(|environment| environment.selection.clone())
+                    .collect(),
+                trust: config.active_project.trust_level,
+                max_bytes: config.project_doc_max_bytes,
+                startup: startup.cloned(),
+                revision: state.nested_revision,
+            };
+            if let Some((previous, loaded)) = &state.nested_cache
+                && previous == &key
+            {
+                return Ok(loaded.clone());
+            }
+            (key, state.nested_targets.clone())
+        };
+        let loaded = load_nested_instructions(config, environments, startup, targets).await?;
+        self.state.lock().await.nested_cache = Some((key, loaded.clone()));
+        Ok(loaded)
+    }
+
+    /// Restore discovery scope, not stale file contents, from the native replay baseline.
+    pub(crate) async fn restore_nested_targets(&self, snapshot: &WorldStateSnapshot) {
+        let mut sections = snapshot.clone().into_object();
+        let Some(nested) = sections.remove("nested_agents_md") else {
+            return;
+        };
+        match serde_json::from_value::<NestedAgentsMd>(nested) {
+            Ok(nested) => {
+                let mut state = self.state.lock().await;
+                state.nested_targets = nested.targets;
+                state.nested_cache = None;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to restore nested instruction discovery scope")
+            }
+        }
     }
 
     pub(crate) async fn inherited_instructions(&self) -> SessionInstructions {

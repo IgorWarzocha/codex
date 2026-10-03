@@ -715,6 +715,152 @@ async fn total_byte_limit_truncates_later_project_docs() {
     assert_eq!(loaded.text(), "root\n\nabc");
 }
 
+#[tokio::test]
+async fn nested_instruction_chains_preserve_scope_precedence_budget_and_replay() {
+    use crate::agents_md::nested::InstructionTarget;
+    use crate::agents_md::nested::load_nested_instructions;
+    use crate::agents_md_manager::AgentsMdManager;
+    use crate::agents_md_manager::SessionInstructions;
+    use crate::context::world_state::WorldStateSnapshot;
+    use codex_protocol::config_types::TrustLevel;
+
+    let repo = tempfile::tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("parent/deep")).unwrap();
+    fs::create_dir(repo.path().join("unreached")).unwrap();
+    fs::write(repo.path().join("AGENTS.md"), "ROOT").unwrap();
+    fs::write(repo.path().join("parent/AGENTS.md"), "PARENT").unwrap();
+    fs::write(
+        repo.path().join("parent/deep/AGENTS.md"),
+        "not the override",
+    )
+    .unwrap();
+    fs::write(repo.path().join("parent/deep/AGENTS.override.md"), "DEEP").unwrap();
+    fs::write(repo.path().join("unreached/AGENTS.md"), "must not preload").unwrap();
+    // Disabled marker traversal: discovery still follows the entire chain beneath turn cwd.
+    let mut config = make_config_with_project_root_markers(&repo, 4096, None, &[]).await;
+    let environments = resolved_local_environments([("local", config.cwd.clone())]);
+    let startup = load_agents_md(&config).await.unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("AGENTS.md"), "other project").unwrap();
+    let targets = vec![
+        InstructionTarget {
+            environment_id: "local".to_string(),
+            directory: PathUri::from_abs_path(&repo.path().join("parent/deep").abs()),
+        },
+        InstructionTarget {
+            environment_id: "local".to_string(),
+            directory: PathUri::from_abs_path(&outside.abs()),
+        },
+    ];
+    let loaded = load_nested_instructions(&config, &environments, Some(&startup), targets.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        loaded
+            .entries
+            .iter()
+            .map(|entry| entry.contents.as_str())
+            .collect::<Vec<_>>(),
+        vec!["PARENT", "DEEP"]
+    );
+    assert_eq!(loaded.targets, targets[..1]);
+    assert!(
+        loaded.entries[1]
+            .source_path
+            .to_string()
+            .ends_with("AGENTS.override.md")
+    );
+
+    config.project_doc_max_bytes = 12;
+    let limited = load_nested_instructions(&config, &environments, Some(&startup), targets.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        limited
+            .entries
+            .iter()
+            .map(|entry| entry.contents.as_str())
+            .collect::<Vec<_>>(),
+        vec!["PARENT", "DE"]
+    );
+    config.active_project.trust_level = Some(TrustLevel::Untrusted);
+    let restricted =
+        load_nested_instructions(&config, &environments, Some(&startup), targets.clone())
+            .await
+            .unwrap();
+    assert!(restricted.entries.is_empty());
+    assert_eq!(restricted.targets, targets);
+    config.active_project.trust_level = Some(TrustLevel::Trusted);
+    config.project_doc_max_bytes = 0;
+    let disabled =
+        load_nested_instructions(&config, &environments, Some(&startup), targets.clone())
+            .await
+            .unwrap();
+    assert!(disabled.entries.is_empty());
+    assert_eq!(disabled.targets, targets);
+
+    config.active_project.trust_level = Some(TrustLevel::Trusted);
+    config.project_doc_max_bytes = 4096;
+    let object = serde_json::json!({"nested_agents_md": disabled});
+    let snapshot = WorldStateSnapshot::from(object.as_object().unwrap());
+    let manager = AgentsMdManager::new(SessionInstructions::default());
+    manager.restore_nested_targets(&snapshot).await;
+    fs::write(
+        repo.path().join("parent/deep/AGENTS.override.md"),
+        "UPDATED",
+    )
+    .unwrap();
+    let restored = manager
+        .load_nested(&config, &environments, Some(&startup), "replayed-turn")
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.entries[1].contents, "UPDATED",
+        "replay restores paths, not stale contents"
+    );
+}
+
+#[tokio::test]
+async fn nested_instruction_reads_do_not_bypass_selected_sandbox() {
+    use crate::agents_md::nested::InstructionTarget;
+    use crate::agents_md::nested::load_nested_instructions;
+    use codex_protocol::permissions::FileSystemAccessMode;
+    use codex_protocol::permissions::FileSystemSandboxEntry;
+    use codex_protocol::permissions::FileSystemSandboxPolicy;
+    use codex_protocol::permissions::NetworkSandboxPolicy;
+
+    let repo = tempfile::tempdir().unwrap();
+    fs::create_dir(repo.path().join("scoped")).unwrap();
+    fs::write(repo.path().join("scoped/AGENTS.md"), "inaccessible policy").unwrap();
+    let config = make_config(&repo, 4096, None).await;
+    let mut environments = resolved_local_environments([("local", config.cwd.clone())]);
+    let mut policy = FileSystemSandboxPolicy::read_only();
+    policy.entries.push(FileSystemSandboxEntry::new(
+        repo.path().join("scoped/AGENTS.md").abs().into(),
+        FileSystemAccessMode::Deny,
+    ));
+    if let TurnEnvironmentState::Ready(environment) = &mut environments.environments[0]
+        && let EnvironmentConfigState::Ready(environment_config) = &mut environment.selection.config
+    {
+        environment_config.permission_profile = PermissionProfileSnapshot::legacy(
+            PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
+        );
+    }
+    let target = InstructionTarget {
+        environment_id: "local".to_string(),
+        directory: PathUri::from_abs_path(&repo.path().join("scoped").abs()),
+    };
+    let error = load_nested_instructions(&config, &environments, None, vec![target])
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("failed to load nested AGENTS.md"),
+        "sandbox enforcement must fail closed: {error}"
+    );
+}
+
 /// Unreadable ancestor markers must not hide readable instructions in the selected cwd.
 #[tokio::test]
 async fn read_agents_md_loads_cwd_instructions_when_parent_markers_are_unreadable() {

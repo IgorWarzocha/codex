@@ -39,6 +39,8 @@ use std::io;
 use toml::Value as TomlValue;
 use tracing::error;
 
+pub(crate) mod nested;
+
 /// Default filename scanned for AGENTS.md instructions.
 pub const DEFAULT_AGENTS_MD_FILENAME: &str = "AGENTS.md";
 /// Preferred local override for AGENTS.md instructions.
@@ -135,6 +137,17 @@ async fn read_agents_md(
     }
 
     let paths = agents_md_paths(config, cwd, fs, sandbox).await?;
+    read_agents_md_files(fs, environment_id, cwd, paths, max_total, sandbox).await
+}
+
+async fn read_agents_md_files(
+    fs: &dyn ExecutorFileSystem,
+    environment_id: &str,
+    cwd: &PathUri,
+    paths: Vec<PathUri>,
+    max_total: usize,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<Option<LoadedAgentsMd>> {
     if paths.is_empty() {
         return Ok(None);
     }
@@ -195,6 +208,16 @@ async fn agents_md_paths(
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> io::Result<Vec<PathUri>> {
+    let search_dirs = project_search_dirs(config, cwd, fs, sandbox).await?;
+    agents_md_paths_in_dirs(config, cwd, search_dirs, fs, sandbox).await
+}
+
+async fn project_search_dirs(
+    config: &Config,
+    cwd: &PathUri,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<Vec<PathUri>> {
     let dir = cwd.clone();
 
     let mut merged = TomlValue::Table(toml::map::Map::new());
@@ -239,6 +262,16 @@ async fn agents_md_paths(
         vec![dir]
     };
 
+    Ok(search_dirs)
+}
+
+async fn agents_md_paths_in_dirs(
+    config: &Config,
+    cwd: &PathUri,
+    search_dirs: Vec<PathUri>,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<Vec<PathUri>> {
     let candidate_filenames = candidate_filenames(config, cwd);
     let candidate_filenames = &candidate_filenames;
     let mut results = futures::stream::iter(search_dirs)
