@@ -64,6 +64,42 @@ fn settings_recover_api_key_startup_without_thread_or_deno_and_preserve_options(
 }
 
 #[test]
+fn notes_idle_rollover_accepts_only_off_or_25_and_preserves_other_settings() -> Result<()> {
+    let home = TempDir::new()?;
+    let path = home.path().join("config.toml");
+    let original = "context_strategy = 'notes'\n";
+    std::fs::write(&path, original)?;
+    command(&home)?
+        .args(["settings"])
+        .assert()
+        .success()
+        .stdout(contains("notes-idle-rollover = off\n  Choices: off, 25\n"));
+    for choice in ["15", "30", "60"] {
+        command(&home)?
+            .args(["settings", "set", "notes-idle-rollover", choice])
+            .assert()
+            .failure()
+            .stderr(contains("Choose: off, 25"));
+        assert_eq!(std::fs::read_to_string(&path)?, original);
+    }
+    for (choice, expected) in [("25", Some(25)), ("off", None)] {
+        command(&home)?
+            .args(["settings", "set", "notes-idle-rollover", choice])
+            .assert()
+            .success();
+        let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path)?)?;
+        assert_eq!(
+            config
+                .get("context_idle_rollover_minutes")
+                .and_then(toml::Value::as_integer),
+            expected
+        );
+        assert_eq!(config["context_strategy"].as_str(), Some("notes"));
+    }
+    Ok(())
+}
+
+#[test]
 fn settings_reject_invalid_choices_and_report_overridden_saves() -> Result<()> {
     let home = TempDir::new()?;
     command(&home)?

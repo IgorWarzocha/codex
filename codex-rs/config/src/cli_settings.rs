@@ -71,7 +71,7 @@ impl CliSetting {
                 "New threads only. User-message token retention for Compaction, not a total context limit."
             }
             Self::IdleRollover => {
-                "New threads only. Notes rolls over before the next user turn after this many idle minutes. Off disables idle rollover, not context management."
+                "New threads only. Notes rolls over before the next user turn after 25 idle minutes when fresh saved notes are available. Off disables idle rollover, not context management."
             }
             Self::Runtime => {
                 "New threads only. Notebook needs a single local environment, full-access permissions and Deno. Deno uses an explicit path, PATH or a verified managed download. No permissions are changed. V8 supports sandboxed Code Mode. Off disables configured Code Mode, but a model that requires Code Mode can still select it."
@@ -101,7 +101,7 @@ impl CliSetting {
         match self {
             Self::Context => &["notes", "compaction"],
             Self::Retention => &["16000", "32000", "64000"],
-            Self::IdleRollover => &["off", "15", "30", "60"],
+            Self::IdleRollover => &["off", "25"],
             Self::Runtime => &["off", "v8", "notebook"],
             Self::MultiAgent => &["off", "legacy", "v2"],
             Self::Acknowledgements => &["default", "on", "off"],
