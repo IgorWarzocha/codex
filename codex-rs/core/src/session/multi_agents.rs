@@ -2,6 +2,7 @@ use crate::agent::types::ResolvedMultiAgentV2UsageHints;
 use crate::config::MultiAgentV2Config;
 use crate::context::MultiAgentRoleInstructions;
 use crate::session::step_context::StepContext;
+use codex_prompts::AgentMessageBoardGuidance;
 use codex_prompts::ResolvedMessage;
 use codex_prompts::ResolvedModelMessages;
 use codex_prompts::ResolvedMultiAgentMessages;
@@ -10,6 +11,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_tools::ToolName;
 
 pub(super) fn usage_hint_text(step_context: &StepContext) -> Option<MultiAgentRoleInstructions> {
     let turn_context = step_context.turn.as_ref();
@@ -24,7 +26,7 @@ pub(super) fn usage_hint_text(step_context: &StepContext) -> Option<MultiAgentRo
         multi_agent_messages,
         !turn_context.config.update_plan_enabled && turn_context.config.model_catalog.is_none(),
     );
-    match &turn_context.session_source {
+    let role = match &turn_context.session_source {
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. }) => snapshot.subagent,
         SessionSource::Cli
         | SessionSource::VSCode
@@ -33,7 +35,25 @@ pub(super) fn usage_hint_text(step_context: &StepContext) -> Option<MultiAgentRo
         | SessionSource::Custom(_)
         | SessionSource::Unknown => snapshot.root,
         SessionSource::Internal(_) | SessionSource::SubAgent(_) => None,
-    }
+    };
+    let board_tool = ToolName::new(
+        turn_context.config.multi_agent_v2.tool_namespace.clone(),
+        codex_agent_message_board_extension::AGENT_BOARD_TOOL_NAME,
+    );
+    let board_guidance = step_context.tool_router.exposes_tool(&board_tool).then(|| {
+        let direct_messaging = ["send_message", "followup_task"].into_iter().all(|name| {
+            step_context.tool_router.exposes_tool(&ToolName::new(
+                turn_context.config.multi_agent_v2.tool_namespace.clone(),
+                name,
+            ))
+        });
+        if direct_messaging {
+            AgentMessageBoardGuidance::WithDirectMessaging
+        } else {
+            AgentMessageBoardGuidance::BoardOnly
+        }
+    });
+    role.map(|role| role.with_agent_message_board(board_guidance))
 }
 
 pub(crate) fn resolve_usage_hints(
@@ -59,6 +79,8 @@ pub(crate) fn resolve_usage_hints(
             max_concurrency: config.max_concurrent_threads_per_session,
             wait_agent_enabled: config.wait_agent_enabled,
             expose_model_overrides: config.expose_spawn_agent_model_overrides,
+            // Spawn preparation has no child tool router. The child's step captures availability.
+            agent_message_board: None,
         })
     };
 

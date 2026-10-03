@@ -92,6 +92,9 @@ pub(crate) struct CodeModeService {
     default_exec_yield_time_ms: u64,
     shutdown_token: CancellationToken,
     unavailable_warning_emitted: AtomicBool,
+    // Once unrestricted access has been authorized, later direct-only steps must
+    // still enforce revocation for a live or concurrently prewarming Notebook.
+    notebook_authority_required: AtomicBool,
 }
 
 impl CodeModeService {
@@ -133,6 +136,7 @@ impl CodeModeService {
             default_exec_yield_time_ms: config.code_mode.default_exec_yield_time_ms,
             shutdown_token: CancellationToken::new(),
             unavailable_warning_emitted: AtomicBool::new(false),
+            notebook_authority_required: AtomicBool::new(false),
         }
     }
 
@@ -145,7 +149,9 @@ impl CodeModeService {
     }
 
     pub(crate) async fn prewarm(&self, turn: &TurnContext) -> Result<(), String> {
-        if self.shutdown_token.is_cancelled() {
+        if self.shutdown_token.is_cancelled()
+            || crate::tools::effective_tool_mode(turn, turn.model_info()) == ToolMode::Direct
+        {
             return Ok(());
         }
         match &self.notebook_provider {
@@ -162,6 +168,8 @@ impl CodeModeService {
                     tracing::debug!(%error, "Notebook prewarm deferred until authorized access");
                     return Ok(());
                 }
+                self.notebook_authority_required
+                    .store(true, Ordering::Release);
                 // Saved-code restoration still waits for a captured, validated step.
                 provider.prewarm().await
             }
@@ -214,6 +222,16 @@ impl CodeModeService {
             .await
     }
 
+    pub(crate) async fn validate_sampling_access(&self, step: &StepContext) -> Result<(), String> {
+        if step.tool_router.requires_code_mode_worker()
+            || self.notebook_authority_required.load(Ordering::Acquire)
+        {
+            self.validate_notebook_access(step).await
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) async fn validate_notebook_access(&self, step: &StepContext) -> Result<(), String> {
         let selected =
             step.turn.config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook;
@@ -226,6 +244,10 @@ impl CodeModeService {
             self.shutdown_with_mode(ShutdownMode::WithoutCleanup)
                 .await?;
             return Err(error);
+        }
+        if selected {
+            self.notebook_authority_required
+                .store(true, Ordering::Release);
         }
         Ok(())
     }
@@ -863,7 +885,11 @@ mod tests {
 
     #[tokio::test]
     async fn turn_worker_uses_step_router_mode_instead_of_admitted_turn() {
-        let (session, turn) = make_session_and_context().await;
+        let (session, mut turn) = make_session_and_context().await;
+        Arc::make_mut(&mut turn.config)
+            .features
+            .disable(codex_features::Feature::CodeMode)
+            .expect("admit a direct-mode turn");
         assert_eq!(
             crate::tools::effective_tool_mode(&turn, turn.model_info()),
             ToolMode::Direct

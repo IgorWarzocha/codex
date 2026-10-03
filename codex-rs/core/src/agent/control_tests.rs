@@ -2735,6 +2735,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
         max_concurrency: 2,
         wait_agent_enabled: false,
         expose_model_overrides: false,
+        agent_message_board: None,
     };
     let parent_task = InterAgentCommunication::new(
         AgentPath::root(),
@@ -2904,8 +2905,8 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
         "forked child history should strip the resolved parent hint from compacted replacement history"
     );
     assert!(
-        history_contains_text(history.raw_items(), "Catalog child subagent guidance."),
-        "full-history forked child should add the resolved child hint after compacted-history sanitization"
+        !history_contains_text(history.raw_items(), "Catalog child subagent guidance."),
+        "composed child guidance must wait for the child's first step tool router"
     );
     assert!(
         !history

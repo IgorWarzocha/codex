@@ -5,7 +5,9 @@ use codex_core::ThreadConfigSnapshot;
 use codex_core::TurnInputRequest;
 use codex_core::TurnStartOptions;
 use codex_core::config::AgentRoleConfig;
+use codex_core::config::Config;
 use codex_core::config::CurrentTimeReminderConfig;
+use codex_features::CodeModeRuntime;
 use codex_features::Feature;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
@@ -112,6 +114,17 @@ const FULL_HISTORY_PROACTIVE_PROMPT: &str = "switch to proactive delegation";
 const FULL_HISTORY_EXPLICIT_PROMPT: &str = "restore explicit-only delegation";
 const FULL_HISTORY_PROACTIVE_POLICY: &str = "Parallel delegation when faster or higher quality";
 const FULL_HISTORY_EXPLICIT_POLICY: &str = "Agent spawning only on explicit request from the user or applicable AGENTS.md or skill instructions";
+
+fn configure_legacy_tool_fixture(config: &mut Config) {
+    // Mocked calls use the old direct surface; catalog-selected Code Mode still needs V8.
+    for feature in [Feature::CodeMode, Feature::CodeModeOnly] {
+        config
+            .features
+            .disable(feature)
+            .expect("use catalog tool mode");
+    }
+    config.code_mode.runtime = CodeModeRuntime::V8;
+}
 
 fn body_contains(req: &wiremock::Request, text: &str) -> bool {
     decoded_body(req)
@@ -502,6 +515,7 @@ async fn setup_turn_one_with_custom_spawned_child(
 
     let configured_reasoning_effort = turn_reasoning_effort.clone();
     let mut builder = configure_test(test_codex().with_config(move |config| {
+        configure_legacy_tool_fixture(config);
         // These fixtures exercise the legacy namespace, not the default V2 surface.
         config
             .features
@@ -1367,6 +1381,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
         .mount(&server)
         .await;
     let test = test_codex()
+        .with_config(configure_legacy_tool_fixture)
         .with_history_mode(history_mode)
         .with_config(move |config| {
             config
@@ -2854,6 +2869,7 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
 
     let server = start_mock_server().await;
     let mut builder = test_codex()
+        .with_config(configure_legacy_tool_fixture)
         .with_model("gpt-5.6-sol")
         .with_config(|config| {
             for feature in [Feature::Collab, Feature::MultiAgentV2] {

@@ -1201,8 +1201,9 @@ pub struct CodeModeConfig {
 
 impl Default for CodeModeConfig {
     fn default() -> Self {
+        let runtime = codex_features::CodeModeRuntime::default();
         Self {
-            runtime: codex_features::CodeModeRuntime::V8,
+            runtime,
             deno_program: None,
             notebook_profile: None,
             notebook_max_heap_mib:
@@ -1213,7 +1214,7 @@ impl Default for CodeModeConfig {
             tool_input_schema_max_bytes: None,
             excluded_tool_namespaces: Vec::new(),
             direct_only_tool_namespaces: Vec::new(),
-            disable_in_process_fallback: false,
+            disable_in_process_fallback: runtime == codex_features::CodeModeRuntime::Notebook,
         }
     }
 }
@@ -2790,8 +2791,9 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> std::io::Result<CodeMod
             )
         })?;
 
+    let runtime = base.and_then(|config| config.runtime).unwrap_or_default();
     Ok(CodeModeConfig {
-        runtime: base.and_then(|config| config.runtime).unwrap_or_default(),
+        runtime,
         deno_program: base.and_then(|config| config.deno_program.clone()),
         notebook_profile: base.and_then(|config| config.notebook_profile.clone()),
         notebook_max_heap_mib,
@@ -2815,11 +2817,10 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> std::io::Result<CodeMod
             .and_then(|config| config.direct_only_tool_namespaces.as_ref())
             .cloned()
             .unwrap_or_default(),
-        disable_in_process_fallback: base.is_some_and(|config| {
-            config.runtime == Some(codex_features::CodeModeRuntime::Notebook)
-        }) || host
-            .and_then(|config| config.disable_in_process_fallback)
-            .unwrap_or_default(),
+        disable_in_process_fallback: runtime == codex_features::CodeModeRuntime::Notebook
+            || host
+                .and_then(|config| config.disable_in_process_fallback)
+                .unwrap_or_default(),
     })
 }
 

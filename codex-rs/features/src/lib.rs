@@ -1095,7 +1095,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::CodeMode,
         key: "code_mode",
         stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::CodeModeBufferedExec,
@@ -1399,7 +1399,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::AgentMessageBoard,
         key: "agent_message_board",
         stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::MultiAgentMode,

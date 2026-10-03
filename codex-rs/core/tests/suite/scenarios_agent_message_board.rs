@@ -36,6 +36,9 @@ mod remote;
 #[path = "scenarios_agent_message_board_help.rs"]
 mod help;
 
+#[path = "scenarios_agent_message_board_guidance.rs"]
+mod guidance;
+
 enum BoardClock {
     Available,
     Unavailable,
@@ -85,6 +88,13 @@ fn done() -> String {
 
 fn configure(config: &mut codex_core::config::Config) {
     super::configure_scenario_catalog(config);
+    // These action/notification fixtures call the direct board facade. Notebook defaults
+    // and its nested board surface are exercised by the guidance scenarios.
+    config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
+    config
+        .features
+        .disable(Feature::CodeMode)
+        .expect("direct board tools");
     // These notification scenarios deliberately hold turns open with wait_agent.
     config.multi_agent_v2.wait_agent_enabled = true;
     config

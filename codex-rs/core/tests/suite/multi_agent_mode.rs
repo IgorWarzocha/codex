@@ -76,6 +76,11 @@ fn add_ultra_reasoning(model_info: &mut ModelInfo) {
 }
 
 fn configure_multi_agent_v2(config: &mut Config) {
+    // Delegation-policy fixtures use direct tools, not a Notebook kernel.
+    config
+        .features
+        .disable(Feature::CodeMode)
+        .expect("direct tools");
     config
         .features
         .enable(Feature::MultiAgentV2)
@@ -632,6 +637,18 @@ async fn ultra_on_multi_agent_v1_uses_highest_non_ultra_without_mode_instruction
         .with_model_info_override("gpt-5.4", add_ultra_reasoning)
         .with_config(|config| {
             config.model_reasoning_effort = Some(ReasoningEffort::Ultra);
+            config
+                .features
+                .disable(Feature::CodeMode)
+                .expect("direct tools");
+            config
+                .features
+                .disable(Feature::MultiAgentV2)
+                .expect("V1 fixture");
+            config
+                .features
+                .enable(Feature::Collab)
+                .expect("legacy agents");
         })
         .build(&server)
         .await?;

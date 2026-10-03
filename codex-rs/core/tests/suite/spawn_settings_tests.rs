@@ -87,6 +87,7 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.turn_lifecycle_contributor(remover.clone());
     let test = test_codex()
+        .with_config(configure_legacy_tool_fixture)
         .with_model(INHERITED_MODEL)
         .with_extensions(Arc::new(extensions.build()))
         .with_config(|config| {

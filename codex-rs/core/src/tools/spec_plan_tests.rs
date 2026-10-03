@@ -217,7 +217,7 @@ async fn probe_with(
     configure_turn: impl FnOnce(&mut TurnContext),
     inputs: ToolPlanInputs,
 ) -> ToolPlanProbe {
-    let (_session, mut turn) = make_session_and_context().await;
+    let (_session, mut turn) = make_direct_tool_plan_context().await;
     configure_turn(&mut turn);
     ToolPlanProbe::from_router(plan_with_model(&turn, turn.model_info(), inputs))
 }
@@ -255,6 +255,25 @@ fn plan_with_model(
 
 async fn probe(configure_turn: impl FnOnce(&mut TurnContext)) -> ToolPlanProbe {
     probe_with(configure_turn, ToolPlanInputs::default()).await
+}
+
+// Tool-plan cases start from a direct V8 baseline and opt into other modes explicitly.
+// The default-runtime matrix below uses the unmodified session fixture instead.
+async fn make_direct_tool_plan_context() -> (crate::session::session::Session, TurnContext) {
+    let (session, mut turn) = make_session_and_context().await;
+    update_config(&mut turn, |config| {
+        config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
+        config.code_mode.disable_in_process_fallback = false;
+        config
+            .features
+            .disable(Feature::CodeMode)
+            .expect("direct baseline");
+        config
+            .features
+            .disable(Feature::CodeModeOnly)
+            .expect("direct baseline");
+    });
+    (session, turn)
 }
 
 fn set_feature(turn: &mut TurnContext, feature: Feature, enabled: bool) {
@@ -529,7 +548,7 @@ async fn allowed_tools_filter_sources_before_code_mode_and_discovery() {
         ]),
         Some(Vec::new()),
     ] {
-        let (_, mut turn) = make_session_and_context().await;
+        let (_, mut turn) = make_direct_tool_plan_context().await;
         set_feature(&mut turn, Feature::CodeMode, /*enabled*/ true);
         set_web_search_mode(&mut turn, WebSearchMode::Live);
         update_turn_settings_for_test(&mut turn, |settings| {
@@ -602,7 +621,7 @@ async fn allowed_tools_filter_sources_before_code_mode_and_discovery() {
 
 #[tokio::test]
 async fn reviewer_tool_policy_exclude_optional_core_tools() {
-    let (mut session, mut turn) = make_session_and_context().await;
+    let (mut session, mut turn) = make_direct_tool_plan_context().await;
     session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
     set_feature(&mut turn, Feature::ViewImage, /*enabled*/ true);
     Arc::make_mut(&mut turn.config).update_plan_enabled = true;
@@ -639,7 +658,7 @@ async fn reviewer_tool_policy_respect_managed_shell_restrictions() {
         (Some(Feature::UnifiedExec), ConfigShellToolType::UnifiedExec),
         (None, ConfigShellToolType::Disabled),
     ] {
-        let (mut session, mut turn) = make_session_and_context().await;
+        let (mut session, mut turn) = make_direct_tool_plan_context().await;
         session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
         set_feature(&mut turn, Feature::ViewImage, /*enabled*/ true);
         set_feature(&mut turn, Feature::CodeMode, /*enabled*/ true);
@@ -692,7 +711,7 @@ async fn reviewer_tool_policy_respect_managed_shell_restrictions() {
 
 #[tokio::test]
 async fn reviewer_tool_policy_preserve_code_mode() {
-    let (mut session, mut turn) = make_session_and_context().await;
+    let (mut session, mut turn) = make_direct_tool_plan_context().await;
     session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
     set_feature(&mut turn, Feature::CodeMode, /*enabled*/ true);
     let turn = Arc::new(turn);
@@ -736,7 +755,7 @@ async fn reviewer_tool_policy_require_managed_secondary_environments() {
             Vec::new(),
         ),
     ] {
-        let (mut session, mut turn) = make_session_and_context().await;
+        let (mut session, mut turn) = make_direct_tool_plan_context().await;
         session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
         set_feature(&mut turn, Feature::ViewImage, /*enabled*/ true);
         let TurnEnvironmentState::Ready(primary) = turn
@@ -1357,7 +1376,7 @@ async fn environment_count_controls_environment_backed_tools() {
 
 #[tokio::test]
 async fn environment_tools_follow_the_step_context() {
-    let (_session, mut turn) = make_session_and_context().await;
+    let (_session, mut turn) = make_direct_tool_plan_context().await;
     update_turn_settings_for_test(&mut turn, |settings| {
         Arc::make_mut(&mut settings.model_info).apply_patch_tool_type =
             Some(ApplyPatchToolType::Freeform);
@@ -1661,7 +1680,7 @@ async fn tool_namespaces_info_is_opt_in_and_tracks_mcp_exposure() {
 
 #[tokio::test]
 async fn candidate_model_plan_leaves_selected_model_and_inventory_unchanged() {
-    let (_session, mut turn) = make_session_and_context().await;
+    let (_session, mut turn) = make_direct_tool_plan_context().await;
     set_features(&mut turn, &[Feature::ShellTool, Feature::UnifiedExec]);
     update_config(&mut turn, |config| {
         config.tool_registry.turn_metadata_includes_tool_info = true;
@@ -1727,7 +1746,7 @@ async fn strict_namespace_ownership_requires_tool_namespace_inventory_opt_in() {
         (true, ToolExposure::Direct),
         (true, ToolExposure::Hidden),
     ] {
-        let (_session, mut turn) = make_session_and_context().await;
+        let (_session, mut turn) = make_direct_tool_plan_context().await;
         update_config(&mut turn, |config| {
             config.tool_registry.error_on_tool_collisions = true;
             config.tool_registry.turn_metadata_includes_tool_info = enabled;
@@ -1984,7 +2003,7 @@ async fn strict_tool_collisions_reject_external_and_synthetic_duplicates() {
     for (expected_name, inputs, code_mode_enabled, search_enabled) in
         cases.into_iter().chain(namespace_cases)
     {
-        let (_session, mut turn) = make_session_and_context().await;
+        let (_session, mut turn) = make_direct_tool_plan_context().await;
         update_config(&mut turn, |config| {
             config.tool_registry.error_on_tool_collisions = true;
             config.update_plan_enabled = true;
@@ -2259,7 +2278,7 @@ async fn deferred_extension_tools_are_discoverable_with_tool_search() {
 async fn tool_search_cache_rebuilds_when_deferred_sources_change() {
     let cache = ToolSearchHandlerCache::default();
 
-    let (_session, mut first_turn) = make_session_and_context().await;
+    let (_session, mut first_turn) = make_direct_tool_plan_context().await;
     update_turn_settings_for_test(&mut first_turn, |settings| {
         Arc::make_mut(&mut settings.model_info).supports_search_tool = true;
     });
@@ -2288,7 +2307,7 @@ async fn tool_search_cache_rebuilds_when_deferred_sources_change() {
     );
     let first_plan = ToolPlanProbe::from_router(first_router);
 
-    let (_session, mut second_turn) = make_session_and_context().await;
+    let (_session, mut second_turn) = make_direct_tool_plan_context().await;
     update_turn_settings_for_test(&mut second_turn, |settings| {
         Arc::make_mut(&mut settings.model_info).supports_search_tool = true;
     });
@@ -2343,7 +2362,7 @@ async fn tool_search_cache_rebuilds_when_deferred_world_state_changes() {
     let cache = ToolSearchHandlerCache::default();
 
     for world_state_enabled in [false, true, false] {
-        let (_session, mut turn) = make_session_and_context().await;
+        let (_session, mut turn) = make_direct_tool_plan_context().await;
         update_turn_settings_for_test(&mut turn, |settings| {
             Arc::make_mut(&mut settings.model_info).supports_search_tool = true;
         });
@@ -2587,17 +2606,57 @@ async fn code_mode_only_exposes_code_executor_and_hides_nested_tools() {
     );
 }
 
+#[test_case::test_case(None, true, false, ToolMode::CodeModeOnly; "notebook_default")]
+#[test_case::test_case(None, false, false, ToolMode::Direct; "disabled_with_default_runtime")]
+#[test_case::test_case(Some(ToolMode::Direct), false, false, ToolMode::Direct; "disabled_direct_catalog")]
+#[test_case::test_case(Some(ToolMode::CodeMode), false, false, ToolMode::CodeModeOnly; "catalog_code_mode_retains_notebook_contract")]
+#[test_case::test_case(None, true, true, ToolMode::CodeMode; "explicit_v8")]
+#[tokio::test]
+async fn code_mode_default_and_opt_out_preserve_requested_runtime(
+    catalog_mode: Option<ToolMode>,
+    enabled: bool,
+    v8: bool,
+    expected: ToolMode,
+) {
+    let (_session, mut turn) = make_session_and_context().await;
+    update_turn_settings_for_test(&mut turn, |settings| {
+        Arc::make_mut(&mut settings.model_info).tool_mode = catalog_mode;
+    });
+    set_feature(&mut turn, Feature::CodeMode, enabled);
+    set_feature(&mut turn, Feature::CodeModeOnly, false);
+    if v8 {
+        update_config(&mut turn, |config| {
+            config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
+            config.code_mode.disable_in_process_fallback = false;
+        });
+    }
+    assert_eq!(
+        crate::tools::requested_tool_mode(&turn, turn.model_info()),
+        expected
+    );
+    // An unavailable default Notebook must not silently fall back to direct tools.
+    turn.code_mode_available = false;
+    assert_eq!(
+        crate::tools::effective_tool_mode(&turn, turn.model_info()),
+        if v8 { ToolMode::Direct } else { expected }
+    );
+}
+
 #[test_case::test_case(false; "nested_control_available")]
 #[test_case::test_case(true; "nested_control_excluded")]
 #[tokio::test]
 async fn notebook_lifecycle_stays_top_level_and_has_a_nested_read_surface(exclude_functions: bool) {
     let v8 = probe(|turn| {
+        update_config(turn, |config| {
+            config.code_mode.runtime = codex_features::CodeModeRuntime::V8
+        });
         set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
     })
     .await;
     v8.assert_registered_lacks(&["notebook"]);
     assert!(v8.code_mode_instructions.is_none());
     let notebook = probe(|turn| {
+        set_feature(turn, Feature::CodeMode, true);
         update_config(turn, |config| {
             config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
             if exclude_functions {

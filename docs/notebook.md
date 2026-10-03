@@ -1,6 +1,6 @@
 # Deno Notebook runtime
 
-This fork adds an opt-in persistent JavaScript and TypeScript runtime to Codex's existing `exec` and `wait` tools. Rust controls Deno's Jupyter kernel through `jupyter-zmq-client`. No Python, JupyterLab or Node controller is required.
+This fork uses a persistent JavaScript and TypeScript runtime by default for Codex's `exec` and `wait` tools. Rust controls Deno's Jupyter kernel through `jupyter-zmq-client`. No Python, JupyterLab or Node controller is required.
 
 ## Run
 
@@ -41,7 +41,7 @@ notebook_max_heap_mib = 4096
 notebook_plain_command_output = true
 ```
 
-Full-access permissions must still be selected separately. Omit `runtime` or set it to `"v8"` to retain upstream behavior.
+Code Mode is enabled by default and uses Notebook when `runtime` is omitted. Full-access permissions must still be selected separately. Set `runtime = "v8"` for sandboxed execution. Set `features.code_mode.enabled = false` to disable feature-selected Code Mode. Explicit model catalog tool-mode overrides still apply.
 
 Omit `deno_program` to allow automatic installation. Set it to `"deno"` to require an existing executable on `PATH`, including for offline environments. Network and verification failures are reported rather than falling back to an unverified runtime. Ephemeral threads can share the managed runtime cache without persisting Notebook state.
 

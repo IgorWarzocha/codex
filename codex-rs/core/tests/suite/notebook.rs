@@ -1,10 +1,16 @@
 use anyhow::Result;
 use codex_code_mode::CodeModeSessionProvider;
 use codex_config::types::ContextStrategy;
+use codex_core::TurnInputRequest;
 use codex_features::CodeModeRuntime;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_notebook::DenoNotebookSessionProvider;
+use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::ToolMode;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_custom_tool_call;
@@ -15,6 +21,108 @@ use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event_match;
+
+#[test_case::test_case(PermissionProfile::workspace_write(); "sandboxed")]
+#[test_case::test_case(PermissionProfile::Disabled; "full_access")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disabled_code_mode_does_not_acquire_default_notebook(
+    profile: PermissionProfile,
+) -> Result<()> {
+    let server = start_mock_server().await;
+    let mock = mount_sse_sequence(&server, vec![sse(vec![ev_completed("done")])]).await;
+    let test = test_codex()
+        .with_model_info_override("gpt-5.4", |model| model.tool_mode = Some(ToolMode::Direct))
+        .with_config(|config| {
+            config.features.disable(Feature::CodeMode).unwrap();
+            config.code_mode.deno_program = Some("/nonexistent/default-notebook-deno".into());
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    assert_eq!(test.config.code_mode.runtime, CodeModeRuntime::Notebook);
+    assert!(test.config.features.enabled(Feature::CodeModePrewarm));
+    test.submit_turn_with_permission_profile("Continue.", profile)
+        .await?;
+    let request = mock.single_request();
+    assert!(request.tool_by_name("functions", "exec").is_none());
+    assert!(request.tool_by_name("functions", "notebook").is_none());
+    assert!(!request.instructions_text().contains("<exec_tools>"));
+    assert!(
+        !request
+            .message_input_texts("developer")
+            .join("\n")
+            .contains("Notebook")
+    );
+    assert!(!test.home.path().join("notebook").exists());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn direct_model_transition_revokes_live_notebook_without_running_disposers() -> Result<()> {
+    let deno = std::env::var_os("DENO_PROGRAM")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| "deno".into());
+    if let Err(error) =
+        DenoNotebookSessionProvider::new(deno.clone(), std::env::current_dir()?).availability()
+    {
+        eprintln!("skipping Notebook integration test: {error}");
+        return Ok(());
+    }
+    let server = start_mock_server().await;
+    let mock = mount_sse_sequence(&server, vec![
+        sse(vec![ev_custom_tool_call("seed-disposer", "exec", "var resource = {[Symbol.dispose]() { Deno.writeTextFileSync('disposed-after-revocation', 'x'); }}; text('ready')"), ev_completed("seed")]),
+        sse(vec![ev_assistant_message("ready", "Ready."), ev_completed("ready")]),
+    ]).await;
+    let test = test_codex()
+        .with_model_info_override("gpt-5.2", |model| model.tool_mode = Some(ToolMode::Direct))
+        .with_model_info_override("gpt-5.4", |model| {
+            model.tool_mode = Some(ToolMode::CodeMode)
+        })
+        .with_config(move |config| {
+            config.features.disable(Feature::CodeMode).unwrap();
+            config.code_mode.deno_program = Some(deno);
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    test.submit_turn("Start the assigned work.").await?;
+    assert_eq!(mock.requests().len(), 2);
+    let (output, success) = mock.requests()[1]
+        .custom_tool_call_output_content_and_success("seed-disposer")
+        .unwrap();
+    assert_ne!(success, Some(false));
+    assert!(output.unwrap().contains("ready"));
+    test.codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Continue with restricted permissions.".to_string(),
+                text_elements: vec![],
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                model: Some("gpt-5.2".to_string()),
+                permission_profile: Some(PermissionProfile::workspace_write()),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    let error = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::Error(error) => Some(error.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(
+        error.message.contains("danger-full-access"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        mock.requests().len(),
+        2,
+        "revocation must precede direct-model sampling"
+    );
+    test.codex.shutdown_and_wait().await?;
+    assert!(!test.cwd_path().join("disposed-after-revocation").exists());
+    Ok(())
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn notebook_context_restores_status_after_rollover_without_exposing_values() -> Result<()> {
@@ -79,7 +187,6 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
         )?)
         .with_config(move |config| {
             config.model_provider.base_url = Some(backend_url);
-            config.code_mode.runtime = CodeModeRuntime::Notebook;
             config.code_mode.deno_program = Some(deno);
             config.ephemeral = true;
             config.base_instructions = Some("Keep this explicit base unchanged.".to_string());
@@ -87,6 +194,10 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
         })
         .build(&server)
         .await?;
+    assert!(test.config.features.enabled(Feature::CodeMode));
+    assert!(!test.config.features.enabled(Feature::CodeModeOnly));
+    assert_eq!(test.config.code_mode.runtime, CodeModeRuntime::Notebook);
+    assert!(test.config.code_mode.disable_in_process_fallback);
     test.submit_turn("Retain a binding across a new context window")
         .await?;
     let requests = responses.requests();

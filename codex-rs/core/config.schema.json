@@ -623,7 +623,7 @@
               "$ref": "#/definitions/CodeModeRuntime"
             }
           ],
-          "description": "Notebook uses a persistent Deno kernel and requires unrestricted local execution."
+          "description": "Defaults to Notebook, a persistent Deno kernel requiring unrestricted local execution. Select V8 explicitly for sandboxed execution."
         },
         "tool_input_schema_max_bytes": {
           "description": "Maximum UTF-8 bytes per rendered tool input type, with a 16,000-byte minimum and default. For ordinary MCP tools, this is also at least their server's explicitly configured input limit.",

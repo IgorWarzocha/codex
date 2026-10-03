@@ -688,6 +688,7 @@ disable_in_process_fallback = true
     assert!(config.features.enabled(Feature::CodeMode));
     assert!(config.features.enabled(Feature::CodeModeHost));
     let defaults = resolve_code_mode_config(&ConfigToml::default())?;
+    assert_eq!(defaults, CodeModeConfig::default());
     assert_eq!(defaults.deno_program, None);
     assert_eq!(defaults.notebook_profile, None);
     assert_eq!(defaults.notebook_max_heap_mib, 4096);
@@ -696,6 +697,69 @@ disable_in_process_fallback = true
         defaults.notebook_max_heap_mib,
         CodeModeConfig::default().notebook_max_heap_mib
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn code_mode_defaults_to_notebook_without_implicit_runtime_fallback() -> std::io::Result<()> {
+    let codex_home = tempdir()?;
+    for (toml, enabled, runtime, no_fallback) in [
+        ("", true, codex_features::CodeModeRuntime::Notebook, true),
+        (
+            "[features.code_mode]",
+            true,
+            codex_features::CodeModeRuntime::Notebook,
+            true,
+        ),
+        (
+            "[features]\ncode_mode = false",
+            false,
+            codex_features::CodeModeRuntime::Notebook,
+            true,
+        ),
+        (
+            "[features.code_mode]\nenabled = false",
+            false,
+            codex_features::CodeModeRuntime::Notebook,
+            true,
+        ),
+        (
+            "[features.code_mode_host]\ndisable_in_process_fallback = false",
+            true,
+            codex_features::CodeModeRuntime::Notebook,
+            true,
+        ),
+        (
+            "[features.code_mode]\nruntime = 'v8'",
+            true,
+            codex_features::CodeModeRuntime::V8,
+            false,
+        ),
+        (
+            "[features.code_mode]\nruntime = 'v8'\n[features.code_mode_host]\ndisable_in_process_fallback = true",
+            true,
+            codex_features::CodeModeRuntime::V8,
+            true,
+        ),
+    ] {
+        let config = Config::load_from_base_config_with_overrides(
+            toml::from_str(toml).expect("code-mode config should parse"),
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await?;
+        assert_eq!(
+            config.features.enabled(Feature::CodeMode),
+            enabled,
+            "{toml}"
+        );
+        assert!(!config.features.enabled(Feature::CodeModeOnly), "{toml}");
+        assert_eq!(config.code_mode.runtime, runtime, "{toml}");
+        assert_eq!(
+            config.code_mode.disable_in_process_fallback, no_fallback,
+            "{toml}"
+        );
+    }
     Ok(())
 }
 

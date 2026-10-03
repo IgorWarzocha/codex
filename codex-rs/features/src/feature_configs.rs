@@ -38,7 +38,8 @@ pub struct ToolRegistryConfigToml {
 pub struct CodeModeConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Notebook uses a persistent Deno kernel and requires unrestricted local execution.
+    /// Defaults to Notebook, a persistent Deno kernel requiring unrestricted local execution.
+    /// Select V8 explicitly for sandboxed execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<CodeModeRuntime>,
     /// Explicit Deno executable. Otherwise use PATH or install the pinned Notebook runtime.
@@ -85,8 +86,8 @@ impl FeatureConfig for CodeModeConfigToml {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CodeModeRuntime {
-    #[default]
     V8,
+    #[default]
     Notebook,
 }
 

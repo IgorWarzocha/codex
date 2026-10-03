@@ -3,6 +3,7 @@ use anyhow::anyhow;
 use codex_core::ForkSnapshot;
 use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
+use codex_core::config::Config;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_exec_server::REMOTE_ENVIRONMENT_ID;
@@ -94,6 +95,13 @@ const SPAWN_FRESH_PARENT_PROMPT: &str = "spawn a child with fresh context";
 const SPAWN_PARENT_PROMPT: &str = "spawn a child with the parent context";
 const SPAWN_SEED_PROMPT: &str = "seed parent history";
 const PROVIDER_WARNING: &str = "global instruction source unavailable; using fallback";
+
+fn configure_direct_tool_fixture(config: &mut Config) {
+    // Instruction tests use direct calls, restricted permissions, or no environment.
+    for feature in [Feature::CodeMode, Feature::CodeModeOnly] {
+        config.features.disable(feature).expect("use direct tools");
+    }
+}
 
 struct WarningInstructionsProvider {
     inner: CodexHomeUserInstructionsProvider,
@@ -788,6 +796,7 @@ async fn restricted_project_without_instructions_starts_successfully() -> Result
     )
     .await;
     let mut builder = test_codex().with_config(|config| {
+        configure_direct_tool_fixture(config);
         let mut file_system_policy = FileSystemSandboxPolicy::read_only();
         file_system_policy.entries.push(FileSystemSandboxEntry::new(
             config.cwd.join("private.txt").into(),
@@ -952,6 +961,7 @@ async fn tightening_environment_read_permissions_invalidates_cached_project_inst
         warning_active: AtomicBool::new(/*v*/ false),
     });
     let mut builder = test_codex()
+        .with_config(configure_direct_tool_fixture)
         .with_home(home)
         .with_user_instructions_provider(provider.clone())
         .with_workspace_setup(|cwd, fs| async move {
@@ -1053,6 +1063,7 @@ async fn loads_user_instructions_without_a_primary_environment() -> Result<()> {
     )));
 
     let mut builder = test_codex()
+        .with_config(configure_direct_tool_fixture)
         .with_home(Arc::clone(&home))
         .with_user_instructions_provider(provider.clone())
         .with_workspace_setup(|cwd, fs| async move {
@@ -1118,6 +1129,7 @@ impl ThreadInstructionsFixture {
             )?),
         )));
         let mut builder = test_codex()
+            .with_config(configure_direct_tool_fixture)
             .with_home(home)
             .with_user_instructions_provider(global_provider.clone())
             .with_config(|config| {
@@ -1327,7 +1339,10 @@ async fn thread_provider_refreshes_at_the_next_step_of_an_active_turn() -> Resul
 async fn isolated_guardian_keeps_applied_thread_instructions() -> Result<()> {
     let server = start_mock_server().await;
     let test = test_codex()
+        .with_config(configure_direct_tool_fixture)
         .with_config(|config| {
+            // The catalog-selected reviewer uses Code Mode in an isolated environment.
+            config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
             config.permissions.approval_policy = codex_core::config::Constrained::allow_any(
                 codex_protocol::protocol::AskForApproval::OnRequest,
             );
@@ -1529,6 +1544,7 @@ async fn fork_preserves_thread_instructions(
         InstructionForkSource::OfflinePrepared => ThreadHistoryMode::Paginated,
     };
     let mut builder = test_codex()
+        .with_config(configure_direct_tool_fixture)
         .with_config(|config| {
             config
                 .features
@@ -1657,7 +1673,7 @@ async fn thread_provider_lives_with_its_session_across_resume() -> Result<()> {
             .to_vec(),
     )
     .await;
-    let mut builder = test_codex();
+    let mut builder = test_codex().with_config(configure_direct_tool_fixture);
     let test = builder.build_with_auto_env(&server).await?;
     let provider = Arc::new(RecordingThreadInstructionsProvider::new(
         /*instructions*/ None,
@@ -2094,7 +2110,9 @@ async fn global_instruction_warnings_reappear_only_after_recovery() -> Result<()
         "Failed to read global AGENTS.md instructions from `{}`: {read_error}",
         override_path.display()
     );
-    let mut builder = test_codex().with_home(Arc::clone(&home));
+    let mut builder = test_codex()
+        .with_config(configure_direct_tool_fixture)
+        .with_home(Arc::clone(&home));
     let test = builder.build_with_auto_env(&server).await?;
     wait_for_event(
         &test.codex,
@@ -2310,7 +2328,9 @@ async fn fork_injects_changed_agents_md_once() -> Result<()> {
     )?;
 
     // Create the parent and persist its creation-time instruction snapshot.
-    let mut builder = test_codex().with_home(Arc::clone(&home));
+    let mut builder = test_codex()
+        .with_config(configure_direct_tool_fixture)
+        .with_home(Arc::clone(&home));
     let parent = builder.build(&server).await?;
 
     // Assert the parent reports the source used to create its snapshot.
@@ -2332,6 +2352,7 @@ async fn fork_injects_changed_agents_md_once() -> Result<()> {
     )?;
     assert_ne!(source, new_source);
     let mut fork_config = load_default_config_for_test(home.as_ref()).await;
+    configure_direct_tool_fixture(&mut fork_config);
     fork_config.context_strategy = parent.config.context_strategy;
     fork_config.cwd = parent.config.cwd.clone();
     fork_config.model = parent.config.model.clone();

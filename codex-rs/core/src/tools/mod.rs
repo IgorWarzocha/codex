@@ -73,7 +73,15 @@ pub(crate) fn tool_user_shell_type(
 }
 
 pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
-    if turn_context.config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook {
+    let code_mode_requested = turn_context.config.features.enabled(Feature::CodeMode)
+        || turn_context.config.features.enabled(Feature::CodeModeOnly)
+        || matches!(
+            model_info.tool_mode,
+            Some(ToolMode::CodeMode | ToolMode::CodeModeOnly)
+        );
+    if turn_context.config.code_mode.runtime == codex_features::CodeModeRuntime::Notebook
+        && code_mode_requested
+    {
         return ToolMode::CodeModeOnly;
     }
     model_info.tool_mode.unwrap_or_else(|| {

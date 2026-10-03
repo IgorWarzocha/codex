@@ -16,6 +16,8 @@ Scenario: An active agent posts a shared decision and fetches the text without a
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
+
+    In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...on. Use `followup_task` to start work for idle agents [hash=f2bea39efb3d479b]
 02:message/developer:
     <MULTI_AGENT_MODE>
 03:message/user:

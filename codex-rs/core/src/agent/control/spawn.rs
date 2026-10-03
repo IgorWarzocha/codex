@@ -27,6 +27,7 @@ use codex_context_fragments::to_annotated_content;
 use codex_extension_api::ExtensionDataInit;
 use codex_features::Feature;
 use codex_history::ResponseItemEnvelope;
+use codex_prompts::AgentMessageBoardGuidance;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::intersect_effective_permission_profiles;
 use codex_protocol::protocol::EnvironmentConfigState;
@@ -1042,7 +1043,20 @@ impl LocalAgentControl {
                 [parent_usage_hints.root, parent_usage_hints.subagent]
                     .into_iter()
                     .flatten()
-                    .map(|instructions| instructions.render())
+                    // Legacy unmarked roles may predate any of these capability states.
+                    .flat_map(|instructions| {
+                        [
+                            None,
+                            Some(AgentMessageBoardGuidance::BoardOnly),
+                            Some(AgentMessageBoardGuidance::WithDirectMessaging),
+                        ]
+                        .map(|guidance| {
+                            instructions
+                                .clone()
+                                .with_agent_message_board(guidance)
+                                .render()
+                        })
+                    })
                     .collect()
             } else {
                 Vec::new()
@@ -1238,6 +1252,9 @@ impl LocalAgentControl {
                     )
                     .subagent
                 })
+                // Composed roles depend on the child's actual tool router. Its first step
+                // renders them through world state after startup, not from the parent snapshot.
+                .filter(|role| matches!(role, MultiAgentRoleInstructions::Configured(_)))
         {
             let subagent_usage_hint_message = ContextualUserFragment::into(subagent_usage_hint);
             forked_rollout_items.push(RolloutItem::ResponseItem(

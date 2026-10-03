@@ -136,6 +136,8 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 model.model_messages.as_mut().expect("model messages").tools = messages;
             })
             .with_config(move |config| {
+                // V8 exposes catalog-overridable exec declarations; Notebook owns its exec contract.
+                config.code_mode.runtime = CodeModeRuntime::V8;
                 if matches!(exposure, Exposure::V1) {
                     config.features.enable(Feature::Collab).expect("enable V1");
                     config

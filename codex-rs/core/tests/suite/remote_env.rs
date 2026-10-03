@@ -3154,6 +3154,10 @@ async fn deferred_executor_loads_agents_md_when_environment_becomes_ready() -> R
     let mut builder = test_codex_with_wait_for_environment()
         .with_exec_server_url(format!("ws://{}", listener.local_addr()?))
         .with_config(|config| {
+            // The fixture calls wait_for_environment directly before remote attachment.
+            for feature in [Feature::CodeMode, Feature::CodeModeOnly] {
+                config.features.disable(feature).expect("use direct tools");
+            }
             assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
         });
     let (attach_tx, attach_rx) = tokio::sync::oneshot::channel();

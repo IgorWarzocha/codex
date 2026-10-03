@@ -26,6 +26,8 @@ fn under_development_features_require_fork_approval_to_default_on() {
             let approved = matches!(
                 spec.id,
                 Feature::ApplyPatchPreserveLineEndings
+                    | Feature::AgentMessageBoard
+                    | Feature::CodeMode
                     | Feature::CodeModePrewarm
                     | Feature::DefaultModeRequestUserInput
                     | Feature::MultiAgentV2DynamicTools
@@ -43,6 +45,8 @@ fn under_development_features_require_fork_approval_to_default_on() {
 fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
     let approved = [
         Feature::ApplyPatchPreserveLineEndings,
+        Feature::AgentMessageBoard,
+        Feature::CodeMode,
         Feature::CodeModePrewarm,
         Feature::DefaultModeRequestUserInput,
         Feature::MultiAgentV2,
@@ -60,6 +64,8 @@ fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
     let features_toml: FeaturesToml = toml::from_str(
         r#"
 apply_patch_preserve_line_endings = false
+agent_message_board = false
+code_mode = false
 code_mode_prewarm = false
 default_mode_request_user_input = false
 multi_agent_v2_dynamic_tools = false
@@ -79,6 +85,8 @@ enabled = false
     for feature in approved {
         assert!(!overridden.enabled(feature), "{}", feature.key());
     }
+    assert!(!defaults.enabled(Feature::CodeModeOnly));
+    assert!(!overridden.enabled(Feature::CodeModeOnly));
 }
 
 #[test]
@@ -166,6 +174,8 @@ fn default_enabled_features_are_stable_or_fork_approved() {
                     || matches!(
                         spec.id,
                         Feature::ApplyPatchPreserveLineEndings
+                            | Feature::AgentMessageBoard
+                            | Feature::CodeMode
                             | Feature::CodeModePrewarm
                             | Feature::DefaultModeRequestUserInput
                             | Feature::MultiAgentV2DynamicTools

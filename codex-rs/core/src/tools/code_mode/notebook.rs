@@ -10,7 +10,9 @@ pub(crate) async fn context_status(
     service: &CodeModeService,
     step: &StepContext,
 ) -> Option<String> {
-    if step.turn.config.code_mode.runtime != codex_features::CodeModeRuntime::Notebook {
+    if step.turn.config.code_mode.runtime != codex_features::CodeModeRuntime::Notebook
+        || !step.tool_router.requires_code_mode_worker()
+    {
         return None;
     }
     Some(

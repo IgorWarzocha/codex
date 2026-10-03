@@ -78,6 +78,7 @@ async fn concurrent_preparation_preserves_warnings_and_errors(
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.tool_contributor(observer.clone());
     let mut builder = test_codex()
+        .with_config(configure_direct_tool_fixture)
         .with_extensions(Arc::new(extensions.build()))
         .with_config(|config| {
             config.tool_registry.error_on_tool_collisions = true;
@@ -297,6 +298,7 @@ async fn global_instructions_refresh_after_a_tool_in_the_same_turn() -> Result<(
     let home = Arc::new(TempDir::new()?);
     write_global_file(&home, GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
     let mut builder = test_codex()
+        .with_config(configure_direct_tool_fixture)
         .with_home(Arc::clone(&home))
         .with_config(|config| {
             config

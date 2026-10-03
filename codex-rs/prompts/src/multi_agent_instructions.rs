@@ -9,6 +9,15 @@ const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "`model` or 
 const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
     "`wait_agent`: waits of minutes preferred over busy polling";
 const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = "Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved";
+const AGENT_MESSAGE_BOARD_USAGE_HINT_TEXT: &str = "In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, and findings. Parents pass relevant channel names and thread IDs in assignments. Children read and update those threads. Board posts do not assign work or wake idle agents.";
+const DIRECT_AGENT_COORDINATION_USAGE_HINT_TEXT: &str = "Use direct messages for targeted coordination. Use `followup_task` to start work for idle agents";
+
+/// Board workflow guidance selected from the current step's coordination tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentMessageBoardGuidance {
+    BoardOnly,
+    WithDirectMessaging,
+}
 
 /// Multi-agent role text and the captured capabilities used to render its context segment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +32,22 @@ pub enum MultiAgentRoleInstructions {
         max_concurrency: usize,
         wait_agent_enabled: bool,
         expose_model_overrides: bool,
+        agent_message_board: Option<AgentMessageBoardGuidance>,
     },
+}
+
+impl MultiAgentRoleInstructions {
+    /// Capture actual step availability without changing configured role overrides.
+    pub fn with_agent_message_board(mut self, guidance: Option<AgentMessageBoardGuidance>) -> Self {
+        if let Self::Composed {
+            agent_message_board,
+            ..
+        } = &mut self
+        {
+            *agent_message_board = guidance;
+        }
+        self
+    }
 }
 
 impl ContextualUserFragment for MultiAgentRoleInstructions {
@@ -59,6 +83,7 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
                 max_concurrency,
                 wait_agent_enabled,
                 expose_model_overrides,
+                agent_message_board,
                 ..
             } => {
                 let base = if *omit_update_plan_instructions {
@@ -78,6 +103,14 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
                 if *expose_model_overrides {
                     text.push_str("\n\n");
                     text.push_str(DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT);
+                }
+                if let Some(guidance) = agent_message_board {
+                    text.push_str("\n\n");
+                    text.push_str(AGENT_MESSAGE_BOARD_USAGE_HINT_TEXT);
+                    if *guidance == AgentMessageBoardGuidance::WithDirectMessaging {
+                        text.push(' ');
+                        text.push_str(DIRECT_AGENT_COORDINATION_USAGE_HINT_TEXT);
+                    }
                 }
                 text
             }

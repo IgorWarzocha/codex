@@ -26,6 +26,7 @@ async fn guardian_circuit_breaker_notifies_parent(action: CircuitBreakAction) ->
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
     let test = test_codex()
+        .with_config(configure_legacy_tool_fixture)
         .with_model_info_override("test-gpt-5.1-codex", |model| {
             model.multi_agent_version = Some(MultiAgentVersion::V2);
             model.auto_review_model_override = Some(model.slug.clone());

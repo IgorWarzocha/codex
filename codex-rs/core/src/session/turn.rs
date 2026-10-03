@@ -1701,7 +1701,7 @@ async fn run_sampling_request(
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
     sess.services
         .code_mode_service
-        .validate_notebook_access(&step_context)
+        .validate_sampling_access(&step_context)
         .await
         .map_err(CodexErr::InvalidRequest)?;
     let turn_context = Arc::clone(&step_context.turn);
