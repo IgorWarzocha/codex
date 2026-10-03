@@ -4,9 +4,15 @@ An unofficial fork of OpenAI's Codex CLI for long-running agent work. Codex Lean
 
 The defaults are deliberate, not mandatory. Use the CLI settings to choose ordinary compaction instead of Notes, choose sandbox-compatible tool execution instead of Notebook, or disable optional agent and voice features. Instruction changes are part of the fork, not a second set of feature switches.
 
-## Build and start
+## Install and start
 
-This development fork currently ships as source. OpenAI's installers, `@openai/codex`, and the Homebrew `codex` package install upstream Codex, **not Codex Lean**.
+Use the packages on the [Codex Lean releases page](https://github.com/IgorWarzocha/codex-lean/releases), or build from source below. OpenAI's installers, `@openai/codex`, and the Homebrew `codex` package install upstream Codex, **not Codex Lean**.
+
+Release archives contain the CLI and its tool-execution helpers. Extract the whole archive into its own directory and run `bin/codex`, or `bin/codex.exe` on Windows. Do not copy only the executable out of the package. Verify the archive against the release's SHA-256 checksums before running it.
+
+Release packages include the matching native voice helper and audio runtime. The release workflow targets Linux x64 and ARM64, Apple Silicon macOS, and Windows x64, and publishes only after every platform's package checks pass. macOS and Windows packages are not developer-signed. See [installation](docs/install.md) for platform and package details.
+
+### Build from source
 
 With the repository's Rust toolchain and build prerequisites installed:
 
@@ -17,7 +23,9 @@ CARGO_PROFILE_DEV_DEBUG=0 cargo build -p codex-cli --bin codex
 ./target/debug/codex settings
 ```
 
-`codex settings` lists the available settings and choices without starting an agent thread. Use `codex settings set <setting> <choice>` to save a choice. Inside a running TUI, open `/settings` for the menus. See [configuration](docs/config.md) for the controls and when changes take effect.
+### First launch
+
+`codex settings` lists the available settings and choices without starting an agent thread. Use `codex settings set <setting> <choice>` to save a choice. Inside a running TUI, open `/settings` for the menus. See [configuration](docs/config.md) for the controls and when changes take effect. For a downloaded package, use `./bin/codex` instead of `./target/debug/codex` in the examples below.
 
 Before your first thread:
 

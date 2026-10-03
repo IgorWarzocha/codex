@@ -1,16 +1,56 @@
 ## Installing & building
 
-Codex Lean is currently a source build. OpenAI's installers and packages install
-upstream Codex, not this fork. See the [README](../README.md#build-and-start) for
-first-launch settings and the Notes and Notebook requirements.
+Download Codex Lean from the [fork's releases page](https://github.com/IgorWarzocha/codex-lean/releases)
+or build it from source. OpenAI's installers and packages install upstream Codex,
+not this fork. See the [README](../README.md#first-launch) for first-launch settings
+and the Notes and Notebook requirements.
 
-### System requirements
+### Release packages
 
-| Requirement                | Details                                                     |
-| -------------------------- | ----------------------------------------------------------- |
-| Operating systems          | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 **via WSL2** |
-| Git (optional, recommended) | 2.23+ for built-in PR helpers                                |
-| RAM                        | 4-GB minimum (8-GB recommended)                              |
+Choose the archive matching both your operating system and CPU:
+
+| Platform | Target |
+| --- | --- |
+| Linux, Intel or AMD 64-bit | `x86_64-unknown-linux-musl` |
+| Linux, ARM64 | `aarch64-unknown-linux-musl` |
+| macOS, Apple Silicon | `aarch64-apple-darwin` |
+| Windows, Intel or AMD 64-bit | `x86_64-pc-windows-msvc` |
+
+The initial packages are prereleases. Each platform is built and smoke-tested on
+its native CI runner. That does not establish compatibility with every older OS
+release. macOS and Windows packages are not developer-signed or notarized.
+
+Linux packages require glibc 2.28 or newer for native voice, even though the CLI
+itself uses musl. They are not fully static packages for musl-only distributions.
+
+1. Download the archive and the release's SHA-256 checksums. Compare the archive's
+   SHA-256 digest with its entry in that file.
+2. Extract the archive into a new directory. Keep `codex-package.json`, `bin`,
+   `codex-resources`, and `codex-path` together. The CLI needs the packaged helpers.
+3. Run `./bin/codex --version`, then `./bin/codex settings`. On Windows, use
+   `.\bin\codex.exe` instead.
+
+The packages include the CLI, Code Mode host, ripgrep, platform-specific execution
+helpers, and the native voice helper with its audio libraries. The CLI and voice
+helper are built from the same source revision. Notebook can download its verified
+Deno runtime on first use. Voice still requires an available microphone, audio
+output, and account access to the realtime service.
+
+To update, download and extract the next Codex Lean release. `codex update` points
+to the fork's releases rather than running an installer that would replace the
+fork with upstream Codex. Do not extract an update over a running package.
+
+If you also run upstream Codex, use a separate home directory to avoid sharing
+version-dependent caches and defaults:
+
+```sh
+CODEX_HOME="$HOME/.codex-lean" ./bin/codex
+```
+
+Use that same environment setting on subsequent launches. A separate home has
+separate settings, history, and sign-in state.
+
+Release maintainers: see [the release workflow](releases.md).
 
 ### Build from source
 

@@ -66,7 +66,7 @@ def assemble(
             raise ValueError("package version does not match the declared build")
     elif (
         not re.fullmatch(
-            r"[0-9]+\.[0-9]+\.[0-9]+(?:-alpha(?:\.[0-9]+){0,2}|-beta(?:\.[0-9]+)?)?",
+            r"[0-9]+\.[0-9]+\.[0-9]+(?:-alpha(?:\.[0-9]+){0,2}|-beta(?:\.[0-9]+)?|-lean\.(?:0|[1-9][0-9]*))?",
             release_version,
         )
         or metadata["version"] != release_version

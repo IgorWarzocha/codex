@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Offline tests of the fork's release invariants, not native build coverage."""
+
+import io
+import json
+import os
+import struct
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import lean_release as release
+import lean_voice as voice
+from codex_package.layout import build_package_dir
+from codex_package.targets import PACKAGE_VARIANTS, PackageInputs, TARGET_SPECS
+from runtime import PLUGINS, required_library_paths
+
+VERSION = "0.160.0-lean.1"
+COMMIT = "a" * 40
+
+
+class ReleaseRefTest(unittest.TestCase):
+    def test_only_matching_fork_tags_and_lean_dispatch_can_publish(self) -> None:
+        for event, ref, publish, expected in (
+            ("push", f"refs/tags/lean-v{VERSION}", "", True),
+            ("workflow_dispatch", "refs/heads/lean", "false", False),
+            ("workflow_dispatch", "refs/heads/lean", "true", True),
+        ):
+            with self.subTest(event=event, publish=publish):
+                self.assertEqual(release.validate_ref(release.REPOSITORY, event, ref, VERSION, COMMIT, publish), expected)
+
+    def test_rejects_wrong_repo_ref_event_version_and_publish_input(self) -> None:
+        valid = (release.REPOSITORY, "workflow_dispatch", "refs/heads/lean", VERSION, COMMIT, "false")
+        for index, invalid in (
+            (0, "openai/codex"), (1, "pull_request"), (2, "refs/heads/main"),
+            (2, f"refs/tags/lean-v{VERSION}"), (3, "0.160.0"),
+            (3, "0.160.0-lean.01"), (3, "0.160.0-lean.1+other"),
+            (3, "18446744073709551616.1.0-lean.1"),
+            (4, "a" * 7), (5, "true\npublish=false"),
+        ):
+            args = list(valid)
+            args[index] = invalid
+            with self.subTest(index=index, invalid=invalid), self.assertRaises(ValueError):
+                release.validate_ref(*args)
+        with self.assertRaises(ValueError):
+            release.validate_ref(release.REPOSITORY, "push", "refs/tags/lean-v0.160.0-lean.2", VERSION, COMMIT, "")
+
+
+class ReleasePackageTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.packages = {}
+
+    def make_package(self, target: str) -> tuple[Path, str]:
+        spec = TARGET_SPECS[target]
+        source = self.root / "source"
+        source.mkdir(exist_ok=True)
+        binary = source / "stub"
+        binary.write_bytes(b"test package bytes, not a native executable")
+        binary.chmod(0o755)
+        package = self.root / target
+        package.mkdir()
+        inputs = PackageInputs(
+            entrypoint_bin=binary, code_mode_host_bin=binary, rg_bin=binary,
+            zsh_bin=None if spec.is_windows else binary,
+            bwrap_bin=binary if spec.is_linux else None,
+            codex_command_runner_bin=binary if spec.is_windows else None,
+            codex_windows_sandbox_setup_bin=binary if spec.is_windows else None,
+        )
+        build_package_dir(package, VERSION, PACKAGE_VARIANTS["codex"], spec, inputs)
+        native_target = voice.voice_target(target)
+        runtime = self.root / f"runtime-{target}"
+        runtime.mkdir()
+        plugin_pattern = ("bin/gst{}.dll" if spec.is_windows else
+                          "lib/gstreamer-1.0/libgst{}.so" if spec.is_linux else "plugins/libgst{}.dylib")
+        core = ("bin/gstreamer-1.0-0.dll" if spec.is_windows else
+                "lib/libgstreamer-1.0.so.0" if spec.is_linux else "lib/libgstreamer-1.0.0.dylib")
+        plugins = [plugin_pattern.format(name) for name in PLUGINS]
+        names = [*plugins, *required_library_paths(native_target), core]
+        if spec.is_windows:
+            names.append("bin/vcruntime140.dll")
+        libraries = []
+        for name in names:
+            path = runtime / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"receipt fixture, not a native library")
+            libraries.append({"path": name, "sha256": release.sha256(path)})
+        (runtime / "runtime.json").write_text(json.dumps({
+            "schemaVersion": 1, "developmentOnly": False, "distribution": "publicRelease",
+            "target": native_target, "sourceCommit": COMMIT,
+            "sourceManifestSha256": release.sha256(release.REPO_ROOT / "third_party/voice/sources.json"),
+            "plugins": plugins, "libraries": libraries,
+        }))
+        output = self.root / f"assembled-{target}"
+        voice.assemble(package, binary, native_target, COMMIT, output, runtime=runtime, release_version=VERSION)
+        self.packages[target] = output
+        return output, release.sha256(binary) if spec.is_linux else ""
+
+    def test_finalized_manifest_reports_real_capabilities_and_exact_bwrap(self) -> None:
+        for target in release.TARGETS:
+            with self.subTest(target=target):
+                package, digest = self.make_package(target)
+                release.finalize_package(package, VERSION, target, COMMIT, digest)
+                metadata = json.loads((package / "codex-package.json").read_text())
+                self.assertEqual(metadata["forkRelease"]["commit"], COMMIT)
+                self.assertIs(metadata["forkRelease"]["voiceBundled"], True)
+                self.assertIs(metadata["forkRelease"]["signed"], False)
+                self.assertIs(metadata["forkRelease"]["notarized"], False)
+                self.assertEqual(metadata["forkRelease"]["bwrapSha256"], digest or None)
+                self.assertIn("same-build native voice helper", (package / "README.txt").read_text())
+                self.assertTrue((package / "LICENSE").is_file())
+
+    def test_rejects_mutated_bwrap_missing_zsh_voice_and_wrong_version(self) -> None:
+        target = release.TARGETS[0]
+        package, digest = self.make_package(target)
+        bwrap = package / "codex-resources/bwrap"
+        original = bwrap.read_bytes()
+        bwrap.write_bytes(original + b"post-hash mutation")
+        with self.assertRaisesRegex(ValueError, "bwrap"):
+            release.finalize_package(package, VERSION, target, COMMIT, digest)
+        bwrap.write_bytes(original)
+        zsh = package / "codex-resources/zsh/bin/zsh"
+        zsh.unlink()
+        with self.assertRaisesRegex(RuntimeError, "zsh"):
+            release.finalize_package(package, VERSION, target, COMMIT, digest)
+        zsh.write_bytes(original)
+        zsh.chmod(0o755)
+        resources = package / "codex-resources/voice"
+        resources.rename(self.root / "missing-voice")
+        with self.assertRaises(FileNotFoundError):
+            release.finalize_package(package, VERSION, target, COMMIT, digest)
+        (self.root / "missing-voice").rename(resources)
+        with self.assertRaisesRegex(ValueError, "version"):
+            release.finalize_package(package, "0.160.0-lean.2", target, COMMIT, digest)
+
+    def test_rejects_mixed_voice_commits_and_changed_helper_bytes(self) -> None:
+        target = release.TARGETS[0]
+        package, digest = self.make_package(target)
+        receipt_file = package / "codex-resources/voice/runtime.json"
+        original = receipt_file.read_bytes()
+        receipt = json.loads(original)
+        receipt["sourceCommit"] = "b" * 40
+        receipt_file.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError, "commit"):
+            release.finalize_package(package, VERSION, target, COMMIT, digest)
+        receipt_file.write_bytes(original)
+        helper = package / "codex-resources/voice/bin/codex-voice-host"
+        helper.write_bytes(b"different helper build")
+        with self.assertRaisesRegex(ValueError, "digest"):
+            release.finalize_package(package, VERSION, target, COMMIT, digest)
+
+    def build_assets(self) -> Path:
+        directory = self.root / "dist"
+        directory.mkdir()
+        for target in release.TARGETS:
+            package, digest = self.make_package(target)
+            release.finalize_package(package, VERSION, target, COMMIT, digest)
+            archive = directory / release.archive_name(VERSION, target)
+            release.write_archive(package, archive, force=False)
+            self.write_checksum(archive)
+        return directory
+
+    @staticmethod
+    def write_checksum(archive: Path) -> None:
+        archive.with_name(archive.name + ".sha256").write_text(f"{release.sha256(archive)}  {archive.name}\n")
+
+    def test_verify_requires_all_platforms_matching_checksum_and_same_commit(self) -> None:
+        directory = self.build_assets()
+        checksums = release.verify_assets(directory, VERSION, COMMIT)
+        self.assertEqual(len(checksums.splitlines()), 4)
+        archive = directory / release.archive_name(VERSION, release.TARGETS[0])
+        original = archive.read_bytes()
+        archive.write_bytes(original + b"corruption")
+        with self.assertRaisesRegex(ValueError, "Checksum"):
+            release.verify_assets(directory, VERSION, COMMIT)
+        archive.write_bytes(original)
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            release.verify_assets(directory, VERSION, "b" * 40)
+        package = self.packages[release.TARGETS[0]]
+        metadata_file = package / "codex-package.json"
+        metadata = json.loads(metadata_file.read_text())
+        metadata["forkRelease"]["voiceBundled"] = False
+        metadata_file.write_text(json.dumps(metadata))
+        release.write_archive(package, archive, force=True)
+        self.write_checksum(archive)
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            release.verify_assets(directory, VERSION, COMMIT)
+        archive.unlink()
+        with self.assertRaisesRegex(ValueError, "every platform"):
+            release.verify_assets(directory, VERSION, COMMIT)
+
+    def test_publisher_checks_voice_bytes_even_with_recomputed_archive_checksum(self) -> None:
+        directory = self.build_assets()
+        target = release.TARGETS[0]
+        package = self.packages[target]
+        helper = package / "codex-resources/voice/bin/codex-voice-host"
+        helper.write_bytes(b"post-build corruption")
+        archive = directory / release.archive_name(VERSION, target)
+        release.write_archive(package, archive, force=True)
+        self.write_checksum(archive)
+        with self.assertRaisesRegex(ValueError, "digest"):
+            release.verify_assets(directory, VERSION, COMMIT)
+
+
+class VoiceFrameTest(unittest.TestCase):
+    def test_decodes_bounded_runtime_reply_and_rejects_truncation_or_oversize(self) -> None:
+        payload = b'{"type":"runtimeReady"}'
+        frame = struct.pack(">I", len(payload)) + payload
+        self.assertEqual(voice.read_frame(io.BytesIO(frame)), {"type": "runtimeReady"})
+        for invalid in (b"", frame[:-1], struct.pack(">I", 0), struct.pack(">I", 128 * 1024 + 1)):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                voice.read_frame(io.BytesIO(invalid))
+
+
+class ReleaseTagTest(unittest.TestCase):
+    def test_existing_tag_must_resolve_to_the_tested_commit(self) -> None:
+        ref = [{"ref": f"refs/tags/lean-v{VERSION}"}]
+        env = {"GH_REPO": release.REPOSITORY, "RELEASE_TAG": f"lean-v{VERSION}",
+               "RELEASE_VERSION": VERSION, "RELEASE_COMMIT": COMMIT}
+        for resolved in (COMMIT, "b" * 40):
+            with self.subTest(resolved=resolved), patch.dict(os.environ, env):
+                responses = [subprocess.CompletedProcess([], 0, json.dumps(ref)),
+                             subprocess.CompletedProcess([], 0, resolved + "\n")]
+                with patch.object(release.subprocess, "run", side_effect=responses) as run:
+                    if resolved == COMMIT:
+                        release.tag()
+                    else:
+                        with self.assertRaisesRegex(ValueError, "different commit"):
+                            release.tag()
+                    self.assertFalse(any("POST" in call.args[0] for call in run.call_args_list))
+
+    def test_new_tag_uses_exact_tested_sha_not_branch_head(self) -> None:
+        env = {"GH_REPO": release.REPOSITORY, "RELEASE_TAG": f"lean-v{VERSION}",
+               "RELEASE_VERSION": VERSION, "RELEASE_COMMIT": COMMIT}
+        with patch.dict(os.environ, env), patch.object(release.subprocess, "run") as run:
+            # A matching-prefix tag is not the exact requested tag.
+            run.return_value = subprocess.CompletedProcess([], 0, json.dumps([
+                {"ref": f"refs/tags/lean-v{VERSION}0"},
+            ]))
+            release.tag()
+            creation = run.call_args.args[0]
+            self.assertIn("POST", creation)
+            self.assertIn(f"sha={COMMIT}", creation)
+            self.assertIn(f"ref=refs/tags/lean-v{VERSION}", creation)
+
+
+if __name__ == "__main__":
+    unittest.main()

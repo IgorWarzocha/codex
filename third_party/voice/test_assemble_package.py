@@ -255,7 +255,7 @@ class AssembleTests(unittest.TestCase):
         stage(runtime, staged, target)
         seal(staged, target)
         self.metadata["target"] = target
-        for version in ("0.154.0-beta.2", "0.154.0"):
+        for version in ("0.154.0-beta.2", "0.154.0", "0.160.0-lean.1"):
             with self.subTest(version=version):
                 self.metadata["version"] = version
                 (self.package / "codex-package.json").write_text(
@@ -276,6 +276,23 @@ class AssembleTests(unittest.TestCase):
                 )
                 self.assertEqual(manifest["appVersion"], version)
 
+    def test_rejects_noncanonical_lean_release_version(self):
+        target = "aarch64-unknown-linux-gnu"
+        runtime, _ = self.make_runtime(target)
+        self.metadata["version"] = "0.160.0-lean.01"
+        (self.package / "codex-package.json").write_text(json.dumps(self.metadata))
+        with self.assertRaisesRegex(ValueError, "package version"):
+            assemble(
+                self.package,
+                self.helper,
+                target,
+                self.commit,
+                self.output,
+                runtime=runtime,
+                release_version="0.160.0-lean.01",
+            )
+        self.assertFalse(self.output.exists())
+
     def test_linux_release_pairs_musl_app_with_gnu_voice_runtime(self):
         self.commit = "b" * 40
         target = "aarch64-unknown-linux-gnu"
@@ -283,7 +300,7 @@ class AssembleTests(unittest.TestCase):
         staged = self.root / "staged"
         stage(runtime, staged, target)
         seal(staged, target)
-        for version in ("0.154.0-alpha.8", "0.154.0-beta.2", "0.154.0"):
+        for version in ("0.154.0-alpha.8", "0.154.0-beta.2", "0.154.0", "0.160.0-lean.1"):
             with self.subTest(version=version):
                 self.metadata["version"] = version
                 (self.package / "codex-package.json").write_text(

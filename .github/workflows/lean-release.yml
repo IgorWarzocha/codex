@@ -1,0 +1,374 @@
+name: Codex Lean release
+
+on:
+  push:
+    tags:
+      - "lean-v*.*.*-lean.*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a prerelease only after all four builds pass
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lean-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CODEX_REPO_ROOT: ${{ github.workspace }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      tag: ${{ steps.release.outputs.tag }}
+      publish: ${{ steps.release.outputs.publish }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Validate fork version, ref and exact commit
+        id: release
+        shell: bash
+        env:
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python .github/scripts/lean_release.py check >> "$GITHUB_OUTPUT"
+      - name: Test release contracts
+        run: |
+          python -m unittest discover -s .github/scripts -p test_lean_release.py -v
+          python -m unittest discover -s third_party/voice -p test_assemble_package.py -v
+
+  voice:
+    needs: check
+    name: Native voice (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            prefix: linux_x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            prefix: linux_aarch64
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            prefix: macos_aarch64
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            prefix: windows_x86_64
+    env:
+      TARGET: ${{ matrix.target }}
+      VOICE_PREFIX: ${{ matrix.prefix }}
+      STABLE_GIT_COMMIT: ${{ needs.check.outputs.commit }}
+      BAZEL_BUILD_JOBS: ${{ contains(matrix.target, 'apple-darwin') && '1' || '2' }}
+      # Voice uses its GNU native toolchain, never Cargo's musl/Zig environment.
+      BUILDBUDDY_API_KEY: ""
+    steps:
+      - name: Enable long Windows source paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Reclaim unused SDK space on disposable Linux runners
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android
+          df -h .
+      - name: Verify native voice runner and report resource budget
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$STABLE_GIT_COMMIT"
+          python .github/scripts/lean_release.py runner
+          df -h .
+          if [[ "$TARGET" == *-linux-gnu ]]; then free -h; fi
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-version: 1.28.1
+          # Keep Windows paths short without Hyper-V or a provisioned Dev Drive.
+          output-base: ${{ runner.temp }}/lean-bazel
+      - uses: ./.github/actions/setup-msvc-env
+        if: runner.os == 'Windows'
+        with:
+          target: ${{ matrix.target }}
+      - name: Download and verify public pinned Windows build inputs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -Raw .github/scripts/voice-cygwin-snapshot.json | ConvertFrom-Json
+          $directory = Join-Path $env:RUNNER_TEMP 'voice-cygwin-snapshot'
+          New-Item -ItemType Directory -Path $directory | Out-Null
+          foreach ($pin in @($manifest.archive, $manifest.sourceArchive)) {
+            $file = Join-Path $directory $pin.name
+            $url = "https://github.com/openai/codex/releases/download/$($manifest.archive.tag)/$($pin.name)"
+            Invoke-WebRequest -Uri $url -OutFile $file
+            if ((Get-Item $file).Length -ne $pin.bytes -or
+                (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pin.sha256) {
+              throw "Public Cygwin input mismatch: $($pin.name)"
+            }
+          }
+          & ./.github/scripts/setup-voice-windows.ps1 -Target $env:TARGET -SnapshotArchive (Join-Path $directory $manifest.archive.name)
+          & ./.github/scripts/compute-bazel-windows-path.ps1
+          if (-not $env:SystemRoot) { throw 'Windows SystemRoot is required' }
+          "VOICE_WINDOWS_SYSTEM_ROOT=$env:SystemRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "VOICE_WINDOWS_HOST_ARCH=$env:PROCESSOR_ARCHITECTURE" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build same-commit native helper and private audio runtime
+        run: |
+          set -euo pipefail
+          args=(--jobs="$BAZEL_BUILD_JOBS" --local_cpu_resources="$BAZEL_BUILD_JOBS" --disk_cache= --remote_cache= --remote_executor=)
+          if [[ "$TARGET" == *-windows-msvc ]]; then
+            # Git Bash must not rewrite Bazel labels into Windows filesystem paths.
+            export MSYS2_ARG_CONV_EXCL='*'
+            args+=(
+              --platforms=//:local_windows_msvc --host_platform=//:local_windows_msvc
+              --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows,@local_config_cc//:cc-toolchain-arm64_windows,//third_party/voice:windows_pkg_config_toolchain,//third_party/voice:windows_cmake_toolchain
+              --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=0
+              --repo_env=BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1
+              --inject_repository="voice_windows_tools=$VOICE_WINDOWS_BAZEL_REPOSITORY"
+              --//third_party/voice:windows_installed_tools=@voice_windows_tools//:tools
+              --action_env="SystemRoot=$VOICE_WINDOWS_SYSTEM_ROOT"
+              --host_action_env="SystemRoot=$VOICE_WINDOWS_SYSTEM_ROOT"
+              --action_env="PROCESSOR_ARCHITECTURE=$VOICE_WINDOWS_HOST_ARCH"
+              --host_action_env="PROCESSOR_ARCHITECTURE=$VOICE_WINDOWS_HOST_ARCH"
+              --action_env="PATH=$CODEX_BAZEL_WINDOWS_PATH"
+              --host_action_env="PATH=$CODEX_BAZEL_WINDOWS_PATH"
+              --workspace_status_command=./scripts/workspace-status.cmd
+            )
+          fi
+          # Cargo.lock already matches the workspace version. Do not repin dependencies.
+          bazel --host_jvm_args=-Xmx2g build -c opt "${args[@]}" \
+            //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
+      - name: Stage and seal the matching runtime
+        run: |
+          set -euo pipefail
+          runtime="bazel-bin/third_party/voice/native_runtime_$VOICE_PREFIX"
+          output="$RUNNER_TEMP/lean-voice/$TARGET"
+          mkdir -p "$output"
+          python third_party/voice/release_runtime.py stage \
+            --target "$TARGET" --source "$runtime" --output "$output/runtime"
+          suffix=""
+          [[ "$TARGET" != *-windows-msvc ]] || suffix=".exe"
+          cp "bazel-bin/codex-rs/voice-host/codex-voice-host$suffix" "$output/codex-voice-host$suffix"
+          chmod 0755 "$output/codex-voice-host$suffix"
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            strip --strip-debug --strip-unneeded "$output/codex-voice-host"
+          elif [[ "$TARGET" == *-apple-darwin ]]; then
+            strip -S -x "$output/codex-voice-host"
+            # Restore only an ad-hoc local signature after stripping. No publisher identity.
+            codesign --force --sign - "$output/codex-voice-host"
+          fi
+          if [[ "$TARGET" == *-windows-msvc ]]; then
+            python third_party/voice/windows_crt.py --root "$output/runtime" \
+              --target "$TARGET" --helper "$output/codex-voice-host.exe"
+          fi
+          python third_party/voice/release_runtime.py seal --target "$TARGET" --output "$output/runtime"
+          tar -C "$output" -czf "lean-voice-$TARGET.tar.gz" runtime "codex-voice-host$suffix"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: lean-voice-${{ matrix.target }}
+          path: lean-voice-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Report remaining disk after native build
+        if: always()
+        run: df -h .
+
+  build:
+    needs: [check, voice]
+    name: Complete package (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            voice_target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            voice_target: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            voice_target: aarch64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            voice_target: x86_64-pc-windows-msvc
+    env:
+      TARGET: ${{ matrix.target }}
+      VOICE_TARGET: ${{ matrix.voice_target }}
+      RELEASE_VERSION: ${{ needs.check.outputs.version }}
+      STABLE_GIT_COMMIT: ${{ needs.check.outputs.commit }}
+      # Public runners have limited RAM and SSD. Avoid debug sidecars and
+      # incremental objects, cap compilation parallelism, retain thin LTO.
+      # Standard macOS ARM64 runners have only 7 GiB RAM.
+      CARGO_BUILD_JOBS: ${{ contains(matrix.target, 'apple-darwin') && '1' || '2' }}
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: "off"
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      RUST_MIN_STACK: "8388608"
+    steps:
+      - name: Enable long Windows source paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Verify native runner and report disk budget
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$STABLE_GIT_COMMIT"
+          python .github/scripts/lean_release.py runner
+          df -h .
+      - name: Reclaim unused SDK space on disposable Linux runners
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # Only preinstalled SDKs unrelated to this build. Never remove the
+          # checkout, Cargo sources or artifacts to disguise a disk failure.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android
+          df -h .
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Zig
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+      - name: Install musl build tools
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          bash .github/scripts/install-musl-build-tools.sh
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-msvc-env
+        if: runner.os == 'Windows'
+        with:
+          target: ${{ matrix.target }}
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+      - name: Finalize bwrap before compiling Codex
+        if: runner.os == 'Linux'
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target "$TARGET" --bin bwrap
+          bwrap="target/$TARGET/release/bwrap"
+          strip --strip-debug --strip-unneeded "$bwrap"
+          digest="$(sha256sum "$bwrap" | cut -d ' ' -f 1)"
+          echo "CODEX_BWRAP_SHA256=$digest" >> "$GITHUB_ENV"
+      - name: Build optimized CLI and package helpers
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          args=(--bin codex --bin codex-code-mode-host)
+          if [[ "$TARGET" == *-windows-msvc ]]; then
+            export LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC
+            args+=(--bin codex-command-runner --bin codex-windows-sandbox-setup)
+          fi
+          # Never rebuild or mutate bwrap after exporting its embedded digest.
+          cargo build --locked --release --target "$TARGET" --timings "${args[@]}"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: lean-voice-${{ matrix.voice_target }}
+          path: lean-voice-artifact
+      - name: Assemble, smoke-test voice and checksum complete package
+        env:
+          RELEASE_COMMIT: ${{ needs.check.outputs.commit }}
+        run: |
+          set -euo pipefail
+          python .github/scripts/lean_release.py package
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: lean-package-${{ matrix.target }}
+          path: lean-dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload build timings
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: lean-timings-${{ matrix.target }}
+          path: codex-rs/target/**/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Report remaining disk after build
+        if: always()
+        run: df -h .
+
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.check.outputs.version }}
+      RELEASE_COMMIT: ${{ needs.check.outputs.commit }}
+      RELEASE_TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: lean-package-*
+          merge-multiple: true
+          path: lean-dist
+      - name: Verify all platforms and release provenance
+        run: python .github/scripts/lean_release.py verify
+      - name: Publish a complete unsigned prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python .github/scripts/lean_release.py tag
+          # A failed upload leaves a draft, never a partially published release.
+          # Existing releases are not overwritten on reruns.
+          gh release create "$RELEASE_TAG" lean-dist/* \
+            --verify-tag --target "$RELEASE_COMMIT" --draft --prerelease \
+            --title "Codex Lean $RELEASE_VERSION" --notes-file lean-release-notes.md
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease
