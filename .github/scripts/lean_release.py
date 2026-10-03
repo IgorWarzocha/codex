@@ -55,13 +55,32 @@ def validate_ref(repository: str, event: str, ref: str, version: str, commit: st
     raise ValueError("Use a tag matching Cargo.toml, or dispatch on the lean branch")
 
 
+def voice_matrix(scope: str, publish: bool) -> dict:
+    if scope not in ("all", "windows-voice"):
+        raise ValueError("Build scope must be all or windows-voice")
+    if publish and scope != "all":
+        raise ValueError("Publishing requires all four complete packages")
+    entries = [
+        {"runner": "ubuntu-24.04", "target": "x86_64-unknown-linux-gnu", "prefix": "linux_x86_64"},
+        {"runner": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu", "prefix": "linux_aarch64"},
+        {"runner": "macos-15", "target": "aarch64-apple-darwin", "prefix": "macos_aarch64"},
+        {"runner": "windows-2025", "target": "x86_64-pc-windows-msvc", "prefix": "windows_x86_64"},
+    ]
+    if scope == "windows-voice":
+        entries = [entry for entry in entries if entry["target"] == "x86_64-pc-windows-msvc"]
+    return {"include": entries}
+
+
 def check() -> None:
     with (REPO_ROOT / "codex-rs/Cargo.toml").open("rb") as source:
         version = tomllib.load(source)["workspace"]["package"]["version"]
     commit = os.environ["GITHUB_SHA"]
     publish = validate_ref(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_EVENT_NAME"],
                            os.environ["GITHUB_REF"], version, commit, os.environ["INPUT_PUBLISH"])
+    scope = os.environ.get("INPUT_SCOPE") or "all"
+    matrix = voice_matrix(scope, publish)
     print(f"version={version}\ncommit={commit}\ntag=lean-v{version}\npublish={str(publish).lower()}")
+    print(f"scope={scope}\nvoice_matrix={json.dumps(matrix, separators=(',', ':'))}")
 
 
 def runner() -> None:

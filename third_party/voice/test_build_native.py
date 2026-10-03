@@ -307,6 +307,20 @@ class NativeBuildTests(unittest.TestCase):
         )
         self.assertFalse((build.output / "built.json").exists())
 
+    def test_unavailable_failure_diagnostic_preserves_the_subprocess_error(self):
+        build = NativeBuild(self.args, self.environment)
+        build.output.mkdir()
+        diagnostic = build.output / "missing-config.log"
+        command = [sys.executable, "-c", "raise SystemExit(77)"]
+        with self.assertRaises(subprocess.CalledProcessError) as error:
+            build.run("configure", command, diagnostic_logs=(diagnostic,))
+        self.assertEqual(error.exception.returncode, 77)
+        self.assertEqual(error.exception.cmd, command)
+        log = (build.output / "configure.log").read_text()
+        self.assertIn(str(diagnostic), log)
+        self.assertIn("Could not read diagnostic log:", log)
+        self.assertEqual(build.record["steps"][-1]["exit_code"], 77)
+
     def test_ambient_native_discovery_variables_are_not_inherited(self):
         inherited = {
             **self.environment,
@@ -482,8 +496,11 @@ class NativeBuildTests(unittest.TestCase):
                 )
                 expected = {
                     **build.environment,
-                    "CC": f"/cygdrive/d/msvcc.sh {flag}",
-                    "CXX": f"/cygdrive/d/msvcc.sh {flag}",
+                    "PATH": str(build.sources["libffi"])
+                    + os.pathsep
+                    + build.environment["PATH"],
+                    "CC": f"msvcc.sh {flag}",
+                    "CXX": f"msvcc.sh {flag}",
                     "AR": "/usr/share/automake-1.18/ar-lib lib",
                     "RANLIB": ":",
                     "LD": "link",
@@ -498,7 +515,11 @@ class NativeBuildTests(unittest.TestCase):
                 }
                 self.assertEqual(
                     kwargs,
-                    {"cwd": build.output / "build/libffi", "environment": expected},
+                    {
+                        "cwd": build.output / "build/libffi",
+                        "environment": expected,
+                        "diagnostic_logs": (build.output / "build/libffi/config.log",),
+                    },
                 )
                 self.assertEqual(calls["libffi-install"][1]["environment"], expected)
                 if platform.system() == "Windows":
@@ -534,6 +555,94 @@ class NativeBuildTests(unittest.TestCase):
                 self.assertEqual(
                     result.stdout.strip(),
                     linker_flags,
+                )
+
+    @unittest.skipIf(os.name == "nt", "Exercises Cygwin-style shell expansion on Unix")
+    def test_windows_compiler_survives_autoconf_expansion_and_make_recursion(self):
+        shell = shutil.which("bash")
+        make = shutil.which("make")
+        if shell is None or make is None:
+            self.skipTest("Requires Bash and GNU make")
+        for architecture, flag in (("x86_64", "-m64"), ("aarch64", "-marm64")):
+            with self.subTest(architecture=architecture):
+                self.args.target = f"{architecture}-pc-windows-msvc"
+                self.args.output = self.root / "RUNNER~1" / "voice build" / architecture
+                self.args.output.parent.mkdir(parents=True, exist_ok=True)
+                with patch("build_native.validate_target"):
+                    build = NativeBuild(self.args, self.environment)
+
+                def prepare(*args):
+                    (build.output / "build").mkdir()
+                    source = build.output / "sources/libffi-3.8.0"
+                    source.mkdir(parents=True)
+                    wrapper = source / "msvcc.sh"
+                    wrapper.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+                    wrapper.chmod(0o755)
+
+                def record(name, command, **kwargs):
+                    (build.output / f"{name}.log").write_text(
+                        "native pkg-config paths\n"
+                    )
+
+                with (
+                    patch("build_native.prepare_sources", side_effect=prepare),
+                    patch.object(build, "cmake"),
+                    patch.object(build, "meson"),
+                    patch.object(build, "run", side_effect=record) as run,
+                    patch.object(
+                        build, "posix_path", side_effect=lambda p: p.as_posix()
+                    ),
+                    patch(
+                        "build_native.subprocess.check_output",
+                        return_value="/usr/share/automake-1.18\n",
+                    ),
+                ):
+                    build.build()
+                configure = next(
+                    call
+                    for call in run.call_args_list
+                    if call.args[0] == "libffi-configure"
+                )
+                environment = configure.kwargs["environment"]
+                directory = configure.kwargs["cwd"]
+                for compiler in ("CC", "CXX"):
+                    # Autoconf expands the compiler variable inside eval. Quotes
+                    # introduced by that expansion are literal executable bytes.
+                    result = subprocess.run(
+                        [
+                            shell,
+                            "-c",
+                            f"ac_link='${compiler} -o conftest conftest.c'; eval \"$ac_link\"",
+                        ],
+                        cwd=directory,
+                        env=environment,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(
+                        result.stdout, f"{flag}\n-o\nconftest\nconftest.c\n"
+                    )
+                nested = directory / "recursive"
+                nested.mkdir()
+                (directory / "Makefile").write_text(
+                    "MAKEOVERRIDES =\nall:\n"
+                    "\t@$(MAKE) --no-print-directory -C recursive\n"
+                )
+                (nested / "Makefile").write_text(
+                    f"CC = {environment['CC']}\nCXX = {environment['CXX']}\n"
+                    "all:\n\t@$(CC) recursive-c\n\t@$(CXX) recursive-cxx\n"
+                )
+                result = subprocess.run(
+                    [make, "--no-print-directory"],
+                    cwd=directory,
+                    env=environment,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(
+                    result.stdout, f"{flag}\nrecursive-c\n{flag}\nrecursive-cxx\n"
                 )
 
     def test_explicit_windows_inputs_replace_ambient_sdk_and_search_paths(self):

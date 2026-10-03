@@ -38,6 +38,17 @@ gh workflow run lean-release.yml --repo IgorWarzocha/codex-lean --ref lean
 gh workflow run lean-release.yml --repo IgorWarzocha/codex-lean --ref lean -f publish=true
 ```
 
+To diagnose a Windows native voice failure without rebuilding the other platforms:
+
+```sh
+gh workflow run lean-release.yml --repo IgorWarzocha/codex-lean --ref lean -f scope=windows-voice
+```
+
+This diagnostic scope produces only the intermediate Windows voice artifact. It
+does not build CLI packages and cannot publish a release. After it passes, use the
+default `all` scope to build and validate all complete packages from one commit.
+Rerunning an old job does not pick up a source fix; dispatch on the updated branch.
+
 A matching `lean-v<VERSION>` tag can also start a release. Tag and workspace
 versions must agree. A failed platform prevents publication; inspect and fix the
 failure rather than dropping that platform from the release being validated.

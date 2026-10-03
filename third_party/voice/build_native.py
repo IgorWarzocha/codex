@@ -197,7 +197,7 @@ class NativeBuild:
         if input_record is not None:
             self.record["windows_build_inputs"] = input_record
 
-    def run(self, name, command, cwd=None, environment=None):
+    def run(self, name, command, cwd=None, environment=None, *, diagnostic_logs=()):
         command = [str(part) for part in command]
         step = {"name": name, "command": command}
         self.record["steps"].append(step)
@@ -211,6 +211,18 @@ class NativeBuild:
                 stderr=subprocess.STDOUT,
                 check=False,
             )
+            if result.returncode:
+                for diagnostic in diagnostic_logs:
+                    print(f"\n--- {diagnostic} ---", file=log)
+                    try:
+                        contents = diagnostic.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                    except OSError as error:
+                        # Supplemental diagnostics must not replace the build failure.
+                        print(f"Could not read diagnostic log: {error}", file=log)
+                    else:
+                        log.write(contents)
         step["exit_code"] = result.returncode
         (self.output / "build-state.json").write_text(
             json.dumps(self.record, indent=2) + "\n", encoding="utf-8"
@@ -362,7 +374,13 @@ class NativeBuild:
         environment = self.environment.copy()
         configure_options = []
         if self.windows:
-            wrapper = shlex.quote(self.posix_path(self.sources["libffi"] / "msvcc.sh"))
+            # Autoconf does not reinterpret quotes expanded from $CC. Resolve
+            # the bare wrapper through PATH instead, preserving ordinary user
+            # paths and compiler lookup when recursive make changes directory.
+            wrapper = "msvcc.sh"
+            environment["PATH"] = (
+                str(self.sources["libffi"]) + os.pathsep + environment["PATH"]
+            )
             architecture = (
                 "-m64" if self.args.target.startswith("x86_64-") else "-marm64"
             )
@@ -455,6 +473,7 @@ class NativeBuild:
             ],
             cwd=ffi_build,
             environment=environment,
+            diagnostic_logs=(ffi_build / "config.log",),
         )
         self.run(
             "libffi-build",

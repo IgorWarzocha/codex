@@ -164,7 +164,10 @@ def main():
             if builder.record["steps"]:
                 log = builder.output / (builder.record["steps"][-1]["name"] + ".log")
                 if log.is_file():
-                    print(log.read_text(errors="replace"), file=sys.stderr)
+                    print(
+                        log.read_text(encoding="utf-8", errors="replace"),
+                        file=sys.stderr,
+                    )
             raise
         with tarfile.open(root / config["prefix"], "w") as archive:
             archive.add(builder.prefix, arcname=".")

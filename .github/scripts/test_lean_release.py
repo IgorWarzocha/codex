@@ -22,6 +22,20 @@ COMMIT = "a" * 40
 
 
 class ReleaseRefTest(unittest.TestCase):
+    def test_diagnostic_scope_selects_windows_without_allowing_publication(self) -> None:
+        windows = release.voice_matrix("windows-voice", False)["include"]
+        self.assertEqual([entry["target"] for entry in windows], ["x86_64-pc-windows-msvc"])
+        for publish in (False, True):
+            complete = release.voice_matrix("all", publish)["include"]
+            self.assertEqual(
+                {entry["target"] for entry in complete},
+                {voice.voice_target(target) for target in release.TARGETS},
+            )
+        with self.assertRaisesRegex(ValueError, "all four complete packages"):
+            release.voice_matrix("windows-voice", True)
+        with self.assertRaisesRegex(ValueError, "Build scope"):
+            release.voice_matrix("unknown", False)
+
     def test_only_matching_fork_tags_and_lean_dispatch_can_publish(self) -> None:
         for event, ref, publish, expected in (
             ("push", f"refs/tags/lean-v{VERSION}", "", True),

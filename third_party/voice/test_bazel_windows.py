@@ -1,9 +1,14 @@
 """Exercise declared tool selection and the platform-independent payload copy action."""
 
 import copy
+from contextlib import redirect_stderr
 import errno
+import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -54,6 +59,78 @@ class WindowsInputsTests(unittest.TestCase):
                             "USERPROFILE": environment["HOME"],
                         },
                     )
+
+    def test_failed_configure_prints_config_log_before_scratch_cleanup(self):
+        config = self.root / "failure-action.json"
+        config.write_text(
+            json.dumps({"archives": [], "prefix": "unused", "receipt": "unused"})
+        )
+        inputs = {
+            "target": "x86_64-pc-windows-msvc",
+            "tools": {
+                name: sys.executable
+                for name in (
+                    "cc",
+                    "cxx",
+                    "cmake",
+                    "make",
+                    "pkg_config",
+                    "shell",
+                    "bootstrap_make",
+                )
+            },
+        }
+        environment = {
+            "PATH": os.environ.get("PATH", ""),
+            "INCLUDE": "fixture",
+            "LIB": "fixture",
+        }
+        builds = []
+
+        def prepare(archives, output, manifest):
+            builds.append(output.parent)
+            (output.parent / "build").mkdir()
+            source = output / "libffi-3.8.0"
+            source.mkdir(parents=True)
+            (source / "configure").write_text(
+                "from pathlib import Path\n"
+                "Path('config.log').write_bytes(b'compiler diagnostic \\xff\\n')\n"
+                "print('C compiler cannot create executables')\n"
+                "raise SystemExit(77)\n"
+            )
+
+        diagnostics = io.StringIO()
+        with (
+            patch.object(bazel_windows, "os", SimpleNamespace(environ={})),
+            patch.object(bazel_windows.sys, "argv", ["driver", "build", str(config)]),
+            patch.object(bazel_windows, "selected_inputs", return_value=inputs),
+            patch.object(
+                bazel_windows, "build_environment", return_value=(environment, {})
+            ),
+            patch("build_native.build_environment", return_value=(environment, {})),
+            patch("build_native.validate_target"),
+            patch("build_native.prepare_sources", side_effect=prepare),
+            patch.object(bazel_windows.NativeBuild, "cmake"),
+            patch.object(
+                bazel_windows.NativeBuild,
+                "posix_path",
+                new=lambda self, path: path.as_posix(),
+            ),
+            patch(
+                "build_native.subprocess.check_output",
+                return_value="/usr/share/automake-1.18\n",
+            ),
+            redirect_stderr(diagnostics),
+            self.assertRaises(subprocess.CalledProcessError) as error,
+        ):
+            bazel_windows.main()
+        self.assertEqual(error.exception.returncode, 77)
+        self.assertIn("configure", str(error.exception.cmd[1]))
+        self.assertIn("C compiler cannot create executables", diagnostics.getvalue())
+        self.assertIn("config.log", diagnostics.getvalue())
+        self.assertIn("compiler diagnostic \ufffd", diagnostics.getvalue())
+        self.assertEqual(len(builds), 1)
+        self.assertFalse(builds[0].exists())
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
