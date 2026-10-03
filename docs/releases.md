@@ -23,8 +23,8 @@ changed release.
 
 Run the **Codex Lean release** workflow from the repository's Actions page, selecting
 the `lean` branch. Leave publishing disabled to produce CI artifacts only.
-Enable publishing to create a GitHub prerelease after every platform has built,
-packaged, and passed its smoke checks. The release tag identifies the exact
+Enable publishing to create a GitHub release marked Latest after every platform
+has built, packaged, and passed its smoke checks. The release tag identifies the exact
 commit that was built, not whichever commit happens to be latest when the jobs
 finish.
 
@@ -34,7 +34,7 @@ With GitHub CLI:
 # Build and validate without publishing.
 gh workflow run lean-release.yml --repo IgorWarzocha/codex-lean --ref lean
 
-# Build, validate, and publish a prerelease.
+# Build, validate, and publish a release.
 gh workflow run lean-release.yml --repo IgorWarzocha/codex-lean --ref lean -f publish=true
 ```
 

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish a prerelease only after all four builds pass
+        description: Publish a release only after all four builds pass
         type: boolean
         default: false
       scope:
@@ -447,7 +447,7 @@ jobs:
           path: lean-dist
       - name: Verify all platforms and release provenance
         run: python .github/scripts/lean_release.py verify
-      - name: Publish a complete unsigned prerelease
+      - name: Publish a complete unsigned release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -458,6 +458,6 @@ jobs:
           # A failed upload leaves a draft, never a partially published release.
           # Existing releases are not overwritten on reruns.
           gh release create "$RELEASE_TAG" lean-dist/* \
-            --verify-tag --target "$RELEASE_COMMIT" --draft --prerelease \
+            --verify-tag --target "$RELEASE_COMMIT" --draft --prerelease=false \
             --title "Codex Lean $RELEASE_VERSION" --notes-file lean-release-notes.md
-          gh release edit "$RELEASE_TAG" --draft=false --prerelease
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest

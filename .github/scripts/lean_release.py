@@ -243,7 +243,7 @@ def verify() -> None:
         "without opening audio devices. Live microphone and speaker validation is separate.\n\n"
         "Linux x64 and ARM64 CLIs use musl. Their native voice runtime requires glibc 2.28 "
         "or newer. macOS ARM64 and Windows x64 packages "
-        "are unsigned. macOS is not notarized. These are initial prerelease builds.\n\n"
+        "are unsigned. macOS is not notarized.\n\n"
         "Packages include Codex, the code-mode host, sandbox helpers and ripgrep. "
         "Patched zsh is included on Linux and macOS, not Windows. Keep the extracted "
         "directories together and add `bin` to PATH.\n\n"
