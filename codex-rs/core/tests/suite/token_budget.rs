@@ -66,6 +66,7 @@ const AUTO_COMPACT_FALLBACK_PROMPT: &str = "Save the important state before roll
 /// Notes cases use real backend eligibility rather than the ordinary compaction fixture.
 fn test_codex() -> TestCodexBuilder {
     base_test_codex()
+        .with_direct_tools()
         .with_context_strategy(ContextStrategy::Notes)
         .with_auth(
             CodexAuth::from_external_chatgpt_tokens(

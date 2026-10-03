@@ -289,6 +289,10 @@ impl SessionState {
         self.auto_compact_window.claim_auto_compact_fallback()
     }
 
+    pub(crate) fn claim_notes_checkpoint_reminder(&mut self) -> bool {
+        self.auto_compact_window.claim_notes_checkpoint_reminder()
+    }
+
     pub(crate) fn auto_compact_window_number(&self) -> u64 {
         self.auto_compact_window.window_number()
     }

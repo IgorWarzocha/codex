@@ -414,8 +414,21 @@ async fn run_compact_task_inner_impl(
         CompactionWindowTransition::Preserve => sess.auto_compact_window_state().await,
     };
 
-    let (initial_context, world_state_baseline) =
+    let (mut initial_context, world_state_baseline) =
         build_compaction_initial_context(sess.as_ref(), &initial_context_injection).await;
+    if matches!(window_transition, CompactionWindowTransition::Preserve) {
+        // Same-window rescue keeps delivery flags claimed, so retain their
+        // developer instructions rather than relying on the summary to repeat them.
+        initial_context.extend(history_items.iter().filter(|envelope| {
+            matches!(&envelope.item, ResponseItem::Message {
+                role,
+                internal_chat_message_metadata_passthrough: Some(metadata),
+                ..
+            } if role == "developer" && metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
+                kinds.iter().any(|kind| kind.0 == "token_budget.reminder")
+            }))
+        }).cloned());
+    }
     if !initial_context.is_empty() {
         new_history =
             insert_initial_context_before_last_real_user_or_summary(new_history, initial_context);

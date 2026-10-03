@@ -7,6 +7,7 @@ use crate::config::resolve_token_budget_config;
 use crate::context::ContextualUserFragment;
 use codex_features::Feature;
 use codex_login::CodexAuth;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 
 /// Validate storage before enabling resets. Legacy flags and model experiments
@@ -115,66 +116,63 @@ pub(super) fn resolve_token_budget(
 pub(super) async fn maybe_record(
     sess: &Session,
     turn_context: &TurnContext,
-    base_window_tokens_remaining: Option<i64>,
+    model_info: &ModelInfo,
+    token_status: &super::context_window::ContextWindowTokenStatus,
     allow_auto_compact_fallback: bool,
-) {
+) -> Vec<ResponseItem> {
     if !turn_context.config.features.enabled(Feature::TokenBudget) {
-        return;
+        return Vec::new();
     }
-    let Some(base_window_tokens_remaining) = base_window_tokens_remaining else {
-        return;
+    let Some(config) = resolve_token_budget(
+        turn_context.configured_token_budget.as_ref(),
+        turn_context.use_model_token_budget_defaults,
+        model_info,
+    ) else {
+        return Vec::new();
     };
-
-    let Some(config) = turn_context.config.token_budget.as_ref() else {
-        return;
-    };
-
-    if config
-        .reminder_threshold_tokens
-        .is_some_and(|threshold| base_window_tokens_remaining <= threshold)
+    let mut items = Vec::new();
+    if token_status.notes_checkpoint_due {
+        let checkpoint_due = sess.state.lock().await.claim_notes_checkpoint_reminder();
+        if checkpoint_due {
+            items.push(ContextualUserFragment::into(
+                crate::context::TokenBudgetReminder::checkpoint_now(),
+            ));
+        }
+    } else if let Some(base_window_tokens_remaining) = token_status.base_window_tokens_remaining
+        && config
+            .reminder_threshold_tokens
+            .is_some_and(|threshold| base_window_tokens_remaining <= threshold)
     {
         let reminder_due = {
             let mut state = sess.state.lock().await;
             state.claim_token_budget_reminder()
         };
         if reminder_due {
-            let response_item =
-                ContextualUserFragment::into(crate::context::TokenBudgetReminder::new(
+            items.push(ContextualUserFragment::into(
+                crate::context::TokenBudgetReminder::new(
                     &config.reminder_message_template,
                     base_window_tokens_remaining,
-                ));
-            sess.record_conversation_items(
-                turn_context,
-                turn_context.model_info(),
-                std::slice::from_ref(&response_item),
-            )
-            .await;
+                ),
+            ));
         }
     }
 
-    if !allow_auto_compact_fallback || base_window_tokens_remaining != 0 {
-        return;
+    // The urgent instruction supersedes softer prompts at this boundary.
+    if !token_status.notes_checkpoint_due
+        && allow_auto_compact_fallback
+        && token_status.base_window_tokens_remaining == Some(0)
+        && let Some(prompt) = config.auto_compact_fallback_prompt.as_deref()
+        && sess.state.lock().await.claim_auto_compact_fallback()
+    {
+        items.push(ContextualUserFragment::into(
+            crate::context::AutoCompactFallbackPrompt::new(prompt),
+        ));
     }
-    let Some(prompt) = config.auto_compact_fallback_prompt.as_deref() else {
-        return;
-    };
-
-    let fallback_due = {
-        let mut state = sess.state.lock().await;
-        state.claim_auto_compact_fallback()
-    };
-    if !fallback_due {
-        return;
+    if !items.is_empty() {
+        sess.record_conversation_items(turn_context, model_info, &items)
+            .await;
     }
-
-    let response_item =
-        ContextualUserFragment::into(crate::context::AutoCompactFallbackPrompt::new(prompt));
-    sess.record_conversation_items(
-        turn_context,
-        turn_context.model_info(),
-        std::slice::from_ref(&response_item),
-    )
-    .await;
+    items
 }
 
 #[cfg(test)]

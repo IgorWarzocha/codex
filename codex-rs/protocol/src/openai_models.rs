@@ -523,6 +523,37 @@ impl ModelInfo {
         })
     }
 
+    /// Notes uses the selected window for work planning, not execution admission.
+    /// Only advertised metadata can authorize execution beyond that window.
+    pub fn notes_execution_context_window(&self) -> Option<i64> {
+        self.notes_max_context_window().map(|context_window| {
+            context_window.saturating_mul(self.effective_context_window_percent) / 100
+        })
+    }
+
+    /// Leave five percentage points of the model window for checkpointing before
+    /// execution admission closes, even when metadata reserves more than 5%.
+    pub fn notes_checkpoint_token_limit(&self) -> Option<i64> {
+        let selected = self.resolved_context_window()?;
+        let maximum = self.notes_max_context_window()?;
+        let checkpoint_percent = self
+            .effective_context_window_percent
+            .saturating_sub(5)
+            .min(90);
+        Some(selected.min(maximum.saturating_mul(checkpoint_percent) / 100))
+    }
+
+    fn notes_max_context_window(&self) -> Option<i64> {
+        let selected = self.resolved_context_window()?;
+        Some(if self.used_fallback_model_metadata {
+            selected
+        } else {
+            self.max_context_window
+                .filter(|maximum| *maximum >= selected)
+                .unwrap_or(selected)
+        })
+    }
+
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
         let context_limit = self
             .resolved_context_window()
@@ -1886,6 +1917,39 @@ mod tests {
             ),
             (Some(272_000), Some(258_400), Some(244_800))
         );
+    }
+
+    #[test]
+    fn notes_separates_selected_budget_from_execution_headroom() {
+        for (selected, maximum, percent, fallback, execution, checkpoint) in [
+            (100_000, Some(500_000), 95, false, 475_000, 100_000),
+            (500_000, Some(500_000), 95, false, 475_000, 450_000),
+            (500_000, Some(500_000), 80, false, 400_000, 375_000),
+            (100_000, None, 95, false, 95_000, 90_000),
+            (100_000, Some(500_000), 95, true, 95_000, 90_000),
+        ] {
+            let model = ModelInfo {
+                context_window: Some(selected),
+                max_context_window: maximum,
+                effective_context_window_percent: percent,
+                used_fallback_model_metadata: fallback,
+                ..test_model(None)
+            };
+            assert_eq!(model.notes_execution_context_window(), Some(execution));
+            assert_eq!(model.notes_checkpoint_token_limit(), Some(checkpoint));
+            assert_eq!(
+                model.usable_context_window(),
+                Some(selected * percent / 100)
+            );
+            assert_eq!(model.auto_compact_token_limit(), Some(selected * 9 / 10));
+        }
+        let model = ModelInfo {
+            context_window: None,
+            max_context_window: None,
+            ..test_model(None)
+        };
+        assert_eq!(model.notes_execution_context_window(), None);
+        assert_eq!(model.notes_checkpoint_token_limit(), None);
     }
 
     #[test]

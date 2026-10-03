@@ -134,6 +134,20 @@ The strategy selects continuity independently of the legacy context-management
 and token-budget activation flags. Managed requirements can restrict the selected
 strategy. Native token budgets and checkpoint reminders still apply in notes mode.
 
+In Notes mode, `model_context_window` selects a working budget, not an execution
+cutoff. Early reminders remain. At the selected budget, the agent receives an
+urgent instruction to stop work, save a notes checkpoint, and call `new_context`
+immediately. Crossing that budget does not itself force summarization or cancel
+running tools.
+
+Execution headroom is calculated against the model's advertised maximum instead.
+For a 272,000-token selected window and an 872,000-token maximum, the urgent
+reminder arrives at 272,000 tokens. With the usual 95% usable-window setting,
+the execution guard remains at 828,400 tokens. When the selected budget approaches
+the maximum, the urgent reminder arrives earlier to leave room for checkpointing.
+These thresholds follow model metadata and the selected window, not fixed GPT
+window sizes. Ordinary compaction keeps its existing thresholds.
+
 Idle rollover is optional and disabled when the setting is absent. To reset a
 notes window before the next user turn after 25 minutes idle:
 

@@ -527,7 +527,7 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         .find(|model| model.slug == MODEL_A)
         .expect("initial model");
     initial_model.context_window = Some(272_000);
-    initial_model.max_context_window = Some(272_000);
+    initial_model.max_context_window = Some(500_000);
     initial_model.auto_compact_token_limit = None;
     initial_model.effective_context_window_percent = 95;
     let destination = models
@@ -535,7 +535,7 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         .find(|model| model.slug == MODEL_B)
         .expect("destination model");
     destination.context_window = Some(190_000);
-    destination.max_context_window = Some(190_000);
+    destination.max_context_window = Some(300_000);
     destination.auto_compact_token_limit = Some(150_000);
     destination.effective_context_window_percent = 80;
     destination.default_reasoning_summary = ReasoningSummary::Detailed;
@@ -722,6 +722,25 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         ]
     );
     assert_eq!(desired_step_settings(&session).await, desired);
+    let mut notes_config = (*turn.config).clone();
+    notes_config.context_strategy = crate::config::ContextStrategy::Notes;
+    for (step, execution_limit, checkpoint_due, cap_reached) in [
+        (&before, 475_000, false, false),
+        (&during, 475_000, false, false),
+        (&after, 240_000, true, true),
+    ] {
+        let status = crate::session::context_window::context_window_token_status_for_request(
+            &session,
+            &notes_config,
+            &turn,
+            &step.settings.model_info,
+            250_000,
+        )
+        .await;
+        assert_eq!(status.full_context_window_limit, Some(execution_limit));
+        assert_eq!(status.notes_checkpoint_due, checkpoint_due);
+        assert_eq!(status.full_context_window_limit_reached, cap_reached);
+    }
     assert!(Arc::ptr_eq(&before.settings, &during.settings));
     assert!(Arc::ptr_eq(&before.settings, &turn.initial_settings));
     assert_eq!(turn.model_info().slug, MODEL_A);

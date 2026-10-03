@@ -557,11 +557,14 @@ pub(crate) async fn run_turn(
                 let (has_pending_input, token_status) = async {
                     let has_pending_input =
                         sess.input_queue.has_pending_input(&sess.active_turn).await;
-                    let token_status = super::context_window::context_window_token_status(
-                        sess.as_ref(),
-                        turn_context.as_ref(),
-                    )
-                    .await;
+                    let token_status =
+                        super::context_window::context_window_token_status_for_model(
+                            sess.as_ref(),
+                            turn_context.config.as_ref(),
+                            turn_context.as_ref(),
+                            &step_context.settings.model_info,
+                        )
+                        .await;
                     (has_pending_input, token_status)
                 }
                 .instrument(trace_span!("run_turn.collect_post_sampling_state"))
@@ -616,7 +619,8 @@ pub(crate) async fn run_turn(
                 super::token_budget::maybe_record(
                     sess.as_ref(),
                     turn_context.as_ref(),
-                    token_status.base_window_tokens_remaining,
+                    &step_context.settings.model_info,
+                    &token_status,
                     allow_auto_compact_fallback,
                 )
                 .await;
@@ -1483,6 +1487,12 @@ async fn maybe_run_previous_model_inline_compact(
         return Ok(());
     }
 
+    // Notes treats selected windows as working budgets. Only assembled-request
+    // admission on the captured model may rescue actual execution exhaustion.
+    if turn_context.config.context_strategy == ContextStrategy::Notes {
+        return Ok(());
+    }
+
     let Some(old_context_window) = previous_model_turn_context.model_context_window() else {
         return Ok(());
     };
@@ -1770,9 +1780,7 @@ async fn run_sampling_request(
             )
             .await?;
         }
-        if turn_context.config.context_strategy == ContextStrategy::Notes
-            && let Some(limit) = step_context.settings.model_info.usable_context_window()
-        {
+        if turn_context.config.context_strategy == ContextStrategy::Notes {
             let base_tokens = i64::try_from(approx_token_count(&prompt.base_instructions.text))
                 .unwrap_or(i64::MAX);
             let estimated_tokens = prompt
@@ -1780,10 +1788,35 @@ async fn run_sampling_request(
                 .iter()
                 .map(estimate_item_token_count)
                 .fold(base_tokens, i64::saturating_add);
-            // Check each assembled request, including stream retries and newly accepted
-            // input without a usage report. Keep native usage and model headroom authoritative
-            // even if the backend accepts a larger window. The caller owns one shared rescue.
-            if sess.get_total_token_usage().await >= limit || estimated_tokens >= limit {
+            let token_status = super::context_window::context_window_token_status_for_request(
+                sess.as_ref(),
+                turn_context.config.as_ref(),
+                turn_context.as_ref(),
+                &step_context.settings.model_info,
+                sess.get_total_token_usage().await.max(estimated_tokens),
+            )
+            .await;
+            // Check assembled requests and retries, including accepted input and
+            // injections without a native usage sample. Selected-budget escalation
+            // is an instruction, while only model execution headroom closes admission.
+            let reminders = super::token_budget::maybe_record(
+                sess.as_ref(),
+                turn_context.as_ref(),
+                &step_context.settings.model_info,
+                &token_status,
+                true,
+            )
+            .await;
+            let reminder_tokens = reminders
+                .iter()
+                .map(estimate_item_token_count)
+                .fold(0, i64::saturating_add);
+            prompt.input.extend(reminders);
+            if token_status.full_context_window_limit_reached
+                || token_status
+                    .full_context_window_limit
+                    .is_some_and(|limit| estimated_tokens.saturating_add(reminder_tokens) >= limit)
+            {
                 return Err(CodexErr::ContextWindowExceeded);
             }
         }

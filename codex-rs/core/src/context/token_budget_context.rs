@@ -179,6 +179,12 @@ pub(crate) struct TokenBudgetReminder {
 }
 
 impl TokenBudgetReminder {
+    pub(crate) fn checkpoint_now() -> Self {
+        Self {
+            message: "Your selected context-window budget is exhausted or the model's execution limit is approaching. STOP ongoing work. Checkpoint the active request, progress, decisions, and next steps in notes, then call new_context IMMEDIATELY before resuming work. This is an instruction to checkpoint and reset, not tool cancellation.".to_string(),
+        }
+    }
+
     pub(crate) fn new(message_template: &str, n_remaining: i64) -> Self {
         Self {
             message: message_template.replace("{n_remaining}", &n_remaining.to_string()),

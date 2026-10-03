@@ -7,6 +7,7 @@ use codex_login::CodexAuth;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ResponsesRequest;
@@ -28,9 +29,11 @@ use test_case::test_case;
 const FULL_WINDOW: i64 = 64_000;
 const USABLE_WINDOW: i64 = FULL_WINDOW * 80 / 100;
 const SUMMARY: &str = "Readable checkpoint: retain job 42 and the tool's budget evidence.";
+const URGENT_CHECKPOINT: &str = "STOP ongoing work. Checkpoint the active request";
 
 fn notes_fixture(scope: AutoCompactTokenLimitScope) -> TestCodexBuilder {
     test_codex()
+        .with_direct_tools()
         .with_context_strategy(ContextStrategy::Notes)
         .with_auth(
             CodexAuth::from_external_chatgpt_tokens(
@@ -42,6 +45,7 @@ fn notes_fixture(scope: AutoCompactTokenLimitScope) -> TestCodexBuilder {
         )
         .with_model_info_override("gpt-5.2", |model| {
             model.effective_context_window_percent = 80;
+            model.max_context_window = Some(FULL_WINDOW);
         })
         .with_config(move |config| {
             let base_url = config.model_provider.base_url.as_ref().unwrap();
@@ -95,6 +99,260 @@ fn assert_same_window(requests: &[ResponsesRequest]) {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_window_downshift_does_not_summarize_notes_below_execution_cap() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("previous", "Retain job 42"),
+                ev_completed_with_tokens("previous", 250_000),
+            ]),
+            reply("current", "continued without summarizing"),
+        ],
+    )
+    .await;
+    let test = notes_fixture(AutoCompactTokenLimitScope::Total)
+        .with_model("gpt-daybreak-red-latest")
+        .with_config(|config| {
+            config.model_context_window = None;
+            config.model_auto_compact_token_limit = None;
+        })
+        .build(&server)
+        .await?;
+    assert!(complete(&test, "Previous task").await?.error.is_none());
+    core_test_support::submit_thread_settings(
+        &test.codex,
+        ThreadSettingsOverrides {
+            model: Some("gpt-6-astra".into()),
+            ..Default::default()
+        },
+    )
+    .await?;
+    assert!(
+        complete(&test, "Continue on the larger-capacity model")
+            .await?
+            .error
+            .is_none()
+    );
+    let requests = responses.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "a selected-window downshift must not add a Notes summary request"
+    );
+    assert_eq!(requests[1].body_json()["model"], "gpt-6-astra");
+    assert!(!requests[1].body_contains_text(SUMMARIZATION_PROMPT));
+    assert!(requests[1].body_contains_text("Retain job 42"));
+    assert_same_window(&requests);
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn same_window_rescue_preserves_checkpoint_instruction_without_duplicates() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("overflow", "get_context_remaining", "{}"),
+                ev_completed_with_tokens("overflow", USABLE_WINDOW),
+            ]),
+            reply("summary", SUMMARY),
+            sse(vec![
+                ev_function_call("checkpoint", "get_context_remaining", "{}"),
+                ev_completed_with_tokens("checkpoint", FULL_WINDOW * 75 / 100),
+            ]),
+            reply("final", "checkpointing after rescue"),
+        ],
+    )
+    .await;
+    let test = notes_fixture(AutoCompactTokenLimitScope::Total)
+        .build(&server)
+        .await?;
+    assert!(
+        complete(&test, "Keep the mandatory checkpoint instruction")
+            .await?
+            .error
+            .is_none()
+    );
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[1].body_contains_text(SUMMARIZATION_PROMPT));
+    for request in &requests[1..] {
+        assert_eq!(
+            request
+                .message_input_texts("developer")
+                .iter()
+                .filter(|text| text.contains(URGENT_CHECKPOINT))
+                .count(),
+            1,
+            "same-window summarization must retain one mandatory checkpoint instruction"
+        );
+        assert!(request.body_contains_text("call new_context IMMEDIATELY before resuming work"));
+    }
+    assert!(requests[2].body_contains_text(SUMMARY));
+    assert_same_window(&requests);
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_budget_escalates_once_without_rescue_and_reset_rearms() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("early", "get_context_remaining", "{}"),
+                ev_completed_with_tokens("early", 60_000),
+            ]),
+            sse(vec![
+                ev_function_call("cross", "get_context_remaining", "{}"),
+                ev_completed_with_tokens("cross", FULL_WINDOW),
+            ]),
+            sse(vec![
+                ev_function_call("repeat", "get_context_remaining", "{}"),
+                ev_completed_with_tokens("repeat", FULL_WINDOW + 1_000),
+            ]),
+            sse(vec![
+                ev_function_call("reset", "new_context", "{}"),
+                ev_completed_with_tokens("reset", FULL_WINDOW + 2_000),
+            ]),
+            sse(vec![
+                ev_function_call("rearm", "get_context_remaining", "{}"),
+                ev_completed_with_tokens("rearm", FULL_WINDOW),
+            ]),
+            reply("final", "continued after checkpoint"),
+        ],
+    )
+    .await;
+    let test = notes_fixture(AutoCompactTokenLimitScope::Total)
+        .with_model_info_override("gpt-5.2", |model| {
+            model.max_context_window = Some(FULL_WINDOW * 4)
+        })
+        .build(&server)
+        .await?;
+    assert!(
+        complete(&test, "Keep working across the selected budget")
+            .await?
+            .error
+            .is_none()
+    );
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 6);
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.body_contains_text(SUMMARIZATION_PROMPT))
+    );
+    assert!(requests[1].body_contains_text("Native budget:"));
+    let urgent_count = |request: &ResponsesRequest| {
+        request
+            .message_input_texts("developer")
+            .iter()
+            .filter(|text| text.contains(URGENT_CHECKPOINT))
+            .count()
+    };
+    assert_eq!(
+        requests.iter().map(urgent_count).collect::<Vec<_>>(),
+        vec![0, 0, 1, 1, 0, 1]
+    );
+    assert!(requests[2].body_contains_text("call new_context IMMEDIATELY before resuming work"));
+    assert_same_window(&requests[..4]);
+    assert_ne!(
+        requests[3].header("x-codex-window-id"),
+        requests[4].header("x-codex-window-id")
+    );
+    assert_eq!(
+        requests[4].header("x-codex-window-id"),
+        requests[5].header("x-codex-window-id")
+    );
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[test_case(false; "accepted_input")]
+#[test_case(true; "injected_context")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_budget_crossing_before_request_instructs_without_rescue(
+    inject: bool,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(&server, vec![reply("final", "checkpoint next")]).await;
+    let test = notes_fixture(AutoCompactTokenLimitScope::BodyAfterPrefix)
+        .with_model_info_override("gpt-5.2", |model| {
+            model.max_context_window = Some(FULL_WINDOW * 4)
+        })
+        .build(&server)
+        .await?;
+    let payload = format!(
+        "Selected-budget crossing {}",
+        "x".repeat((FULL_WINDOW * 4 + 4_000) as usize)
+    );
+    if inject {
+        test.codex.inject_response_items(vec![serde_json::from_value(serde_json::json!({
+            "type": "message", "role": "developer", "content": [{"type": "input_text", "text": payload}]
+        }))?]).await?;
+    }
+    let input = if inject {
+        "Inspect injected evidence"
+    } else {
+        &payload
+    };
+    assert!(complete(&test, input).await?.error.is_none());
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(!requests[0].body_contains_text(SUMMARIZATION_PROMPT));
+    assert!(requests[0].body_contains_text(URGENT_CHECKPOINT));
+    assert!(requests[0].body_contains_text("Selected-budget crossing"));
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[test_case(Some(FULL_WINDOW); "advertised_maximum")]
+#[test_case(None; "unknown_maximum")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn near_model_max_escalates_with_checkpoint_runway(maximum: Option<i64>) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("checkpoint", "get_context_remaining", "{}"),
+                ev_completed_with_tokens("checkpoint", FULL_WINDOW * 75 / 100),
+            ]),
+            reply("final", "checkpointing before the hard cap"),
+        ],
+    )
+    .await;
+    let test = notes_fixture(AutoCompactTokenLimitScope::Total)
+        .with_model_info_override("gpt-5.2", move |model| model.max_context_window = maximum)
+        .build(&server)
+        .await?;
+    assert!(
+        complete(&test, "Preserve execution headroom")
+            .await?
+            .error
+            .is_none()
+    );
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(!requests[0].body_contains_text(URGENT_CHECKPOINT));
+    assert!(requests[1].body_contains_text(URGENT_CHECKPOINT));
+    assert!(!requests[1].body_contains_text(SUMMARIZATION_PROMPT));
+    assert_same_window(&requests);
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 #[test_case(AutoCompactTokenLimitScope::Total, USABLE_WINDOW; "exact_usable_cap")]
 #[test_case(AutoCompactTokenLimitScope::BodyAfterPrefix, USABLE_WINDOW + 1_000; "above_cap_with_body_after_prefix")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -104,7 +362,7 @@ async fn usable_hard_cap_rescues_tool_continuation_on_a_larger_backend(
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    // Every request succeeds at this backend, including requests above our configured cap.
+    // Every request succeeds at this backend, including requests above the model's cap.
     // Usage is below the full window but reaches its usable, headroom-reserving limit.
     let responses = mount_sse_sequence(
         &server,
@@ -203,6 +461,45 @@ async fn oversized_new_input_is_summarized_before_first_normal_request() -> Resu
     assert!(requests[0].body_contains_text("Accepted job 42 input"));
     assert!(requests[1].body_contains_text(SUMMARY));
     assert!(requests[1].body_contains_text("Accepted job 42 input"));
+    assert_same_window(&requests);
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn backend_overflow_below_advertised_max_retains_one_same_window_rescue() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse_failed(
+                "overflow",
+                "context_length_exceeded",
+                "Input exceeds context",
+            ),
+            reply("summary", SUMMARY),
+            reply("final", "recovered from backend overflow"),
+        ],
+    )
+    .await;
+    let test = notes_fixture(AutoCompactTokenLimitScope::Total)
+        .with_model_info_override("gpt-5.2", |model| {
+            model.max_context_window = Some(FULL_WINDOW * 4)
+        })
+        .build(&server)
+        .await?;
+    assert!(complete(&test, "Retain job 42").await?.error.is_none());
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.body_contains_text(SUMMARIZATION_PROMPT))
+            .count(),
+        1
+    );
+    assert!(requests[2].body_contains_text(SUMMARY));
     assert_same_window(&requests);
     test.codex.shutdown_and_wait().await?;
     Ok(())
