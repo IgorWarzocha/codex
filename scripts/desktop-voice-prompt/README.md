@@ -2,7 +2,7 @@
 
 An opt-in ASAR patch that appends your communication preferences to **Codex desktop's native text and realtime voice instructions**. It preserves Codex's own prompts and tool handoffs. Python 3.10 or newer is required, without additional packages.
 
-The script writes separate artifacts. It never installs them, changes its inputs, or overwrites existing outputs. Compatibility is checked against the specific native instruction code it edits, not the app version or whole-archive hash. Unrelated code changes and renamed bundle chunks are allowed. Unfamiliar instruction code, ambiguous owners, and already-patched archives are rejected.
+The patcher writes separate artifacts. It never installs them, changes its inputs, or overwrites existing outputs. An optional Linux hook reapplies the patch after package updates. Compatibility is checked against the specific native instruction code it edits, not the app version or whole-archive hash. Unrelated code changes and renamed bundle chunks are allowed. Unfamiliar instruction code, ambiguous owners, and already-patched archives are rejected.
 
 ## Prepare a patched archive
 
@@ -41,11 +41,47 @@ The original plist must match the original ASAR. Only its `Resources/app.asar` i
 
 ## Installation and removal
 
-Installation is a separate, deliberate action. Fully quit the desktop app first. Preserve the unmodified app for removal, or be ready to reinstall its package. Install the generated archive with the installation's normal owner and mode, usually `root:root` and `0644` on Linux. Keep the matching `app.asar.unpacked` directory unchanged. On macOS, the generated plist and a valid signature are also required. This script does not need root.
+Installation is a separate, deliberate action. Fully quit the desktop app first. Install the generated archive with the installation's normal owner and mode, usually `root:root` and `0644` on Linux. Keep the matching `app.asar.unpacked` directory unchanged. On macOS, the generated plist and a valid signature are also required. Preparing an archive does not need root.
 
 Restart the app after installation. Start a new text conversation to get newly composed instructions. Stop and restart voice to pick up changes. The file is reread when desktop text developer instructions are composed and whenever a native realtime call is created, including replacement calls. Existing text instructions and ongoing voice calls are not hot-updated.
 
-To remove the patch, quit the app and restore the unmodified app or reinstall its package. Updates replace the patch. Run `--check` against the new unpatched archive before generating another patch. If an integrity or signing check rejects the result, restore the original rather than disabling that protection.
+To remove the patch, quit the app and reinstall its package. No restore backup is required. Updates replace the patch unless you install the hook below. Run `--check` against a new unpatched archive before generating another patch manually. If an integrity or signing check rejects the result, reinstall the original rather than disabling that protection.
+
+## Keep personality after pacman updates
+
+On Arch Linux and Omarchy, install the optional hook with your desktop account and an existing personality file:
+
+```sh
+sudo python3 scripts/desktop-voice-prompt/install_hook.py \
+  --user "$USER" \
+  --personality-file "$HOME/.local/state/codex-desktop-personality-test/codex_personality.md"
+```
+
+The installer copies the patcher into root-owned `/usr/local/lib/codex-desktop-personality/` and registers `/etc/pacman.d/hooks/95-codex-desktop-personality.hook`. It never runs root code from your checkout or user-writable configuration during updates. Your Markdown stays user-owned and is read by the app, not imported as code.
+
+The hook runs after any package installs or upgrades `usr/lib/chatgpt/resources/app.asar`, including `chatgpt-bin` updates through pacman, yay, and Omarchy. A compatible archive is staged on the same filesystem and atomically replaced with its original owner and mode. No original archive backup is kept. The unpacked directory stays untouched. The hook does not stop or restart the app. Restart it after an update.
+
+If native instruction code is incompatible, the updated archive stays unchanged and Codex uses its native personality. The hook prints a warning, logs it under `codex-desktop-personality`, and sends a persistent desktop notification when your session is available. Operational failures are also reported. All paths through the launcher return success so the personality hook does not turn the app update into a failed update. A two-minute timeout prevents a stuck patcher from holding up updates indefinitely. When no desktop session is available, the printed warning and journal remain available:
+
+```sh
+journalctl -t codex-desktop-personality
+```
+
+After adjusting compatibility checks, rerun the installer to refresh the root-owned patcher. To retry on an unpatched archive, quit the app and run:
+
+```sh
+sudo /usr/local/lib/codex-desktop-personality/pacman-hook.sh \
+  "$USER" "$HOME/.local/state/codex-desktop-personality-test/codex_personality.md"
+```
+
+Already-patched archives are deliberately rejected rather than patched twice. To disable automatic reapplication, remove the hook and its installed code:
+
+```sh
+sudo rm /etc/pacman.d/hooks/95-codex-desktop-personality.hook
+sudo rm -r /usr/local/lib/codex-desktop-personality
+```
+
+Your personality file is not removed. Reinstall the app package afterwards if you also want to remove the active patch.
 
 ## What changes
 
@@ -55,7 +91,7 @@ For voice, a narrow preload bridge supplies the same block to the native `thread
 
 The renderer can request only the configured file. Access is restricted to the app's top-level `app://-` frames. Native routing, authentication, SDP, WebRTC, tools, delegation, and handoff fields remain unchanged. No native prompt or tool schema is copied into this repository.
 
-Offline validation covered Linux 26.930.21537 and 26.930.31730, plus the official macOS Apple Silicon DMG 26.930.31730. It compared all untouched archive entries and executed the actual native instruction owners before and after transformation with controlled boundary inputs. Live app launch, backend acceptance, spoken behavior, and tool execution remain untested. No installed app was patched.
+Offline validation covered Linux 26.930.21537 and 26.930.31730, plus the official macOS Apple Silicon DMG 26.930.31730. It compared all untouched archive entries and executed the actual native instruction owners before and after transformation with controlled boundary inputs. Linux laptop personality behavior has also been confirmed in a live user test. macOS launch and native tool execution remain unverified.
 
 ## Tests
 
