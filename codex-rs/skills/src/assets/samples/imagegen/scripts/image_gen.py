@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fallback CLI for explicit image generation or editing with GPT Image models.
 
-Used only when the user explicitly opts into CLI fallback mode, or when explicit
-transparent output requires the `gpt-image-1.5` fallback path.
+Used only when the user explicitly opts into CLI fallback mode. Transparent
+output alone does not select this path or authorize a model switch.
 
 Defaults to gpt-image-2 and a structured prompt augmentation workflow.
 """

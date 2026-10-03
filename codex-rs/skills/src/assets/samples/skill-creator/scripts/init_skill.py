@@ -25,12 +25,10 @@ ALLOWED_RESOURCES = {"scripts", "references", "assets"}
 
 SKILL_TEMPLATE = """---
 name: {skill_name}
-description: "[TODO: Briefly describe what this skill does and when it applies.]"
+description: "[TODO: State when to read this skill in 175 characters or fewer.]"
 ---
 
-# {skill_title}
-
-[TODO: Add the task-specific guidance Codex needs. Reference supporting files only when they are relevant.]
+[TODO: Start with task-specific decisions or actions. Link branch-specific references only where needed.]
 """
 
 EXAMPLE_SCRIPT = '''#!/usr/bin/env python3
