@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import lean_release as release
 import lean_voice as voice
+import lean_voice_cache as cache
 from codex_package.layout import build_package_dir
 from codex_package.targets import PACKAGE_VARIANTS, PackageInputs, TARGET_SPECS
 from runtime import PLUGINS, required_library_paths
@@ -69,7 +70,7 @@ class ReleasePackageTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.packages = {}
 
-    def make_package(self, target: str) -> tuple[Path, str]:
+    def make_package(self, target: str, voice_commit: str = COMMIT) -> tuple[Path, str]:
         spec = TARGET_SPECS[target]
         source = self.root / "source"
         source.mkdir(exist_ok=True)
@@ -105,12 +106,29 @@ class ReleasePackageTest(unittest.TestCase):
             libraries.append({"path": name, "sha256": release.sha256(path)})
         (runtime / "runtime.json").write_text(json.dumps({
             "schemaVersion": 1, "developmentOnly": False, "distribution": "publicRelease",
-            "target": native_target, "sourceCommit": COMMIT,
+            "target": native_target, "sourceCommit": voice_commit,
             "sourceManifestSha256": release.sha256(release.REPO_ROOT / "third_party/voice/sources.json"),
             "plugins": plugins, "libraries": libraries,
         }))
         output = self.root / f"assembled-{target}"
-        voice.assemble(package, binary, native_target, COMMIT, output, runtime=runtime, release_version=VERSION)
+        voice.assemble(package, binary, native_target, COMMIT, output, runtime=runtime,
+                       release_version=VERSION, voice_build_commit=voice_commit)
+        proof = {
+            "schemaVersion": 1, "target": native_target, "sourceCommit": voice_commit,
+            "sourceFingerprint": cache.source_fingerprint(cache.ROOT, native_target),
+            "runnerImage": {"ImageOS": "fixture", "ImageVersion": "1"},
+            "toolVersions": cache.tool_identity(),
+            "archiveSha256": "0" * 64, "helperSha256": release.sha256(binary),
+            "runtimeSha256": cache.inventory(runtime),
+        }
+        proof["inputFingerprint"] = cache.input_fingerprint(proof["sourceFingerprint"], proof["runnerImage"], proof["toolVersions"])
+        proof_path = output / "codex-resources/voice/provenance.json"
+        proof_path.write_text(json.dumps(proof))
+        manifest_path = output / "codex-resources/voice/manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["voiceInputFingerprint"] = proof["inputFingerprint"]
+        manifest["sha256"]["codex-resources/voice/provenance.json"] = release.sha256(proof_path)
+        manifest_path.write_text(json.dumps(manifest))
         self.packages[target] = output
         return output, release.sha256(binary) if spec.is_linux else ""
 
@@ -125,7 +143,7 @@ class ReleasePackageTest(unittest.TestCase):
                 self.assertIs(metadata["forkRelease"]["signed"], False)
                 self.assertIs(metadata["forkRelease"]["notarized"], False)
                 self.assertEqual(metadata["forkRelease"]["bwrapSha256"], digest or None)
-                self.assertIn("same-build native voice helper", (package / "README.txt").read_text())
+                self.assertIn("input-verified native voice helper", (package / "README.txt").read_text())
                 self.assertTrue((package / "LICENSE").is_file())
 
     def test_rejects_mutated_bwrap_missing_zsh_voice_and_wrong_version(self) -> None:
@@ -165,6 +183,28 @@ class ReleasePackageTest(unittest.TestCase):
         helper = package / "codex-resources/voice/bin/codex-voice-host"
         helper.write_bytes(b"different helper build")
         with self.assertRaisesRegex(ValueError, "digest"):
+            release.finalize_package(package, VERSION, target, COMMIT, digest)
+
+    def test_reused_voice_keeps_original_stamp_and_requires_independent_input_proof(self) -> None:
+        target = release.TARGETS[0]
+        original_commit = "b" * 40
+        package, digest = self.make_package(target, original_commit)
+        release.finalize_package(package, VERSION, target, COMMIT, digest)
+        metadata = json.loads((package / "codex-package.json").read_text())
+        manifest = json.loads((package / "codex-resources/voice/manifest.json").read_text())
+        self.assertEqual(metadata["forkRelease"]["commit"], COMMIT)
+        self.assertEqual(metadata["forkRelease"]["voiceBuildCommit"], original_commit)
+        self.assertEqual(manifest["buildCommit"], COMMIT)
+        self.assertEqual(manifest["voiceBuildCommit"], original_commit)
+        proof_path = package / "codex-resources/voice/provenance.json"
+        proof = json.loads(proof_path.read_text())
+        proof["sourceFingerprint"] = "0" * 64
+        proof["inputFingerprint"] = cache.input_fingerprint(proof["sourceFingerprint"], proof["runnerImage"], proof["toolVersions"])
+        proof_path.write_text(json.dumps(proof))
+        manifest["voiceInputFingerprint"] = proof["inputFingerprint"]
+        manifest["sha256"]["codex-resources/voice/provenance.json"] = release.sha256(proof_path)
+        (package / "codex-resources/voice/manifest.json").write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "provenance"):
             release.finalize_package(package, VERSION, target, COMMIT, digest)
 
     def build_assets(self) -> Path:

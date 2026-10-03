@@ -276,6 +276,28 @@ class AssembleTests(unittest.TestCase):
                 )
                 self.assertEqual(manifest["appVersion"], version)
 
+    def test_release_reuse_retains_both_commits_and_rejects_relabeled_runtime(self):
+        target = "aarch64-unknown-linux-gnu"
+        runtime, _ = self.make_runtime(target)
+        staged = self.root / "staged"
+        stage(runtime, staged, target)
+        seal(staged, target)
+        version = "0.160.0-lean.1"
+        self.metadata["version"] = version
+        (self.package / "codex-package.json").write_text(json.dumps(self.metadata))
+        # Runtime was built from b, while the new app is built from a.
+        with self.assertRaisesRegex(ValueError, "voice build"):
+            assemble(self.package, self.helper, target, self.commit, self.output,
+                     runtime=staged, release_version=version)
+        self.assertFalse(self.output.exists())
+        assemble(self.package, self.helper, target, self.commit, self.output,
+                 runtime=staged, release_version=version, voice_build_commit="b" * 40)
+        manifest = json.loads((self.output / "codex-resources/voice/manifest.json").read_text())
+        self.assertEqual(manifest["buildCommit"], "a" * 40)
+        self.assertEqual(manifest["voiceBuildCommit"], "b" * 40)
+        self.assertEqual((self.output / "codex-resources/voice/bin/codex-voice-host").read_bytes(),
+                         self.helper.read_bytes())
+
     def test_rejects_noncanonical_lean_release_version(self):
         target = "aarch64-unknown-linux-gnu"
         runtime, _ = self.make_runtime(target)
@@ -526,6 +548,7 @@ class AssembleTests(unittest.TestCase):
             {
                 "schemaVersion": 1,
                 "buildCommit": self.commit,
+                "voiceBuildCommit": self.commit,
                 "appTarget": self.metadata["target"],
                 "voiceTarget": "aarch64-unknown-linux-gnu",
                 "appVersion": self.metadata["version"],
@@ -593,6 +616,7 @@ class AssembleTests(unittest.TestCase):
                     {
                         "schemaVersion": 1,
                         "buildCommit": self.commit,
+                        "voiceBuildCommit": self.commit,
                         "appTarget": target,
                         "voiceTarget": target,
                         "appVersion": self.metadata["version"],

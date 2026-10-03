@@ -23,6 +23,7 @@ def assemble(
     *,
     runtime: Path,
     release_version: str | None = None,
+    voice_build_commit: str | None = None,
 ):
     package, helper = package.resolve(strict=True), helper.resolve(strict=True)
     output = output.absolute()
@@ -36,6 +37,9 @@ def assemble(
         raise ValueError(
             "a full build commit is required; dev builds are not distributable"
         )
+    voice_build_commit = commit if voice_build_commit is None else voice_build_commit
+    if not re.fullmatch(r"[0-9a-f]{40}", voice_build_commit):
+        raise ValueError("a full voice build commit is required")
     metadata = json.loads((package / "codex-package.json").read_text())
     app_target = metadata["target"]
     targets = {
@@ -94,8 +98,8 @@ def assemble(
     )
     if release_version is not None:
         receipt = json.loads((runtime / "runtime.json").read_text(encoding="utf-8"))
-        if receipt["sourceCommit"] != commit:
-            raise ValueError("release runtime source does not match the app build")
+        if receipt["sourceCommit"] != voice_build_commit:
+            raise ValueError("release runtime source does not match the voice build")
     output.mkdir()  # Exclusive creation: never clean or overwrite a pre-existing output.
     try:
         shutil.copytree(package, output, dirs_exist_ok=True)
@@ -137,6 +141,7 @@ def assemble(
         manifest = {
             "schemaVersion": 1,
             "buildCommit": commit,
+            "voiceBuildCommit": voice_build_commit,
             "appTarget": app_target,
             "voiceTarget": voice_target,
             "appVersion": metadata["version"],
@@ -156,6 +161,7 @@ if __name__ == "__main__":
     parser.add_argument("--helper", type=Path, required=True)
     parser.add_argument("--voice-target", required=True)
     parser.add_argument("--build-commit", required=True)
+    parser.add_argument("--voice-build-commit", help="original verified native voice source commit")
     parser.add_argument(
         "--release-version", help="exact version of a public release package"
     )
@@ -175,4 +181,5 @@ if __name__ == "__main__":
         args.output,
         runtime=args.runtime,
         release_version=args.release_version,
+        voice_build_commit=args.voice_build_commit,
     )

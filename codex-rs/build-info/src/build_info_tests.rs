@@ -47,10 +47,11 @@ fn packaged_runtime_uses_manifest_version() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, None),
         BuildInfo {
             version: Version::parse("1.2.3-alpha.4").expect("valid release version"),
             build_commit: BUILD_COMMIT.to_string(),
+            voice_build_commit: None,
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -66,10 +67,11 @@ fn unpackaged_runtime_uses_build_commit() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, None),
         BuildInfo {
             version: Version::new(0, 0, 0),
             build_commit: BUILD_COMMIT.to_string(),
+            voice_build_commit: None,
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -93,10 +95,11 @@ fn legacy_package_without_version_uses_build_commit() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, None),
         BuildInfo {
             version: Version::new(0, 0, 0),
             build_commit: BUILD_COMMIT.to_string(),
+            voice_build_commit: None,
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -123,10 +126,11 @@ fn invalid_package_version_uses_build_commit() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, None),
         BuildInfo {
             version: Version::new(0, 0, 0),
             build_commit: BUILD_COMMIT.to_string(),
+            voice_build_commit: None,
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -138,6 +142,7 @@ fn build_info_serialization_preserves_build_provenance() {
     let build_info = BuildInfo {
         version: Version::parse("1.2.3-alpha.4").expect("valid release version"),
         build_commit: BUILD_COMMIT.to_string(),
+        voice_build_commit: None,
         target: Some("x86_64-pc-windows-msvc".to_string()),
     };
     let serialized = serde_json::json!({
@@ -165,7 +170,31 @@ fn historical_build_info_does_not_infer_the_current_target() {
         BuildInfo::from_version(BUILD_COMMIT),
     ] {
         assert_eq!(info.target(), None);
+        assert_eq!(info.voice_build_commit(), info.build_commit());
     }
+}
+
+#[test]
+fn reused_voice_preserves_both_build_stamps() {
+    let context = InstallContext::from_exe(
+        cfg!(target_os = "macos"),
+        /*current_exe*/ None,
+        /*method_override*/ None,
+    );
+    let voice_commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let same_build = BuildInfo::resolve(&context, BUILD_COMMIT, None);
+    assert_eq!(same_build.voice_build_commit(), BUILD_COMMIT);
+    let reused = BuildInfo::resolve(&context, BUILD_COMMIT, Some(voice_commit));
+    assert_eq!(reused.build_commit(), BUILD_COMMIT);
+    assert_eq!(reused.voice_build_commit(), voice_commit);
+    assert_eq!(reused.display_version(), same_build.display_version());
+    let serialized = serde_json::to_value(&reused).expect("serialize reused voice provenance");
+    assert_eq!(serialized["voice_build_commit"], voice_commit);
+    assert_eq!(
+        serde_json::from_value::<BuildInfo>(serialized)
+            .expect("deserialize reused voice provenance"),
+        reused,
+    );
 }
 
 #[test]

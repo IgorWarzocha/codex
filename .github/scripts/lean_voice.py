@@ -1,9 +1,11 @@
-"""Require same-build public voice resources and exercise the installed runtime."""
+"""Require verified compatible public voice resources and exercise the installed runtime."""
 
+import argparse
 import concurrent.futures
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -19,6 +21,7 @@ sys.path.insert(0, str(REPO_ROOT / "third_party/voice"))
 from assemble_package import assemble
 from package_runtime import runtime_files
 from runtime import digest
+import lean_voice_cache as cache
 
 
 def voice_target(target: str) -> str:
@@ -42,17 +45,50 @@ def extract_archive(archive: Path, output: Path) -> None:
             source.extractall(output, filter="data")
 
 
+def verify_artifact(directory: Path, target: str, output: Path, *, root: Path = REPO_ROOT,
+                    current_image: bool = True) -> dict:
+    proof = directory / f"lean-voice-{target}.provenance.json"
+    archive = directory / f"lean-voice-{target}.tar.gz"
+    if ({path.name for path in directory.iterdir()} != {proof.name, archive.name}
+            or proof.is_symlink() or not proof.is_file()):
+        raise ValueError("voice artifact must contain exactly a regular archive and provenance")
+    provenance = json.loads(proof.read_text(encoding="utf-8"))
+    cache.validate_provenance(provenance, target, root=root, current_image=current_image)
+    if archive.is_symlink() or digest(archive) != provenance["archiveSha256"]:
+        raise ValueError("voice archive digest mismatch")
+    output.mkdir()  # Never mix old and new extraction trees.
+    extract_archive(archive, output)
+    suffix = ".exe" if target.endswith("-windows-msvc") else ""
+    helper = output / f"codex-voice-host{suffix}"
+    cache.validate_payload(helper, output / "runtime", provenance, target)
+    expected = {f"codex-voice-host{suffix}", *(f"runtime/{name}" for name in provenance["runtimeSha256"])}
+    if set(cache.inventory(output)) != expected:
+        raise ValueError("voice archive has unexpected files")
+    return provenance
+
+
 def add_voice(package: Path, target: str, version: str, commit: str) -> Path:
     native_target = voice_target(target)
     archive = REPO_ROOT / "lean-voice-artifact" / f"lean-voice-{native_target}.tar.gz"
     staged = REPO_ROOT / "lean-voice-input" / native_target
-    staged.mkdir(parents=True)
-    extract_archive(archive, staged)
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    provenance = verify_artifact(archive.parent, native_target, staged)
+    voice_commit = provenance["sourceCommit"]
+    if os.environ.get("CODEX_VOICE_BUILD_COMMIT") != voice_commit:
+        raise ValueError("compiled app voice commit differs from verified artifact")
     suffix = ".exe" if target.endswith("-windows-msvc") else ""
     output = REPO_ROOT / "lean-voice-package" / target
     output.parent.mkdir(exist_ok=True)
     assemble(package, staged / f"codex-voice-host{suffix}", native_target, commit, output,
-             runtime=staged / "runtime", release_version=version)
+             runtime=staged / "runtime", release_version=version, voice_build_commit=voice_commit)
+    voice = output / "codex-resources/voice"
+    proof = voice / "provenance.json"
+    proof.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+    manifest_path = voice / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["voiceInputFingerprint"] = provenance["inputFingerprint"]
+    manifest["sha256"]["codex-resources/voice/provenance.json"] = digest(proof)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return output
 
 
@@ -61,14 +97,19 @@ def validate_voice(package: Path, target: str, version: str, commit: str) -> Non
     files = runtime_files(voice.resolve(strict=True), voice_target(target), public_release=True)
     receipt = json.loads((voice / "runtime.json").read_text(encoding="utf-8"))
     manifest = json.loads((voice / "manifest.json").read_text(encoding="utf-8"))
-    if (receipt["sourceCommit"] != commit or manifest["schemaVersion"] != 1
+    provenance = json.loads((voice / "provenance.json").read_text(encoding="utf-8"))
+    voice_commit = cache.validate_provenance(provenance, voice_target(target))
+    if (receipt["sourceCommit"] != voice_commit or manifest["schemaVersion"] != 1
             or manifest["buildCommit"] != commit or manifest["appVersion"] != version
+            or manifest.get("voiceBuildCommit") != voice_commit
+            or manifest.get("voiceInputFingerprint") != provenance["inputFingerprint"]
             or manifest["appTarget"] != target or manifest["voiceTarget"] != voice_target(target)):
-        raise ValueError("Voice runtime and helper must match the app's release commit, version and target")
+        raise ValueError("Voice commit, input provenance, app version or target mismatch")
     suffix = ".exe" if target.endswith("-windows-msvc") else ""
     helper = f"codex-resources/voice/bin/codex-voice-host{suffix}"
+    cache.validate_payload(package / helper, voice, provenance, voice_target(target), packaged=True)
     required = {f"bin/codex{suffix}", helper, *(f"codex-resources/voice/{name}" for name in files)}
-    required.update(f"codex-resources/voice/{name}" for name in ("NOTICE.md", "sources.json", "licenses/LGPL-2.1.txt"))
+    required.update(f"codex-resources/voice/{name}" for name in ("NOTICE.md", "sources.json", "licenses/LGPL-2.1.txt", "provenance.json"))
     if suffix:
         required.update(("codex-resources/voice/bin/vcruntime140.dll", "codex-resources/voice/windows-crt.json",
                          "codex-resources/voice/bin/gstreamer-1.0-0.dll"))
@@ -153,3 +194,48 @@ def smoke_voice(package: Path, target: str, commit: str) -> None:
                 process.stdin.close()
             if process.stdout is not None:
                 process.stdout.close()
+
+
+def native_smoke(staged: Path, target: str, commit: str) -> None:
+    """Use the helper's physical private-package layout, including Windows CRT DLLs."""
+    with tempfile.TemporaryDirectory(prefix="lean-voice-smoke-") as temporary:
+        package = Path(temporary)
+        voice = package / "codex-resources/voice"
+        shutil.copytree(staged / "runtime", voice)
+        suffix = ".exe" if target.endswith("-windows-msvc") else ""
+        (voice / "bin").mkdir(exist_ok=True)
+        shutil.copy2(staged / f"codex-voice-host{suffix}", voice / "bin" / f"codex-voice-host{suffix}")
+        smoke_voice(package, target, commit)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("identity", "seal", "verify"))
+    parser.add_argument("--target", default=os.environ.get("VOICE_TARGET") or os.environ.get("TARGET"))
+    parser.add_argument("--directory", type=Path, default=REPO_ROOT / "lean-voice-cache")
+    parser.add_argument("--staged", type=Path)
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--export-env", action="store_true")
+    args = parser.parse_args()
+    if args.command == "identity":
+        fingerprint = cache.input_fingerprint(cache.source_fingerprint(REPO_ROOT, args.target),
+                                              cache.image_identity(), cache.tool_identity())
+        print(f"key=lean-voice-v{cache.SCHEMA}-{args.target}-{fingerprint}")
+    elif args.command == "seal":
+        if args.staged is None:
+            parser.error("seal requires --staged")
+        cache.seal_artifact(args.directory, args.staged, args.target, os.environ["STABLE_GIT_COMMIT"])
+    else:
+        with tempfile.TemporaryDirectory(prefix="lean-voice-verify-") as temporary:
+            staged = Path(temporary) / "payload"
+            provenance = verify_artifact(args.directory, args.target, staged)
+            # Export only a stamp proven by the executable, before Cargo embeds it.
+            if args.smoke or args.export_env:
+                native_smoke(staged, args.target, provenance["sourceCommit"])
+            if args.export_env:
+                with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env:
+                    env.write(f"CODEX_VOICE_BUILD_COMMIT={provenance['sourceCommit']}\n")
+
+
+if __name__ == "__main__":
+    main()

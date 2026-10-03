@@ -58,6 +58,7 @@ jobs:
       - name: Test release contracts
         run: |
           python -m unittest discover -s .github/scripts -p test_lean_release.py -v
+          python -m unittest discover -s .github/scripts -p test_lean_voice_cache.py -v
           python -m unittest discover -s third_party/voice -p test_assemble_package.py -v
           python -m unittest discover -s third_party/voice -p test_build_native.py -v
           python -m unittest discover -s third_party/voice -p test_bazel_windows.py -v
@@ -84,15 +85,27 @@ jobs:
       - name: Enable long Windows source paths
         if: runner.os == 'Windows'
         shell: pwsh
-        run: git config --global core.longpaths true
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
+      - name: Calculate exact native inputs from this checkout and runner image
+        id: voice-identity
+        run: python .github/scripts/lean_voice.py identity >> "$GITHUB_OUTPUT"
+      - name: Restore only the exact sealed native voice artifact
+        id: voice-cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: lean-voice-cache
+          key: ${{ steps.voice-identity.outputs.key }}
+          # No restore-keys. Incompatible native bytes are never a fallback.
       - name: Reclaim unused SDK space on disposable Linux runners
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.voice-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
@@ -108,16 +121,17 @@ jobs:
           df -h .
           if [[ "$TARGET" == *-linux-gnu ]]; then free -h; fi
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        if: steps.voice-cache.outputs.cache-hit != 'true'
         with:
           bazelisk-version: 1.28.1
           # Keep Windows paths short without Hyper-V or a provisioned Dev Drive.
           output-base: ${{ runner.temp }}/lean-bazel
       - uses: ./.github/actions/setup-msvc-env
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.voice-cache.outputs.cache-hit != 'true'
         with:
           target: ${{ matrix.target }}
       - name: Download and verify public pinned Windows build inputs
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.voice-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -139,6 +153,7 @@ jobs:
           "VOICE_WINDOWS_SYSTEM_ROOT=$env:SystemRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "VOICE_WINDOWS_HOST_ARCH=$env:PROCESSOR_ARCHITECTURE" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build same-commit native helper and private audio runtime
+        if: steps.voice-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           args=(--jobs="$BAZEL_BUILD_JOBS" --local_resources="cpu=$BAZEL_BUILD_JOBS" --disk_cache= --remote_cache= --remote_executor=)
@@ -165,6 +180,7 @@ jobs:
           bazel --host_jvm_args=-Xmx2g build -c opt "${args[@]}" \
             //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
       - name: Stage and seal the matching runtime
+        if: steps.voice-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           runtime="bazel-bin/third_party/voice/native_runtime_$VOICE_PREFIX"
@@ -188,11 +204,24 @@ jobs:
               --target "$TARGET" --helper "$output/codex-voice-host.exe"
           fi
           python third_party/voice/release_runtime.py seal --target "$TARGET" --output "$output/runtime"
-          tar -C "$output" -czf "lean-voice-$TARGET.tar.gz" runtime "codex-voice-host$suffix"
+          mkdir lean-voice-cache
+          tar -C "$output" -czf "lean-voice-cache/lean-voice-$TARGET.tar.gz" runtime "codex-voice-host$suffix"
+          python .github/scripts/lean_voice.py seal --staged "$output"
+      - name: Verify native provenance, bytes, build stamp and private runtime initialization
+        run: python .github/scripts/lean_voice.py verify --smoke
+      - name: Save immutable voice bytes only after native validation
+        if: >-
+          steps.voice-cache.outputs.cache-hit != 'true' &&
+          github.repository == 'IgorWarzocha/codex-lean' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: lean-voice-cache
+          key: ${{ steps.voice-identity.outputs.key }}
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: lean-voice-${{ matrix.target }}
-          path: lean-voice-${{ matrix.target }}.tar.gz
+          path: lean-voice-cache/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -240,17 +269,27 @@ jobs:
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: "off"
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       RUST_MIN_STACK: "8388608"
+      # Set native flags before cache identity is captured, not inside Cargo steps.
+      LIBSQLITE3_FLAGS: ${{ contains(matrix.target, 'windows-msvc') && 'SQLITE_DISABLE_INTRINSIC' || '' }}
     steps:
       - name: Enable long Windows source paths
         if: runner.os == 'Windows'
         shell: pwsh
-        run: git config --global core.longpaths true
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: lean-voice-${{ matrix.voice_target }}
+          path: lean-voice-artifact
+      - name: Verify native inputs and export original voice stamp before any Cargo compilation
+        run: python .github/scripts/lean_voice.py verify --directory lean-voice-artifact --export-env
       - name: Verify native runner and report disk budget
         run: |
           set -euo pipefail
@@ -274,6 +313,8 @@ jobs:
         with:
           version: 0.14.0
           use-cache: false
+          # Keep wrapper/sysroot paths stable across jobs. No GitHub Zig cache.
+          use-tool-cache: true
       - name: Install musl build tools
         if: runner.os == 'Linux'
         run: |
@@ -287,6 +328,56 @@ jobs:
       - uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
+      - name: Identify native compilers, runner image and Cargo profiles
+        id: rust-cache-identity
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          commands = {
+              "Linux": [["dpkg-query", "-W", "-f=${Package}=${Version}\n"], ["zig", "version"]],
+              "macOS": [["xcrun", "clang", "--version"], ["xcrun", "--show-sdk-version"],
+                        ["xcodebuild", "-version"]],
+              "Windows": [["pwsh", "-NoProfile", "-Command",
+                           "(Get-Item (Get-Command cl.exe -ErrorAction Stop).Source).VersionInfo.FileVersion"]],
+          }[os.environ["RUNNER_OS"]]
+          tools = [subprocess.check_output(command, text=True).strip() for command in commands]
+          image = {name: os.environ[name] for name in ("ImageOS", "ImageVersion")}
+          if not all(image.values()):
+              raise ValueError("Rust dependency cache requires the hosted runner image identity")
+          manifest = tomllib.loads(Path("codex-rs/Cargo.toml").read_text(encoding="utf-8"))
+          # Profiles belong in the restore prefix too. Workspace version does not.
+          identity = {"tools": tools, "image": image, "profiles": manifest["profile"]}
+          digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"native={digest}\n")
+          PY
+      - name: Restore compiled third-party Rust dependencies and Cargo downloads
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: codex-rs -> target
+          # Keep recipe/native settings in the prefix: the action may restore
+          # older manifest/lock hashes only within this compiler/environment key.
+          key: ${{ matrix.target }}-release-${{ steps.rust-cache-identity.outputs.native }}-${{ hashFiles('.github/workflows/lean-release.yml', '.github/scripts/install-musl-*.sh', '.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/rusty_v8_bazel.py', 'third_party/v8/*release_manifests.sha256', 'codex-rs/.cargo/config.toml', 'codex-rs/rust-toolchain.toml') }}
+          # These are additional prefixes. The action always includes CARGO,
+          # CC, CFLAGS, CXX, CMAKE and RUST. Deliberately omit app/voice commits.
+          env-vars: ImageOS ImageVersion AWS_LC_SYS BORING_BSSL PKG_CONFIG OPENSSL X86_64_ AARCH64_ TARGET_ AR LD INCLUDE LIB UCRT UniversalCRTSdk VC WindowsSdk WindowsSDK WindowsLibPath SDKROOT DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET
+          cache-targets: "true"
+          cache-workspace-crates: "false"
+          cache-all-crates: "false"
+          cache-bin: "false"
+          # Default post-job save requires the complete package job to succeed.
+          cache-on-failure: "false"
+          save-if: ${{ github.repository == 'IgorWarzocha/codex-lean' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+      - name: Verify cache metadata preserved the locked dependency graph
+        # The action invokes cargo metadata without --locked during restore.
+        run: git diff --exit-code -- codex-rs/Cargo.lock
       - name: Finalize bwrap before compiling Codex
         if: runner.os == 'Linux'
         working-directory: codex-rs
@@ -303,15 +394,10 @@ jobs:
           set -euo pipefail
           args=(--bin codex --bin codex-code-mode-host)
           if [[ "$TARGET" == *-windows-msvc ]]; then
-            export LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC
             args+=(--bin codex-command-runner --bin codex-windows-sandbox-setup)
           fi
           # Never rebuild or mutate bwrap after exporting its embedded digest.
           cargo build --locked --release --target "$TARGET" --timings "${args[@]}"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: lean-voice-${{ matrix.voice_target }}
-          path: lean-voice-artifact
       - name: Assemble, smoke-test voice and checksum complete package
         env:
           RELEASE_COMMIT: ${{ needs.check.outputs.commit }}

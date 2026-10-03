@@ -30,7 +30,10 @@ pub fn is_fork_version(version: &str) -> bool {
 #[macro_export]
 macro_rules! initialize {
     () => {
-        $crate::BuildInfo::initialize(option_env!("STABLE_GIT_COMMIT").unwrap_or("dev"));
+        $crate::BuildInfo::initialize_with_voice_commit(
+            option_env!("STABLE_GIT_COMMIT").unwrap_or("dev"),
+            option_env!("CODEX_VOICE_BUILD_COMMIT"),
+        );
     };
 }
 
@@ -40,6 +43,8 @@ pub struct BuildInfo {
     version: Version,
     build_commit: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    voice_build_commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     target: Option<String>,
 }
 
@@ -47,7 +52,7 @@ impl BuildInfo {
     /// Return build information for the current Codex runtime.
     pub fn get() -> Self {
         BUILD_INFO
-            .get_or_init(|| Self::resolve(InstallContext::current(), "dev"))
+            .get_or_init(|| Self::resolve(InstallContext::current(), "dev", None))
             .clone()
     }
 
@@ -57,7 +62,19 @@ impl BuildInfo {
     /// invalidating the shared Rust library graph.
     #[doc(hidden)]
     pub fn initialize(build_commit: &'static str) {
-        let _ = BUILD_INFO.get_or_init(|| Self::resolve(InstallContext::current(), build_commit));
+        Self::initialize_with_voice_commit(build_commit, None);
+    }
+
+    /// Initialize with the original voice build's stamp when CI reuses verified voice inputs.
+    /// Both stamps belong in the final executable, never in mutable package metadata.
+    #[doc(hidden)]
+    pub fn initialize_with_voice_commit(
+        build_commit: &'static str,
+        voice_build_commit: Option<&'static str>,
+    ) {
+        let _ = BUILD_INFO.get_or_init(|| {
+            Self::resolve(InstallContext::current(), build_commit, voice_build_commit)
+        });
     }
 
     /// Recover structured release information from a persisted version string.
@@ -74,11 +91,13 @@ impl BuildInfo {
                     "unknown".to_string()
                 },
                 version: parsed_version,
+                voice_build_commit: None,
                 target: None,
             },
             Err(_) => Self {
                 version: Version::new(0, 0, 0),
                 build_commit: version,
+                voice_build_commit: None,
                 target: None,
             },
         }
@@ -110,16 +129,28 @@ impl BuildInfo {
         &self.build_commit
     }
 
+    /// Return the verified voice helper's original commit, or the app commit for same-build voice.
+    pub fn voice_build_commit(&self) -> &str {
+        self.voice_build_commit
+            .as_deref()
+            .unwrap_or(&self.build_commit)
+    }
+
     /// Return the compiler target triple, or `None` for historical metadata without a target.
     pub fn target(&self) -> Option<&str> {
         self.target.as_deref()
     }
 
-    fn resolve(install_context: &InstallContext, build_commit: &'static str) -> Self {
+    fn resolve(
+        install_context: &InstallContext,
+        build_commit: &'static str,
+        voice_build_commit: Option<&'static str>,
+    ) -> Self {
         if let Some(manifest) = install_context.package_manifest() {
             return Self {
                 version: manifest.version,
                 build_commit: build_commit.to_owned(),
+                voice_build_commit: voice_build_commit.map(str::to_owned),
                 target: Some(env!("CODEX_BUILD_TARGET").to_owned()),
             };
         }
@@ -127,6 +158,7 @@ impl BuildInfo {
         Self {
             version: Version::new(0, 0, 0),
             build_commit: build_commit.to_owned(),
+            voice_build_commit: voice_build_commit.map(str::to_owned),
             target: Some(env!("CODEX_BUILD_TARGET").to_owned()),
         }
     }

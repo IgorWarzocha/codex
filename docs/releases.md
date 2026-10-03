@@ -46,7 +46,7 @@ gh workflow run lean-release.yml --repo IgorWarzocha/codex-lean --ref lean -f sc
 
 This diagnostic scope produces only the intermediate Windows voice artifact. It
 does not build CLI packages and cannot publish a release. After it passes, use the
-default `all` scope to build and validate all complete packages from one commit.
+default `all` scope to build and validate all complete packages for the release commit.
 Rerunning an old job does not pick up a source fix; dispatch on the updated branch.
 
 A matching `lean-v<VERSION>` tag can also start a release. Tag and workspace
@@ -57,6 +57,43 @@ The workflow uses public GitHub-hosted runners and pinned build actions. Build
 jobs have read-only repository access. Only the publication job can write release
 assets. It does not publish to OpenAI's package registries or use OpenAI signing
 credentials.
+
+## Reusing build outputs
+
+Rust package jobs cache downloaded crates and compiled third-party dependencies.
+Caches are separated by target, compiler, build settings and native toolchain
+inputs. Cargo still runs with `--locked` and checks dependency fingerprints before
+reusing compiled outputs. A changed lockfile can reuse compatible dependencies
+from an earlier cache without accepting stale release binaries.
+
+Workspace crates and final executables are not retained in this dependency cache.
+The CLI and package helpers rebuild from the release checkout, with the current
+app and verified voice stamps. Release optimization, packaging and smoke checks
+are unchanged. Cache misses use the normal build path.
+
+The first successful run seeds the cache. Dispatch on the default `lean` branch
+to make caches available to later tag runs. GitHub scopes caches written by tag
+runs to that tag, so different tags cannot reuse each other's entries.
+
+### Native voice
+
+The workflow reuses a sealed voice helper and audio runtime only when its exact
+build-input cache key matches. Each platform has its own key. The key covers voice
+sources and their local dependencies, the shared voice protocol, Cargo manifests
+and lockfile, native runtime inputs, Bazel configuration and patches, build recipe,
+and runner image. CLI-only and bundled-skill source changes do not invalidate it.
+Workspace version changes do invalidate it because those versions are compiler
+inputs.
+
+A cache hit skips native compilation, not validation. The workflow checks the
+artifact's provenance and digests, embeds the original voice commit into the new
+CLI, and runs the packaged voice handshake and runtime smoke checks. The release
+records separate app and voice commits. Reused binaries are never relabeled as
+new builds. Any platform failure still blocks publication.
+
+The first run with caching enabled builds and seeds the cache. An absent or evicted
+cache entry triggers a rebuild. Earlier workflow runs do not populate this cache.
+An invalid restored artifact fails validation rather than silently shipping it.
 
 ## Package contents and boundaries
 

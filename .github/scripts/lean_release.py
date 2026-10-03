@@ -119,16 +119,20 @@ def finalize_package(package: Path, version: str, target: str, commit: str, bwra
     if metadata["version"] != version:
         raise ValueError("Package version does not match release version")
     validate_voice(package, target, version, commit)
+    voice_manifest = json.loads((package / "codex-resources/voice/manifest.json").read_text(encoding="utf-8"))
     metadata["forkRelease"] = {
         "repository": REPOSITORY, "commit": commit, "tag": f"lean-v{version}",
         "voiceBundled": True, "signed": False, "notarized": False,
+        "voiceBuildCommit": voice_manifest["voiceBuildCommit"],
+        "voiceInputFingerprint": voice_manifest["voiceInputFingerprint"],
         "zshBundled": not spec.is_windows,
         "bwrapSha256": bwrap_digest if spec.is_linux else None,
     }
     write_json(metadata_path, metadata)
     (package / "README.txt").write_text(
         f"Codex Lean {version}\nSource commit: {commit}\nTarget: {target}\n\n"
-        "Includes the same-build native voice helper and private GStreamer audio runtime.\n"
+        f"Voice source commit: {voice_manifest['voiceBuildCommit']}\n"
+        "Includes the input-verified native voice helper and private GStreamer audio runtime.\n"
         "Linux CLI uses musl. Native voice requires glibc 2.28 or newer.\n"
         "macOS and Windows executables are unsigned. macOS is not notarized.\n"
         "Keep bin, codex-resources and codex-path together. Add bin to PATH.\n"
@@ -170,7 +174,7 @@ def package() -> None:
         subprocess.run([str(package_dir / "codex-resources/zsh/bin/zsh"), "--version"], check=True, timeout=60)
     if spec.is_linux:
         subprocess.run([str(package_dir / "codex-resources/bwrap"), "--version"], check=True, timeout=60)
-    smoke_voice(package_dir, target, commit)
+    smoke_voice(package_dir, target, os.environ["CODEX_VOICE_BUILD_COMMIT"])
     output_dir = REPO_ROOT / "lean-dist"
     output_dir.mkdir(exist_ok=True)
     output = output_dir / archive_name(version, target)
@@ -217,6 +221,10 @@ def verify_assets(directory: Path, version: str, commit: str) -> str:
             validate_package_dir(package, PACKAGE_VARIANTS["codex"], TARGET_SPECS[target],
                                  include_zsh=not TARGET_SPECS[target].is_windows)
             validate_voice(package, target, version, commit)
+            voice_manifest = json.loads((package / "codex-resources/voice/manifest.json").read_text(encoding="utf-8"))
+            if (release.get("voiceBuildCommit") != voice_manifest["voiceBuildCommit"]
+                    or release.get("voiceInputFingerprint") != voice_manifest["voiceInputFingerprint"]):
+                raise ValueError(f"Release voice provenance mismatch: {name}")
             if TARGET_SPECS[target].is_linux and sha256(package / "codex-resources/bwrap") != release["bwrapSha256"]:
                 raise ValueError(f"Release bwrap digest mismatch: {name}")
         checksums.append(checksum)
@@ -230,7 +238,7 @@ def verify() -> None:
     (directory / "SHA256SUMS").write_text(checksums, encoding="utf-8")
     (REPO_ROOT / "lean-release-notes.md").write_text(
         f"Codex Lean {version}, built from `{commit}`.\n\n"
-        "All four packages include the same-build native voice helper and privately bundled "
+        "All four packages include an input-verified native voice helper and privately bundled "
         "GStreamer audio runtime. CI verifies runtime initialization and plugin loading "
         "without opening audio devices. Live microphone and speaker validation is separate.\n\n"
         "Linux x64 and ARM64 CLIs use musl. Their native voice runtime requires glibc 2.28 "
@@ -240,7 +248,9 @@ def verify() -> None:
         "Patched zsh is included on Linux and macOS, not Windows. Keep the extracted "
         "directories together and add `bin` to PATH.\n\n"
         "Verify downloads with `SHA256SUMS` or the per-archive `.sha256` files. "
-        "The package and voice manifests record the exact source commit and file hashes.\n",
+        "The package and voice manifests record app and original voice source commits, "
+        "the exact native input fingerprint and file hashes. Unchanged native voice inputs "
+        "may reuse a validated helper from an earlier commit.\n",
         encoding="utf-8",
     )
 

@@ -60,7 +60,11 @@ impl Drop for Package {
 pub fn package(test: &str) -> Result<Option<PathBuf>> {
     let source = std::env::current_exe()?;
     if source.file_name().is_some_and(|name| name == APP) {
-        codex_build_info::BuildInfo::initialize(BUILD_COMMIT);
+        // Reused voice retains its original stamp even when the CLI comes from a new commit.
+        codex_build_info::BuildInfo::initialize_with_voice_commit(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some(BUILD_COMMIT),
+        );
         return Ok(Some(
             source
                 .parent()

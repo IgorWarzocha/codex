@@ -102,7 +102,9 @@ impl RealtimeWebrtcSession {
             .package_layout
             .clone()
             .ok_or_else(|| anyhow::anyhow!("voice package unavailable"))?;
-        let build_commit = codex_build_info::BuildInfo::get().build_commit().to_owned();
+        let build_commit = codex_build_info::BuildInfo::get()
+            .voice_build_commit()
+            .to_owned();
         let (sender, receiver) = mpsc::channel(/*buffer*/ 8);
         let (offer, result) = blocking::sync_channel(/*bound*/ 1);
         let (stop, stopped) = AbortHandle::new_pair();
