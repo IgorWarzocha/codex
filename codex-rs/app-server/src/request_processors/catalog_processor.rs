@@ -386,12 +386,15 @@ impl CatalogRequestProcessor {
                         Some(menu_description.to_string()),
                         Some(announcement.to_string()),
                     ),
-                    Stage::UnderDevelopment => (
-                        ApiExperimentalFeatureStage::UnderDevelopment,
-                        None,
-                        None,
-                        None,
-                    ),
+                    Stage::UnderDevelopment => {
+                        let metadata = spec.id.menu_metadata();
+                        (
+                            ApiExperimentalFeatureStage::UnderDevelopment,
+                            metadata.map(|(name, _)| name.to_string()),
+                            metadata.map(|(_, description)| description.to_string()),
+                            None,
+                        )
+                    }
                     Stage::Stable => (ApiExperimentalFeatureStage::Stable, None, None, None),
                     Stage::Deprecated => {
                         (ApiExperimentalFeatureStage::Deprecated, None, None, None)

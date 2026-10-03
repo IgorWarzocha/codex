@@ -23,25 +23,10 @@ pub(super) fn apply_context_strategy(
         ));
     }
 
-    // ManagedFeatures can normalize a requested mutation back to a pinned value.
-    // Check the result and commit atomically only after both restrictions agree.
-    let mut features = config.features.clone();
-    for feature in [Feature::ContextManagement, Feature::TokenBudget] {
-        features
-            .set_enabled(feature, notes)
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
-        if features.enabled(feature) != notes {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "context_strategy = '{}' conflicts with managed requirement features.{} = {}. Change the context strategy or contact your administrator.",
-                    if notes { "notes" } else { "compaction" },
-                    feature.key(),
-                    features.enabled(feature),
-                ),
-            ));
-        }
-    }
+    // Settings persistence shares this policy check without requiring session auth.
+    let features = config
+        .features
+        .with_context_strategy(config.context_strategy)?;
 
     let mut token_budget = config.token_budget.clone();
     if notes && token_budget.is_none() {

@@ -32,23 +32,42 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_realtime_settings(&mut self) {
+        use codex_config::cli_settings::CliSetting;
+        let mut items = vec![
+            SelectionItem {
+                name: "Set sound devices".to_string(),
+                actions: vec![Box::new(|tx| tx.send(AppEvent::OpenRealtimeSoundDevices))],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: "Choose a voice".to_string(),
+                actions: vec![Box::new(|tx| tx.send(AppEvent::OpenRealtimeVoices))],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+        ];
+        items.extend(
+            [
+                CliSetting::Screenless,
+                CliSetting::Acknowledgements,
+                CliSetting::AutoResume,
+                CliSetting::VoiceRefresh,
+            ]
+            .into_iter()
+            .map(|setting| SelectionItem {
+                name: setting.title().into(),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::OpenCliSetting(setting))
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            }),
+        );
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Voice settings".to_string()),
             subtitle: Some("Communication style: codex_personality.md in your Codex home.".into()),
-            items: vec![
-                SelectionItem {
-                    name: "Set sound devices".to_string(),
-                    actions: vec![Box::new(|tx| tx.send(AppEvent::OpenRealtimeSoundDevices))],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                },
-                SelectionItem {
-                    name: "Choose a voice".to_string(),
-                    actions: vec![Box::new(|tx| tx.send(AppEvent::OpenRealtimeVoices))],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                },
-            ],
+            items,
             footer_hint: Some(standard_popup_hint_line()),
             ..SelectionViewParams::picker()
         });

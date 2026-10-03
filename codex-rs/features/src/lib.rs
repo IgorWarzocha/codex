@@ -475,6 +475,57 @@ impl Feature {
         self.info().default_enabled
     }
 
+    /// Public menu metadata is opt-in, independent of lifecycle stage.
+    /// Internal experiments, removed flags and desktop-only plumbing stay hidden.
+    pub fn menu_metadata(self) -> Option<(&'static str, &'static str)> {
+        if let Stage::Experimental {
+            name,
+            menu_description,
+            ..
+        } = self.stage()
+        {
+            return Some((name, menu_description));
+        }
+        if self.stage() != Stage::UnderDevelopment {
+            return None;
+        }
+        Some(match self {
+            Self::CodeMode => (
+                "Code Mode",
+                "New threads. Runtime is selected in /settings. Notebook requires local full-access permissions and Deno; enabling never changes permissions.",
+            ),
+            Self::CodeModePrewarm => (
+                "Code Mode prewarming",
+                "New threads. Warm the configured worker before first use. Notebook validates permissions and only prewarms an existing Deno runtime.",
+            ),
+            Self::MultiAgentV2DynamicTools => (
+                "Subagent client tools",
+                "New threads. V2 children inherit client-defined dynamic tools. Requires multi-agent V2 and client-provided tools.",
+            ),
+            Self::AgentMessageBoard => (
+                "Agent message board",
+                "New threads. Shared coordination tools for V2 agents. Requires supported session storage; ephemeral sessions need an in-memory or remote board.",
+            ),
+            Self::DefaultModeRequestUserInput => (
+                "Structured questions",
+                "New threads. Allow structured user questions outside Plan mode. The client must support question forms.",
+            ),
+            Self::ApplyPatchPreserveLineEndings => (
+                "Preserve patch line endings",
+                "New threads. Preserve existing line endings when applying patches.",
+            ),
+            Self::ApplyPatchStreamingEvents => (
+                "Streaming patch progress",
+                "New threads. Show intermediate patch events on clients that support them.",
+            ),
+            Self::RuntimeMetrics => (
+                "Runtime metrics",
+                "New threads. Collect additional runtime metrics for diagnostics.",
+            ),
+            _ => return None,
+        })
+    }
+
     fn info(self) -> &'static FeatureSpec {
         FEATURES
             .iter()

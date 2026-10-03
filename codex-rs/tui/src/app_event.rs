@@ -1401,6 +1401,20 @@ pub(crate) enum AppEvent {
     /// Update the current approvals reviewer in the running app and widget.
     UpdateApprovalsReviewer(ApprovalsReviewer),
 
+    OpenSettings,
+    OpenExperimentalSettings,
+    OpenCliSetting(codex_config::cli_settings::CliSetting),
+    CliSettingDiscovered {
+        request_id: uuid::Uuid,
+        setting: codex_config::cli_settings::CliSetting,
+        cwd: String,
+        result: Result<String, String>,
+    },
+    PersistCliSetting {
+        setting: codex_config::cli_settings::CliSetting,
+        choice: String,
+        cwd: String,
+    },
     /// Discover experimental features for the requesting popup only.
     FetchExperimentalFeatures {
         thread_id: ThreadId,

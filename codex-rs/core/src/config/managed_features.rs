@@ -7,6 +7,7 @@ use codex_config::ConstraintResult;
 use codex_config::FeatureRequirementsToml;
 use codex_config::RequirementSource;
 use codex_config::Sourced;
+use codex_config::types::ContextStrategy;
 
 use codex_config::config_toml::ConfigToml;
 use codex_features::Feature;
@@ -90,6 +91,31 @@ impl ManagedFeatures {
 
     pub fn get(&self) -> &Features {
         self.value.get()
+    }
+
+    /// Policy-only continuity validation. Storage authentication and runtime startup
+    /// remain session responsibilities, so settings can be repaired before a thread starts.
+    pub(crate) fn with_context_strategy(&self, strategy: ContextStrategy) -> std::io::Result<Self> {
+        let notes = strategy == ContextStrategy::Notes;
+        let mut features = self.clone();
+        for feature in [Feature::ContextManagement, Feature::TokenBudget] {
+            features
+                .set_enabled(feature, notes)
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+            // ManagedFeatures normalizes requested mutations back to pinned values.
+            if features.enabled(feature) != notes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "context_strategy = '{}' conflicts with managed requirement features.{} = {}. Change the context strategy or contact your administrator.",
+                        if notes { "notes" } else { "compaction" },
+                        feature.key(),
+                        features.enabled(feature),
+                    ),
+                ));
+            }
+        }
+        Ok(features)
     }
 
     fn normalize_and_validate(&self, candidate: Features) -> ConstraintResult<Features> {
@@ -300,7 +326,7 @@ fn explicit_feature_settings_in_config(cfg: &ConfigToml) -> Vec<(String, Feature
         for (key, enabled) in features.entries() {
             if let Some(feature) = feature_for_key(&key) {
                 // These legacy activation flags no longer select context policy.
-                // Startup validates the authoritative strategy against managed pins.
+                // Strategy policy is validated separately against managed pins.
                 if matches!(feature, Feature::TokenBudget | Feature::ContextManagement) {
                     continue;
                 }
@@ -372,5 +398,10 @@ pub(crate) fn validate_feature_requirements_in_config_toml(
         FeatureConfigSource::default(),
         FeatureOverrides::default(),
     );
-    ManagedFeatures::from_configured(configured_features, feature_requirements.cloned()).map(|_| ())
+    let features =
+        ManagedFeatures::from_configured(configured_features, feature_requirements.cloned())?;
+    if let Some(strategy) = cfg.context_strategy {
+        features.with_context_strategy(strategy)?;
+    }
+    Ok(())
 }

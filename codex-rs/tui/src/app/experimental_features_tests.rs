@@ -10,7 +10,10 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
     let selected = AbsolutePathBuf::from_absolute_path(home.path().join("work.config.toml"))?;
     let managed = home.path().join("managed.toml");
     std::fs::write(home.path().join("config.toml"), "# unselected\n")?;
-    std::fs::write(&selected, "[features]\nnetwork_proxy = true\n")?;
+    std::fs::write(
+        &selected,
+        "context_strategy = 'compaction'\n[features]\nnetwork_proxy = true\n",
+    )?;
     std::fs::write(&managed, "")?;
     let loader = LoaderOverrides {
         user_config_path: Some(selected.clone()),
@@ -73,7 +76,7 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
     let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&selected)?)?;
     assert_eq!(
         serde_json::to_value(saved)?,
-        serde_json::json!({"features": {"multi_agent": false, "memories": true}})
+        serde_json::json!({"context_strategy": "compaction", "features": {"network_proxy": {"enabled": false}, "multi_agent": false, "memories": true}})
     );
     assert_eq!(
         (app.config.clone(), app.chat_widget.config_ref().clone()),
@@ -97,13 +100,12 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
     app.enable_feature_for_new_threads(&mut tui, &server, Feature::Collab)
         .await;
     insta::assert_snapshot!("subagents_enable_notice", notice_text(&app));
-    std::fs::write(
-        &selected,
-        format!(
-            "{}memory_tool = false\n",
-            std::fs::read_to_string(&selected)?
-        ),
-    )?;
+    let mut saved: toml::Value = toml::from_str(&std::fs::read_to_string(&selected)?)?;
+    saved["features"]
+        .as_table_mut()
+        .unwrap()
+        .insert("memory_tool".into(), false.into());
+    std::fs::write(&selected, toml::to_string(&saved)?)?;
     app.enable_feature_for_new_threads(&mut tui, &server, Feature::MemoryTool)
         .await;
     insta::assert_snapshot!("memories_enable_notice", notice_text(&app));

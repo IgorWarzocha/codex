@@ -1603,6 +1603,126 @@ async fn write_value_rejects_invalid_guardian_review_threshold() -> Result<()> {
 }
 
 #[tokio::test]
+async fn cli_settings_sparse_edits_preserve_structured_options_and_readback() -> Result<()> {
+    use codex_config::cli_settings::CliSetting;
+    for original in [
+        "[features]\ncode_mode = true\nmulti_agent_v2 = true\n",
+        "[features.code_mode]\nruntime = 'notebook'\nnotebook_profile = 'keep'\nnotebook_max_heap_mib = 2048\n[features.multi_agent_v2]\nwait_agent_enabled = false\n",
+    ] {
+        let tmp = tempdir()?;
+        let path = tmp.path().join(CONFIG_TOML_FILE);
+        std::fs::write(&path, original)?;
+        let service = ConfigManager::without_managed_config_for_tests(tmp.path().to_path_buf());
+        for (setting, choice) in [
+            (CliSetting::Runtime, "v8"),
+            (CliSetting::Runtime, "off"),
+            (CliSetting::MultiAgent, "off"),
+            (CliSetting::Context, "compaction"),
+        ] {
+            let response = service
+                .batch_write(ConfigBatchWriteParams {
+                    edits: setting
+                        .edits(choice)
+                        .unwrap()
+                        .into_iter()
+                        .map(|(path, value)| codex_app_server_protocol::ConfigEdit {
+                            key_path: path.into(),
+                            value,
+                            merge_strategy: MergeStrategy::Replace,
+                        })
+                        .collect(),
+                    file_path: None,
+                    expected_version: None,
+                    reload_user_config: true,
+                })
+                .await?;
+            assert_eq!(response.status, WriteStatus::Ok);
+            let read = service
+                .read(ConfigReadParams {
+                    include_layers: false,
+                    cwd: None,
+                })
+                .await?;
+            assert!(setting.matches_edits(&serde_json::to_value(read.config)?, choice));
+        }
+        let saved: TomlValue = toml::from_str(&std::fs::read_to_string(&path)?)?;
+        assert_eq!(
+            saved["features"]["code_mode"]["enabled"].as_bool(),
+            Some(false)
+        );
+        if original.contains("notebook_profile") {
+            assert_eq!(
+                saved["features"]["code_mode"]["notebook_profile"].as_str(),
+                Some("keep")
+            );
+            assert_eq!(
+                saved["features"]["code_mode"]["notebook_max_heap_mib"].as_integer(),
+                Some(2048)
+            );
+            assert_eq!(
+                saved["features"]["multi_agent_v2"]["wait_agent_enabled"].as_bool(),
+                Some(false)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cli_settings_reject_managed_context_conflicts_before_persistence() -> Result<()> {
+    use codex_config::cli_settings::CliSetting;
+    for feature in ["token_budget", "context_management"] {
+        for (choice, required) in [("compaction", true), ("notes", false)] {
+            let tmp = tempdir()?;
+            let path = tmp.path().join(CONFIG_TOML_FILE);
+            let original = "# retained config\n[features.code_mode]\nnotebook_profile = 'keep'\n";
+            std::fs::write(&path, original)?;
+            let service = ConfigManager::new_for_tests(
+                tmp.path().to_path_buf(),
+                vec![],
+                LoaderOverrides::without_managed_config_for_tests(),
+                CloudConfigBundleFixture::loader_with_enterprise_requirement(&format!(
+                    "[features]\n{feature} = {required}\n"
+                )),
+            );
+            let error = service
+                .batch_write(ConfigBatchWriteParams {
+                    edits: CliSetting::Context
+                        .edits(choice)
+                        .unwrap()
+                        .into_iter()
+                        .map(|(path, value)| codex_app_server_protocol::ConfigEdit {
+                            key_path: path.into(),
+                            value,
+                            merge_strategy: MergeStrategy::Replace,
+                        })
+                        .collect(),
+                    file_path: None,
+                    expected_version: None,
+                    reload_user_config: true,
+                })
+                .await
+                .expect_err("managed context conflict must be rejected before writing");
+            assert_eq!(
+                error.write_error_code(),
+                Some(ConfigWriteErrorCode::ConfigValidationError)
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains("conflicts with managed requirement"),
+                "{error}"
+            );
+            assert!(error.to_string().contains(feature), "{error}");
+            assert_eq!(std::fs::read_to_string(&path)?, original);
+            assert!(!tmp.path().join("sessions").exists());
+            assert!(!tmp.path().join("notebook").exists());
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn write_value_rejects_feature_requirement_conflict() {
     let tmp = tempdir().expect("tempdir");
     std::fs::write(tmp.path().join(CONFIG_TOML_FILE), "").unwrap();

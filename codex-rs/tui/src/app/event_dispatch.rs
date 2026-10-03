@@ -2690,6 +2690,11 @@ impl App {
                     ));
                 }
             }
+            AppEvent::OpenSettings => self.chat_widget.open_settings(),
+            AppEvent::OpenExperimentalSettings => self.chat_widget.open_experimental_popup(),
+            AppEvent::OpenCliSetting(setting) => self.open_cli_setting(app_server, setting),
+            AppEvent::CliSettingDiscovered { request_id, setting, cwd, result } => self.chat_widget.on_cli_setting_discovered(request_id, setting, cwd, result),
+            AppEvent::PersistCliSetting { setting, choice, cwd } => self.persist_cli_setting(app_server, setting, choice, cwd),
             AppEvent::FetchExperimentalFeatures { thread_id, response_tx } => {
                 self.fetch_experimental_features(app_server, thread_id, response_tx);
             }

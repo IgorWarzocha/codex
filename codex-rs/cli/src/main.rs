@@ -76,6 +76,7 @@ mod queue_cmd;
 mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
+mod settings;
 mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
@@ -240,6 +241,8 @@ enum Subcommand {
 
     /// Inspect feature flags.
     Features(FeaturesCli),
+    /// Configure context, Code Mode and voice defaults without starting a thread.
+    Settings(settings::SettingsCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -1805,6 +1808,14 @@ async fn cli_main(
             cmd.strict_config |= root_strict_config;
             cmd.run(&arg0_paths, &root_config_overrides).await?;
         }
+        Some(Subcommand::Settings(command)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "settings",
+            )?;
+            settings::run(command, &root_config_overrides).await?;
+        }
         Some(Subcommand::Features(FeaturesCli { sub })) => match sub {
             FeaturesSubcommand::List => {
                 reject_remote_mode_for_subcommand(
@@ -2266,6 +2277,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::ResponsesApiProxy(_)) => Some("responses-api-proxy"),
         Some(Subcommand::StdioToUds(_)) => Some("stdio-to-uds"),
         Some(Subcommand::Features(_)) => Some("features"),
+        Some(Subcommand::Settings(_)) => Some("settings"),
         Some(Subcommand::TcpTunnel(_)) => Some("tcp-tunnel"),
     }
 }

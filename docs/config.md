@@ -6,6 +6,39 @@ For advanced configuration instructions, see [this documentation](https://develo
 
 For a full configuration reference, see [this documentation](https://developers.openai.com/codex/config-reference).
 
+## CLI settings
+
+Use `/settings` in the TUI for context management, Code Mode, subagent tools and
+experimental features. `/voice settings` also includes voice continuity policies.
+Pickers show configured defaults for the current project, not the running thread's
+effective state. Saves report rejected writes, overrides and failed readback.
+Context and runtime choices apply to new threads. They never migrate retained
+history or checkpoints or change permissions. Voice client policies require a
+new client launch and thread.
+
+Settings are also available before a thread can start. Run `codex settings` to
+list choices, then save a default with `codex settings set <setting> <choice>`.
+For example, API-key sessions can select ordinary compaction and sandboxed Code
+Mode without opening a thread or editing TOML:
+
+```sh
+codex settings set context compaction
+codex settings set code-mode v8
+```
+
+`code-mode off` disables configured Code Mode without deleting Notebook profiles
+or runtime options. A model that explicitly requires Code Mode can still select
+it. Notebook requires a single local environment, full-access permissions and
+Deno. Selecting it never grants access. `multi-agent off` disables both tool
+generations. `subagent-wait` independently controls the V2 wait tool, not automatic
+delivery of child results.
+
+`/experimental` includes Beta features and selected UnderDevelopment features
+with public metadata from the feature registry. Internal, removed, deprecated
+and unsupported controls remain hidden. Entries retain their lifecycle stage,
+prerequisites and new-thread or restart notices. Enabling a flag does not guarantee
+that the provider, client or current session supports its tools.
+
 ## Communication style
 
 Create `codex_personality.md` in your Codex home (`~/.codex` by default) with your
@@ -90,7 +123,8 @@ window.
 Notes requires an OpenAI Codex backend provider and Codex backend authentication.
 An unsupported session fails at startup with an actionable error. It does not
 silently switch to summarization. API-key sessions and other providers should
-explicitly select ordinary compaction in `config.toml`:
+explicitly select ordinary compaction with `codex settings set context compaction`
+or the equivalent configuration:
 
 ```toml
 context_strategy = "compaction"

@@ -86,6 +86,37 @@ fn server_feature(name: &str) -> ExperimentalFeature {
 }
 
 #[test]
+fn under_development_discovery_requires_public_metadata_and_keeps_removed_flags_hidden() {
+    let (app_tx, _app_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (catalog_tx, catalog_rx) = oneshot::channel();
+    let mut view = ExperimentalFeaturesView::new(
+        Vec::new(),
+        ThreadId::new(),
+        Some(catalog_rx),
+        AppEventSender::new(app_tx),
+        crate::keymap::RuntimeKeymap::defaults().list,
+    );
+    let mut public = server_feature("agent_message_board");
+    public.stage = ExperimentalFeatureStage::UnderDevelopment;
+    let mut internal = server_feature("internal");
+    internal.stage = ExperimentalFeatureStage::UnderDevelopment;
+    internal.description = None;
+    let mut removed = server_feature("removed");
+    removed.stage = ExperimentalFeatureStage::Removed;
+    catalog_tx
+        .send(Ok(vec![public, internal, removed]))
+        .unwrap();
+    assert!(view.pre_draw_tick(Instant::now()));
+    assert_eq!(view.features.len(), 1);
+    assert_eq!(view.features[0].key, "agent_message_board");
+    assert!(
+        view.features[0]
+            .description
+            .starts_with("Under development [agent_message_board]")
+    );
+}
+
+#[test]
 fn experimental_features_discovery_preserves_server_order_and_accepts_new_keys() {
     let (app_tx, mut app_rx) = tokio::sync::mpsc::unbounded_channel();
     let (catalog_tx, catalog_rx) = oneshot::channel();

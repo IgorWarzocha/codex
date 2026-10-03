@@ -1,23 +1,23 @@
 ## Installing & building
 
+Codex Lean is currently a source build. OpenAI's installers and packages install
+upstream Codex, not this fork. See the [README](../README.md#build-and-start) for
+first-launch settings and the Notes and Notebook requirements.
+
 ### System requirements
 
-| Requirement                 | Details                                                         |
-| --------------------------- | --------------------------------------------------------------- |
-| Operating systems           | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 **via WSL2** |
-| Git (optional, recommended) | 2.23+ for built-in PR helpers                                   |
-| RAM                         | 4-GB minimum (8-GB recommended)                                 |
-
-### DotSlash
-
-The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Codex CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
+| Requirement                | Details                                                     |
+| -------------------------- | ----------------------------------------------------------- |
+| Operating systems          | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 **via WSL2** |
+| Git (optional, recommended) | 2.23+ for built-in PR helpers                                |
+| RAM                        | 4-GB minimum (8-GB recommended)                              |
 
 ### Build from source
 
 ```bash
 # Clone the repository and navigate to the root of the Cargo workspace.
-git clone https://github.com/openai/codex.git
-cd codex/codex-rs
+git clone --branch lean https://github.com/IgorWarzocha/codex-lean.git
+cd codex-lean/codex-rs
 
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -31,11 +31,17 @@ cargo install --locked dotslash
 # Install nextest for the `just test` helper.
 cargo install --locked cargo-nextest
 
-# Build Codex.
-cargo build
+# Build the fork's CLI.
+CARGO_PROFILE_DEV_DEBUG=0 cargo build -p codex-cli --bin codex
+
+# Inspect defaults without starting a thread.
+./target/debug/codex settings
+# For API-key sessions and sandbox-compatible Code Mode:
+./target/debug/codex settings set context compaction
+./target/debug/codex settings set code-mode v8
 
 # Launch the TUI with a sample prompt.
-cargo run --bin codex -- "explain this codebase to me"
+./target/debug/codex "explain this codebase to me"
 
 # After making changes, use the root justfile helpers (they default to codex-rs):
 just fmt

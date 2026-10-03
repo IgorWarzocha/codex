@@ -537,6 +537,7 @@ pub(crate) struct ChatWidget {
     has_codex_backend_auth: bool,
     model_catalog: Arc<ModelCatalog>,
     model_popup_request_id: Option<uuid::Uuid>,
+    cli_setting_request_id: Option<uuid::Uuid>,
     permission_popup_request_id: Option<uuid::Uuid>,
     permission_discovery: Option<crate::permission_discovery::PermissionDiscovery>,
     worktree_popup_request_id: Option<uuid::Uuid>,

@@ -67,7 +67,13 @@ async fn experimental_feature_list_returns_feature_metadata_with_stage() -> Resu
                     Some(announcement.to_string()),
                 ),
                 Stage::UnderDevelopment => {
-                    (ExperimentalFeatureStage::UnderDevelopment, None, None, None)
+                    let metadata = spec.id.menu_metadata();
+                    (
+                        ExperimentalFeatureStage::UnderDevelopment,
+                        metadata.map(|(name, _)| name.to_string()),
+                        metadata.map(|(_, description)| description.to_string()),
+                        None,
+                    )
                 }
                 Stage::Stable => (ExperimentalFeatureStage::Stable, None, None, None),
                 Stage::Deprecated => (ExperimentalFeatureStage::Deprecated, None, None, None),
@@ -155,7 +161,9 @@ async fn experimental_feature_list_resolves_thread_project_config() -> Result<()
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),
-        r#"[features]
+        r#"context_strategy = "compaction"
+
+[features]
 memories = true
 "#,
     )?;

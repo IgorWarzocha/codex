@@ -8,5 +8,9 @@ expression: "render_bottom_popup(&chat, 80)"
 
 › 1. Set sound devices
   2. Choose a voice
+  3. Speak public progress and typed results
+  4. Delegation acknowledgements
+  5. Recover a closed voice call
+  6. Refresh voice after context changes
 
   enter select · esc back

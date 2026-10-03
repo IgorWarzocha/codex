@@ -325,7 +325,10 @@ impl BottomPaneView for ExperimentalFeaturesView {
             Ok(features) => {
                 let mut count = 0;
                 for feature in features {
-                    if feature.stage != ExperimentalFeatureStage::Beta
+                    if !(feature.stage == ExperimentalFeatureStage::Beta
+                        || (feature.stage == ExperimentalFeatureStage::UnderDevelopment
+                            && feature.display_name.is_some()
+                            && feature.description.is_some()))
                         || (feature.name == Feature::RealtimeConversation.key()
                             && !self.voice_supported)
                     {
@@ -343,8 +346,17 @@ impl BottomPaneView for ExperimentalFeaturesView {
                                 && spec.default_enabled == feature.default_enabled
                         }),
                         key: feature.name.clone(),
-                        name: feature.display_name.unwrap_or(feature.name),
-                        description: feature.description.unwrap_or_default(),
+                        name: feature.display_name.unwrap_or_else(|| feature.name.clone()),
+                        description: if feature.stage == ExperimentalFeatureStage::UnderDevelopment
+                        {
+                            format!(
+                                "Under development [{}]. {}",
+                                feature.name,
+                                feature.description.unwrap_or_default()
+                            )
+                        } else {
+                            feature.description.unwrap_or_default()
+                        },
                         enabled: feature.enabled,
                     });
                     count += 1;

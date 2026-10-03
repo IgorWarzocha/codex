@@ -21,6 +21,7 @@ pub enum SlashCommand {
     #[strum(serialize = "setup-default-sandbox")]
     ElevateSandbox,
     Experimental,
+    Settings,
     #[strum(to_string = "approve")]
     AutoReview,
     Memories,
@@ -147,6 +148,9 @@ impl SlashCommand {
             SlashCommand::Vim => "toggle Vim mode for the composer",
             SlashCommand::ElevateSandbox => "set up elevated agent sandbox",
             SlashCommand::Experimental => "toggle experimental features",
+            SlashCommand::Settings => {
+                "configure context, Code Mode, subagents and experimental features"
+            }
             SlashCommand::AutoReview => "approve one retry of a recent auto-review denial",
             SlashCommand::Memories => "configure memory use and generation",
             SlashCommand::Mcp => "list MCP tools; use /mcp verbose or /mcp login <name>",
@@ -254,6 +258,7 @@ impl SlashCommand {
             | SlashCommand::Vim
             | SlashCommand::ElevateSandbox
             | SlashCommand::Experimental
+            | SlashCommand::Settings
             | SlashCommand::Memories
             | SlashCommand::Import
             | SlashCommand::Review

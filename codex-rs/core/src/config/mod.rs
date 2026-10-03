@@ -2183,7 +2183,8 @@ pub fn deserialize_config_toml_with_base(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
-/// Validate user-visible feature settings against managed feature requirements.
+/// Validate feature settings and explicit continuity choices against managed policy,
+/// without requiring session authentication or acquiring a tool runtime.
 pub fn validate_feature_requirements_for_config_toml(
     cfg: &ConfigToml,
     feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
