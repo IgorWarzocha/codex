@@ -281,6 +281,7 @@ pub async fn run_pid_update_loop(
     http_client_factory: codex_http_client::HttpClientFactory,
     restore_release: Option<String>,
 ) -> Result<()> {
+    ensure_upstream_updates_allowed()?;
     ensure_supported_platform()?;
     #[cfg(windows)]
     backend::windows::ensure_not_elevated()?;
@@ -290,10 +291,19 @@ pub async fn run_pid_update_loop(
 pub async fn update(
     http_client_factory: codex_http_client::HttpClientFactory,
 ) -> Result<UpdateOutput> {
+    ensure_upstream_updates_allowed()?;
     ensure_supported_platform()?;
     #[cfg(windows)]
     backend::windows::ensure_not_elevated()?;
     update_loop::request_manual_update(&Daemon::from_environment()?, http_client_factory).await
+}
+
+fn ensure_upstream_updates_allowed() -> Result<()> {
+    anyhow::ensure!(
+        !codex_build_info::is_fork_version(env!("CARGO_PKG_VERSION")),
+        "Update Codex Lean manually from https://github.com/IgorWarzocha/codex-lean/releases, then use `codex app-server daemon update --from-cli`. Upstream daemon installers are disabled for this fork."
+    );
+    Ok(())
 }
 
 #[cfg(any(unix, windows))]
@@ -1178,6 +1188,28 @@ mod tests {
     use crate::client::ProbeInfo;
     #[cfg(unix)]
     use crate::settings::DaemonSettings;
+
+    #[tokio::test]
+    async fn fork_daemon_updates_stop_before_initializing_the_upstream_updater() {
+        let factory = codex_http_client::HttpClientFactory::new(
+            codex_http_client::OutboundProxyPolicy::ReqwestDefault,
+        );
+        for error in [
+            super::run_pid_update_loop(factory.clone(), None)
+                .await
+                .expect_err("fork must not schedule upstream updates"),
+            super::update(factory)
+                .await
+                .expect_err("fork must not request an upstream daemon update"),
+        ] {
+            assert!(
+                error
+                    .to_string()
+                    .contains("Upstream daemon installers are disabled")
+            );
+            assert!(error.to_string().contains("--from-cli"));
+        }
+    }
 
     #[test]
     fn remote_control_status_uses_camel_case_json() {

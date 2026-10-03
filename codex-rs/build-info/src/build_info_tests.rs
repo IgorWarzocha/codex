@@ -10,6 +10,22 @@ use crate::build_id;
 
 const BUILD_COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
+#[test]
+fn fork_release_channels_do_not_allow_upstream_updates() {
+    for version in ["0.160.0-lean.1", "0.160.0-howaboua.1", "1.0.0-lean"] {
+        assert!(crate::is_fork_version(version), "{version}");
+    }
+    for version in [
+        "0.160.0",
+        "0.160.0-alpha.1",
+        "0.0.0",
+        "dev",
+        "0.160.0-leaner.1",
+    ] {
+        assert!(!crate::is_fork_version(version), "{version}");
+    }
+}
+
 /// A packaged runtime takes its release identity from its package manifest.
 #[test]
 fn packaged_runtime_uses_manifest_version() {

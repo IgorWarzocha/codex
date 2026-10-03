@@ -1,4 +1,4 @@
-#![cfg(not(debug_assertions))]
+#![cfg(any(not(debug_assertions), test))]
 
 use crate::legacy_core::config::Config;
 use crate::npm_registry;
@@ -22,10 +22,14 @@ use std::path::Path;
 
 use crate::version::CODEX_CLI_VERSION;
 
+#[cfg(not(debug_assertions))]
 pub(crate) use crate::updates_cache::dismiss_version;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {
+    if codex_build_info::is_fork_version(CODEX_CLI_VERSION)
+        || !config.check_for_update_on_startup
+        || is_source_build_version(CODEX_CLI_VERSION)
+    {
         return None;
     }
 
@@ -150,7 +154,10 @@ async fn fetch_latest_github_release_version(
 /// Returns the latest version to show in a popup, if it should be shown.
 /// This respects the user's dismissal choice for the current latest version.
 pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {
+    if codex_build_info::is_fork_version(CODEX_CLI_VERSION)
+        || !config.check_for_update_on_startup
+        || is_source_build_version(CODEX_CLI_VERSION)
+    {
         return None;
     }
 
@@ -163,4 +170,32 @@ pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
         return None;
     }
     Some(latest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn fork_startup_ignores_upstream_cache_without_refreshing_it() {
+        let home = tempfile::tempdir().expect("temporary Codex home");
+        let mut config = Config::load_default_with_cli_overrides_for_codex_home(
+            home.path().to_path_buf(),
+            Vec::new(),
+        )
+        .await
+        .expect("config");
+        config.check_for_update_on_startup = true;
+        let path = version_filepath(&config);
+        let cache = serde_json::to_vec(&VersionInfo {
+            latest_version: "999.0.0".into(),
+            last_checked_at: chrono::DateTime::<Utc>::UNIX_EPOCH,
+            dismissed_version: None,
+        })
+        .expect("cache JSON");
+        std::fs::write(&path, &cache).expect("write stale upstream cache");
+        assert_eq!(get_upgrade_version(&config), None);
+        assert_eq!(get_upgrade_version_for_popup(&config), None);
+        assert_eq!(std::fs::read(&path).expect("read cache"), cache);
+    }
 }

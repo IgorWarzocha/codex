@@ -186,12 +186,12 @@ fn render_lines(lines: &[Line<'static>]) -> Vec<String> {
 }
 
 fn sanitize_directory(lines: Vec<String>) -> Vec<String> {
-    let versioned_title = format!("OpenAI Codex (v{})", crate::version::CODEX_CLI_VERSION);
+    let versioned_title = format!("Codex Lean (v{})", crate::version::CODEX_CLI_VERSION);
     lines
         .into_iter()
         .map(|line| {
             // Keep the header assertion while making snapshots independent of release versions.
-            let line = line.replace(&versioned_title, "OpenAI Codex (v0.0.0)");
+            let line = line.replace(&versioned_title, "Codex Lean (v0.0.0)");
             if let Some((prefix, value)) = line.split_once("Directory:") {
                 let padding = &value[..value.len() - value.trim_start().len()];
                 format!("{prefix}Directory:{padding}[[workspace]]")

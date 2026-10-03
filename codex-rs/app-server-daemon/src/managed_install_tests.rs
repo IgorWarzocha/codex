@@ -5,6 +5,15 @@ use super::executable_identity;
 use super::parse_codex_version;
 
 #[test]
+fn parses_fork_version_with_a_multi_word_display_name() {
+    assert_eq!(
+        parse_codex_version("Codex Lean 0.160.0-lean.1\n").expect("fork version"),
+        "0.160.0-lean.1"
+    );
+    assert!(parse_codex_version("Codex Lean\n").is_err());
+}
+
+#[test]
 fn parses_codex_cli_version_output() {
     assert_eq!(
         parse_codex_version("codex 1.2.3\n").expect("version"),

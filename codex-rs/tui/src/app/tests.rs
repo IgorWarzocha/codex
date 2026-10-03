@@ -6040,7 +6040,7 @@ async fn ctrl_l_clears_owned_history_and_preserves_the_draft() -> Result<()> {
             .is::<history_cell::SessionHeaderHistoryCell>()
     );
     let header = lines_to_single_string(&app.transcript_cells[0].display_lines(/*width*/ 80));
-    assert!(header.contains("OpenAI Codex"));
+    assert!(header.contains("Codex Lean"));
     let raw_header = lines_to_single_string(&app.transcript_cells[0].raw_lines());
     assert!(raw_header.contains("gpt-test"));
     assert!(!header.contains("old transcript row"));
@@ -6627,7 +6627,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
         .join("\n");
     assert!(!rendered.contains("Previous thread transcript"));
     assert!(!rendered.contains("Previous queued history"));
-    assert_snapshot!(rendered);
+    assert_snapshot!(rendered.replace(crate::version::CODEX_CLI_VERSION, "0.0.0"));
     app_server.shutdown().await?;
     Ok(())
 }

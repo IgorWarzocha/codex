@@ -773,7 +773,7 @@ async fn session_info_availability_nux_tooltip_snapshot() {
     );
 
     let rendered = render_transcript(&cell).join("\n");
-    insta::assert_snapshot!(rendered);
+    insta::assert_snapshot!(rendered.replace(crate::version::CODEX_CLI_VERSION, "0.0.0"));
 }
 
 #[tokio::test]
@@ -1867,6 +1867,15 @@ fn session_header_clamps_to_narrow_width() {
     let widths = lines.iter().map(line_width).collect::<Vec<_>>();
 
     assert!(widths.iter().all(|width| *width <= usize::from(WIDTH)));
+    assert_eq!(
+        render_lines(&cell.raw_lines()),
+        [
+            "Codex Lean (vtest)",
+            "model: gpt-5.6-sol xhigh",
+            "directory: project",
+            "permissions: YOLO mode",
+        ]
+    );
     insta::assert_snapshot!(render_lines(&lines).join("\n"));
 }
 

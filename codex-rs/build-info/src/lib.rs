@@ -12,6 +12,16 @@ use sha2::Sha256;
 
 static BUILD_INFO: OnceLock<BuildInfo> = OnceLock::new();
 
+/// Fork release channels must never use the upstream Codex installers.
+pub fn is_fork_version(version: &str) -> bool {
+    Version::parse(version).is_ok_and(|version| {
+        matches!(
+            version.pre.as_str().split('.').next(),
+            Some("lean" | "howaboua")
+        )
+    })
+}
+
 /// Initialize build information from the commit stamped into the calling executable.
 ///
 /// The environment lookup intentionally expands at the macro call site so Git

@@ -28,7 +28,10 @@ pub enum UpdateAction {
 
 impl UpdateAction {
     #[cfg(any(not(debug_assertions), test))]
-    pub(crate) fn from_install_context(context: &InstallContext) -> Option<Self> {
+    pub(crate) fn from_install_context(context: &InstallContext, version: &str) -> Option<Self> {
+        if codex_build_info::is_fork_version(version) {
+            return None;
+        }
         match &context.method {
             InstallMethod::Npm => Some(UpdateAction::NpmGlobalLatest),
             InstallMethod::Bun => Some(UpdateAction::BunGlobalLatest),
@@ -79,9 +82,9 @@ impl UpdateAction {
     }
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(any(not(debug_assertions), test))]
 pub fn get_update_action() -> Option<UpdateAction> {
-    UpdateAction::from_install_context(InstallContext::current())
+    UpdateAction::from_install_context(InstallContext::current(), crate::version::CODEX_CLI_VERSION)
 }
 
 #[cfg(test)]
@@ -91,66 +94,123 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
+    fn fork_versions_never_select_upstream_installers() {
+        for version in ["0.160.0-lean.1", "0.160.0-howaboua.1"] {
+            for method in [
+                InstallMethod::Npm,
+                InstallMethod::Bun,
+                InstallMethod::VitePlus,
+                InstallMethod::Pnpm,
+                InstallMethod::Brew,
+                InstallMethod::Standalone {
+                    platform: StandalonePlatform::Unix,
+                    release_dir: AbsolutePathBuf::from_absolute_path(std::env::temp_dir())
+                        .expect("absolute temp directory"),
+                    resources_dir: None,
+                },
+                InstallMethod::Standalone {
+                    platform: StandalonePlatform::Windows,
+                    release_dir: AbsolutePathBuf::from_absolute_path(std::env::temp_dir())
+                        .expect("absolute temp directory"),
+                    resources_dir: None,
+                },
+            ] {
+                assert_eq!(
+                    UpdateAction::from_install_context(
+                        &InstallContext {
+                            method,
+                            package_layout: None
+                        },
+                        version
+                    ),
+                    None
+                );
+            }
+        }
+    }
+
+    #[test]
     fn maps_install_context_to_update_action() {
         let native_release_dir =
             AbsolutePathBuf::from_absolute_path(std::env::temp_dir().join("native-release"))
                 .expect("temp dir path should be absolute");
 
         assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Other,
-                package_layout: None,
-            }),
+            UpdateAction::from_install_context(
+                &InstallContext {
+                    method: InstallMethod::Other,
+                    package_layout: None,
+                },
+                "0.160.0"
+            ),
             None
         );
         assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Npm,
-                package_layout: None,
-            }),
+            UpdateAction::from_install_context(
+                &InstallContext {
+                    method: InstallMethod::Npm,
+                    package_layout: None,
+                },
+                "0.160.0"
+            ),
             Some(UpdateAction::NpmGlobalLatest)
         );
         assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Bun,
-                package_layout: None,
-            }),
+            UpdateAction::from_install_context(
+                &InstallContext {
+                    method: InstallMethod::Bun,
+                    package_layout: None,
+                },
+                "0.160.0"
+            ),
             Some(UpdateAction::BunGlobalLatest)
         );
         assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Pnpm,
-                package_layout: None,
-            }),
+            UpdateAction::from_install_context(
+                &InstallContext {
+                    method: InstallMethod::Pnpm,
+                    package_layout: None,
+                },
+                "0.160.0"
+            ),
             Some(UpdateAction::PnpmGlobalLatest)
         );
         assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Brew,
-                package_layout: None,
-            }),
+            UpdateAction::from_install_context(
+                &InstallContext {
+                    method: InstallMethod::Brew,
+                    package_layout: None,
+                },
+                "0.160.0"
+            ),
             Some(UpdateAction::BrewUpgrade)
         );
         assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Standalone {
-                    platform: StandalonePlatform::Unix,
-                    release_dir: native_release_dir.clone(),
-                    resources_dir: Some(native_release_dir.join("codex-resources")),
+            UpdateAction::from_install_context(
+                &InstallContext {
+                    method: InstallMethod::Standalone {
+                        platform: StandalonePlatform::Unix,
+                        release_dir: native_release_dir.clone(),
+                        resources_dir: Some(native_release_dir.join("codex-resources")),
+                    },
+                    package_layout: None,
                 },
-                package_layout: None,
-            }),
+                "0.160.0"
+            ),
             Some(UpdateAction::StandaloneUnix)
         );
         assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Standalone {
-                    platform: StandalonePlatform::Windows,
-                    release_dir: native_release_dir.clone(),
-                    resources_dir: Some(native_release_dir.join("codex-resources")),
+            UpdateAction::from_install_context(
+                &InstallContext {
+                    method: InstallMethod::Standalone {
+                        platform: StandalonePlatform::Windows,
+                        release_dir: native_release_dir.clone(),
+                        resources_dir: Some(native_release_dir.join("codex-resources")),
+                    },
+                    package_layout: None,
                 },
-                package_layout: None,
-            }),
+                "0.160.0"
+            ),
             Some(UpdateAction::StandaloneWindows)
         );
     }

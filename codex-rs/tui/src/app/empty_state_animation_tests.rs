@@ -29,6 +29,7 @@ fn text(buffer: &Buffer) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+        .replace(crate::version::CODEX_CLI_VERSION, "0.0.0")
 }
 
 fn draw(app: &mut App, tui: &mut tui::Tui, size: Size) -> Result<Rect> {

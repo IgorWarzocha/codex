@@ -4,7 +4,7 @@ expression: "normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.
 ---
 80 columns
 
-  >_ OpenAI Codex (v0.0.0)
+  >_ Codex Lean (v0.160.0-lean.1)
      /tmp/project
 
 • Conversation continues here.
@@ -26,7 +26,7 @@ expression: "normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.
 
 32 columns
 
-  >_ OpenAI Codex (v0.0.0)
+  >_ Codex Lean (v0.160.0-lean.…
      /tmp/project
 
 • Conversation continues here.

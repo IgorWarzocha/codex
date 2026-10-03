@@ -111,13 +111,14 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
 
-/// Codex CLI
+/// Codex Lean
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
     author,
     version,
+    display_name = "Codex Lean",
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
@@ -860,6 +861,11 @@ fn resolve_windows_update_command_from_path(
 }
 
 fn run_update_command() -> anyhow::Result<()> {
+    if codex_build_info::is_fork_version(env!("CARGO_PKG_VERSION")) {
+        anyhow::bail!(
+            "Update Codex Lean manually from https://github.com/IgorWarzocha/codex-lean/releases. Upstream Codex installers are disabled for this fork."
+        );
+    }
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
@@ -2723,6 +2729,24 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
+    fn fork_identity_preserves_codex_command_name() {
+        let help = MultitoolCli::try_parse_from(["codex", "--help"])
+            .expect_err("help should exit before starting the CLI");
+        assert_eq!(help.kind(), clap::error::ErrorKind::DisplayHelp);
+        let help = help.to_string();
+        assert!(help.starts_with("Codex Lean\n"));
+        assert!(help.contains("Usage: codex [OPTIONS] [PROMPT]"));
+
+        let version = MultitoolCli::try_parse_from(["codex", "--version"])
+            .expect_err("version should exit before starting the CLI");
+        assert_eq!(version.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert_eq!(
+            version.to_string(),
+            format!("Codex Lean {}\n", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
     fn interactive_tui_future_stays_bounded() {
         let future = run_interactive_tui(
             TuiCli::parse_from(["codex"]),
@@ -3515,6 +3539,17 @@ mod tests {
     fn update_parses_as_update_subcommand() {
         let cli = MultitoolCli::try_parse_from(["codex", "update"]).expect("parse");
         assert!(matches!(cli.subcommand, Some(Subcommand::Update)));
+    }
+
+    #[test]
+    fn fork_update_requires_manual_release_without_running_an_installer() {
+        let error = run_update_command().expect_err("fork updates must remain manual");
+        assert!(error.to_string().contains("Update Codex Lean manually"));
+        assert!(
+            error
+                .to_string()
+                .contains("https://github.com/IgorWarzocha/codex-lean/releases")
+        );
     }
 
     #[test]

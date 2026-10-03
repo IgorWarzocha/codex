@@ -214,11 +214,14 @@ fn managed_codex_file_name() -> &'static str {
 }
 
 fn parse_codex_version(output: &str) -> Result<String> {
-    let version = output
-        .split_whitespace()
-        .nth(1)
-        .filter(|version| !version.is_empty())
-        .ok_or_else(|| anyhow!("managed Codex version output was malformed"))?;
+    let output = output.trim();
+    let version = if let Some(rest) = output.strip_prefix("Codex Lean") {
+        rest.split_whitespace().next()
+    } else {
+        output.split_whitespace().nth(1)
+    }
+    .filter(|version| !version.is_empty())
+    .ok_or_else(|| anyhow!("managed Codex version output was malformed"))?;
     Ok(version.to_string())
 }
 
