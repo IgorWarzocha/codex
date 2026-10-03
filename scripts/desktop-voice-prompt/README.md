@@ -57,7 +57,7 @@ sudo python3 scripts/desktop-voice-prompt/install_hook.py \
   --personality-file "$HOME/.local/state/codex-desktop-personality-test/codex_personality.md"
 ```
 
-The installer copies the patcher into root-owned `/usr/local/lib/codex-desktop-personality/` and registers `/etc/pacman.d/hooks/95-codex-desktop-personality.hook`. It never runs root code from your checkout or user-writable configuration during updates. Your Markdown stays user-owned and is read by the app, not imported as code.
+The installer copies the patcher into root-owned `/opt/codex-desktop-personality/` and registers `/etc/pacman.d/hooks/95-codex-desktop-personality.hook`. It rejects user-owned, writable, or symlinked parent directories without changing their permissions. It never runs root code from your checkout or user-writable configuration during updates. Your Markdown stays user-owned and is read by the app, not imported as code.
 
 The hook runs after any package installs or upgrades `usr/lib/chatgpt/resources/app.asar`, including `chatgpt-bin` updates through pacman, yay, and Omarchy. A compatible archive is staged on the same filesystem and atomically replaced with its original owner and mode. No original archive backup is kept. The unpacked directory stays untouched. The hook does not stop or restart the app. Restart it after an update.
 
@@ -70,7 +70,7 @@ journalctl -t codex-desktop-personality
 After adjusting compatibility checks, rerun the installer to refresh the root-owned patcher. To retry on an unpatched archive, quit the app and run:
 
 ```sh
-sudo /usr/local/lib/codex-desktop-personality/pacman-hook.sh \
+sudo /opt/codex-desktop-personality/pacman-hook.sh \
   "$USER" "$HOME/.local/state/codex-desktop-personality-test/codex_personality.md"
 ```
 
@@ -78,7 +78,7 @@ Already-patched archives are deliberately rejected rather than patched twice. To
 
 ```sh
 sudo rm /etc/pacman.d/hooks/95-codex-desktop-personality.hook
-sudo rm -r /usr/local/lib/codex-desktop-personality
+sudo rm -r /opt/codex-desktop-personality
 ```
 
 Your personality file is not removed. Reinstall the app package afterwards if you also want to remove the active patch.

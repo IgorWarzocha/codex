@@ -12,7 +12,7 @@ from pathlib import Path
 from pacman_hook import validate_personality
 
 
-LIBRARY = Path("/usr/local/lib/codex-desktop-personality")
+LIBRARY = Path("/opt/codex-desktop-personality")
 HOOK = Path("/etc/pacman.d/hooks/95-codex-desktop-personality.hook")
 SOURCES = (
     "asar.py",

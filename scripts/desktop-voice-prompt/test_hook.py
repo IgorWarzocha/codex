@@ -4,6 +4,7 @@ import json
 import os
 import pwd
 import shlex
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -196,6 +197,27 @@ class HookTests(unittest.TestCase):
         self.assertIn("Incompatible app, update completed", output.getvalue())
         self.assertIn("journal logging unavailable", output.getvalue())
         self.assertIn("desktop notification unavailable", output.getvalue())
+
+    def test_user_owned_or_writable_or_symlinked_parent_is_rejected(self):
+        directory = Path("/opt/codex-desktop-personality")
+        for mode, uid in (
+            (stat.S_IFDIR | 0o755, 1234),
+            (stat.S_IFDIR | 0o775, 0),
+            (stat.S_IFLNK | 0o777, 0),
+        ):
+            with self.subTest(mode=mode, uid=uid):
+                metadata = [
+                    os.stat_result((stat.S_IFDIR | 0o755, 0, 0, 1, 0, 0, 0, 0, 0, 0)),
+                    os.stat_result((mode, 0, 0, 1, uid, 0, 0, 0, 0, 0)),
+                ]
+                with (
+                    mock_patch.object(Path, "exists", return_value=True),
+                    mock_patch.object(Path, "lstat", side_effect=metadata),
+                    mock_patch.object(Path, "mkdir") as mkdir,
+                ):
+                    with self.assertRaisesRegex(ValueError, "protected: /opt$"):
+                        install_hook.trusted_directory(directory)
+                mkdir.assert_not_called()
 
     def test_installed_hook_quotes_arguments_and_publishes_without_backup(self):
         personality = Path("/home/test/style with 'quotes'.md")
