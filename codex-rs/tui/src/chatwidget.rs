@@ -357,6 +357,7 @@ mod realtime_settings;
 mod realtime_split_flap;
 pub(crate) use realtime::MAX_REPLAY_TRANSCRIPT_CELLS;
 pub(crate) use realtime::MAX_TRANSCRIPT_BYTES;
+pub(crate) use realtime::PreparedVoiceContext;
 pub(crate) use realtime::RealtimeTranscriptRecord;
 pub(crate) use realtime::is_private_realtime_agent_item;
 pub(crate) use realtime::realtime_delegation_display_text;
@@ -607,6 +608,9 @@ pub(crate) struct ChatWidget {
     turn_lifecycle: TurnLifecycleState,
     realtime_conversation: RealtimeConversationUiState,
     realtime_conversation_available_for_thread: bool,
+    // Public history metadata survives turn completion and voice resets; no
+    // user text or private model output is retained for greeting selection.
+    realtime_has_public_thread_context: bool,
     safety_buffering: SafetyBufferingState,
     task_complete_pending: bool,
     unified_exec_processes: Vec<UnifiedExecProcessSummary>,
@@ -1376,6 +1380,7 @@ impl ChatWidget {
             || !display.local_images.is_empty()
             || !display.remote_image_urls.is_empty()
         {
+            self.realtime_has_public_thread_context = true;
             self.add_to_history(history_cell::new_user_prompt(
                 display.message,
                 display.text_elements,

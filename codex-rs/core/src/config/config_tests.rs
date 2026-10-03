@@ -845,7 +845,8 @@ async fn load_config_resolves_tool_registry_config() -> std::io::Result<()> {
             config.tool_registry.turn_metadata_includes_tool_info,
             turn_metadata_includes_tool_info
         );
-        assert!(!config.features.enabled(Feature::CodeMode));
+        // Tool-registry settings do not opt out of the shipped Code Mode default.
+        assert!(config.features.enabled(Feature::CodeMode));
     }
 
     Ok(())
@@ -13421,6 +13422,45 @@ voice = "marin"
 }
 
 #[tokio::test]
+async fn shared_personality_file_loads_without_replacing_native_instructions() -> std::io::Result<()>
+{
+    let home = TempDir::new()?;
+    let path = home.path().join("codex_personality.md");
+    let initial = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        home.abs(),
+    )
+    .await?;
+    assert!(initial.communication_preferences.is_none());
+    tokio::fs::write(&path, "Prefer direct, concise answers.").await?;
+    let loaded = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        home.abs(),
+    )
+    .await?;
+    assert_eq!(
+        loaded.communication_preferences.as_deref(),
+        Some("Prefer direct, concise answers.")
+    );
+    assert_eq!(loaded.base_instructions, initial.base_instructions);
+    assert!(!loaded.personality_file_required);
+    let cfg: ConfigToml =
+        toml::from_str("personality_file = '/missing/codex_personality.md'").unwrap();
+    let error =
+        Config::load_from_base_config_with_overrides(cfg, ConfigOverrides::default(), home.abs())
+            .await
+            .unwrap_err();
+    assert!(error.to_string().contains("Cannot read personality file"));
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await?,
+        "Prefer direct, concise answers."
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn realtime_loads_from_config_toml() -> std::io::Result<()> {
     let cfg: ConfigToml = toml::from_str(
         r#"
@@ -13440,6 +13480,7 @@ voice = "cedar"
             session_type: Some(RealtimeWsMode::Transcription),
             transport: Some(RealtimeTransport::WebRtc),
             voice: Some(RealtimeVoice::Cedar),
+            ..RealtimeToml::default()
         })
     );
 
@@ -13458,6 +13499,7 @@ voice = "cedar"
             session_type: RealtimeWsMode::Transcription,
             transport: RealtimeTransport::WebRtc,
             voice: Some(RealtimeVoice::Cedar),
+            ..RealtimeConfig::default()
         }
     );
     Ok(())

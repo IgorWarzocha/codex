@@ -1209,6 +1209,20 @@ pub(crate) enum AppEvent {
         attempt_id: u64,
         result: Result<(), codex_realtime_webrtc::ConnectionError>,
     },
+    PrepareRealtimeRefresh {
+        thread_id: ThreadId,
+        attempt_id: u64,
+        input_generation: u64,
+        refresh_generation: u64,
+        abort: futures::future::AbortRegistration,
+    },
+    RealtimeRefreshPrepared {
+        thread_id: ThreadId,
+        attempt_id: u64,
+        input_generation: u64,
+        refresh_generation: u64,
+        result: Result<crate::chatwidget::PreparedVoiceContext, String>,
+    },
 
     /// Stop voice on its original thread after its chat widget is replaced.
     StopRealtimeConversation {

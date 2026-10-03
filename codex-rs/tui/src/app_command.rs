@@ -112,6 +112,13 @@ pub(crate) enum AppCommand {
         delivery_id: u64,
         text: RealtimeSpeechText,
     },
+    RealtimeConversationUpdate {
+        thread_id: ThreadId,
+        attempt_id: u64,
+        input_generation: u64,
+        speak: bool,
+        text: RealtimeSpeechText,
+    },
     RunUserShellCommand {
         command: String,
     },

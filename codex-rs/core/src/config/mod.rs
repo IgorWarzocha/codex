@@ -693,6 +693,11 @@ pub struct Config {
     /// Origin of the configured base instructions when supplied by another session or lockfile.
     pub base_instructions_provenance: Option<BaseInstructionsProvenance>,
 
+    /// Shared user communication preferences; never replace native model instructions.
+    pub personality_file: AbsolutePathBuf,
+    pub personality_file_required: bool,
+    pub communication_preferences: Option<String>,
+
     /// Developer instructions override injected as a separate message.
     pub developer_instructions: Option<String>,
 
@@ -4070,6 +4075,14 @@ impl Config {
             .as_ref()
             .map(|_| BaseInstructionsProvenance::Custom);
         let developer_instructions = developer_instructions.or(cfg.developer_instructions);
+        let personality_file_required = cfg.personality_file.is_some();
+        let personality_file = match cfg.personality_file.clone() {
+            Some(path) => path,
+            None => codex_home.join("codex_personality.md"),
+        };
+        let communication_preferences = crate::communication_preferences::read_communication_preferences(
+            &personality_file, personality_file_required,
+        ).await?;
         let include_permissions_instructions = cfg.include_permissions_instructions.unwrap_or(true);
         let include_apps_instructions = cfg.include_apps_instructions.unwrap_or(true);
         let include_collaboration_mode_instructions =
@@ -4377,6 +4390,9 @@ impl Config {
             notify: cfg.notify,
             base_instructions,
             base_instructions_provenance,
+            personality_file,
+            personality_file_required,
+            communication_preferences,
             personality,
             developer_instructions,
             compact_prompt,
@@ -4511,6 +4527,12 @@ impl Config {
                         session_type: realtime.session_type.unwrap_or(defaults.session_type),
                         transport: realtime.transport.unwrap_or(defaults.transport),
                         voice: realtime.voice,
+                        delegation_ack_filler: realtime.delegation_ack_filler,
+                        screenless: realtime.screenless.unwrap_or(defaults.screenless),
+                        auto_resume: realtime.auto_resume.unwrap_or(defaults.auto_resume),
+                        refresh_on_context_change: realtime
+                            .refresh_on_context_change
+                            .unwrap_or(defaults.refresh_on_context_change),
                     }
                 }),
             experimental_realtime_ws_backend_prompt: cfg.experimental_realtime_ws_backend_prompt,

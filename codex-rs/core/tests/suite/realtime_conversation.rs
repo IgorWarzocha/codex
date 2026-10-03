@@ -51,7 +51,7 @@ use core_test_support::skip_if_no_network;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
 use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use futures::SinkExt;
@@ -83,6 +83,23 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
+
+// Scripted realtime/host protocol fixtures use the direct tool surface, not
+// Notebook execution. Keep this policy local; shipped defaults remain unchanged.
+fn test_codex() -> TestCodexBuilder {
+    core_test_support::test_codex::test_codex().with_config(|config| {
+        for feature in [
+            codex_features::Feature::CodeMode,
+            codex_features::Feature::CodeModeOnly,
+        ] {
+            config
+                .features
+                .disable(feature)
+                .expect("direct protocol fixture");
+        }
+        config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
+    })
+}
 
 const STARTUP_CONTEXT_HEADER: &str = "Startup context from Codex.";
 const STARTUP_CONTEXT_OPEN_TAG: &str = "<startup_context>";

@@ -31,6 +31,7 @@ pub enum ConnectionError {
     HelperStartup,
     RuntimeInitialization,
     Transport,
+    MediaClosed,
     AudioDevices,
     AudioControls,
     AudioSession,
@@ -44,6 +45,7 @@ impl std::fmt::Display for ConnectionError {
             Self::HelperStartup => "voice helper could not start",
             Self::RuntimeInitialization => "voice audio runtime could not initialize",
             Self::Transport => "voice transport could not connect",
+            Self::MediaClosed => "voice media connection closed",
             Self::AudioDevices => {
                 "voice audio devices could not open; check microphone and speaker setup"
             }
@@ -121,6 +123,9 @@ impl VoiceHost {
     /// Consume peaks and detect helper loss even when neither device is producing audio.
     pub async fn inspect_audio(&mut self) -> Result<crate::AudioState> {
         let response = self.request(Message::InspectAudio {}, DEADLINE).await?;
+        if response == (Message::TransportClosed {}) {
+            return Err(anyhow::Error::new(ConnectionError::MediaClosed));
+        }
         let Message::AudioState { state } = response else {
             anyhow::bail!("unexpected voice helper response");
         };

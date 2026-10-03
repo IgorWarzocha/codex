@@ -1527,20 +1527,24 @@ impl Session {
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
         let config = self.get_config().await;
         let instructions = self.get_base_instructions().await;
-        if !config.update_plan_enabled
+        let mut instructions = if !config.update_plan_enabled
             && config.model_catalog.is_none()
             && matches!(
                 instructions.provenance,
                 Some(BaseInstructionsProvenance::Model { .. })
-            )
-        {
+            ) {
             BaseInstructions {
                 text: codex_prompts::without_update_plan_instructions(&instructions.text),
                 ..instructions
             }
         } else {
             instructions
-        }
+        };
+        instructions.text = crate::communication_preferences::append_communication_preferences(
+            &instructions.text,
+            config.communication_preferences.as_deref(),
+        );
+        instructions
     }
 
     // Merges connector IDs into the session-level explicit connector selection.

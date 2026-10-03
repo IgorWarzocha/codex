@@ -56,6 +56,58 @@ const NOISY_DIR_NAMES: &[&str] = &[
     "target",
 ];
 
+/// V3 continuity is scoped to this host thread, never nearby threads or a filesystem scan.
+/// Only public conversational text crosses into voice. Native opaque checkpoints stay
+/// owned by the host; ask the host for earlier context rather than decoding them here.
+pub(crate) async fn build_realtime_current_thread_context(sess: &Session) -> Option<String> {
+    let history = sess.clone_history().await;
+    current_thread_voice_context(history.raw_items())
+}
+
+fn current_thread_voice_context<'a>(
+    items: impl IntoIterator<Item = &'a ResponseItem>,
+) -> Option<String> {
+    let mut has_native_checkpoint = false;
+    let public_items = items.into_iter().filter(|item| {
+        has_native_checkpoint |= matches!(
+            item,
+            ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
+        );
+        match item {
+            ResponseItem::Message { role, .. } if role == "user" => true,
+            ResponseItem::Message {
+                role,
+                phase,
+                content,
+                ..
+            } if role == "assistant" => {
+                if matches!(
+                    phase,
+                    Some(codex_protocol::models::MessagePhase::Commentary)
+                ) {
+                    return false;
+                }
+                matches!(
+                    phase,
+                    Some(codex_protocol::models::MessagePhase::FinalAnswer)
+                ) || content_items_to_text(content).is_some_and(|text| {
+                    let text = text.trim_start();
+                    !text.starts_with("[ANALYSIS]") && !text.starts_with("[COMMENTARY]")
+                })
+            }
+            _ => false,
+        }
+    });
+    let section = build_current_thread_section(public_items);
+    if section.is_none() && !has_native_checkpoint {
+        return None;
+    }
+    let section = section.unwrap_or_else(|| "This host thread has native continuity checkpoints; no public conversational excerpt is available in the current window.".into());
+    Some(format!(
+        "<current_thread_context>\n{section}\nEarlier context and native checkpoints remain with the host agent. Delegate requests needing that context; do not infer that omitted history is empty.\n</current_thread_context>"
+    ))
+}
+
 pub(crate) async fn build_realtime_startup_context(
     sess: &Session,
     budget_tokens: usize,

@@ -91,11 +91,13 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
     let codex_home = tempfile::tempdir()?;
     MockResponsesConfig::new(&model_server.uri())
         .with_root_config(&format!(
-            "experimental_realtime_ws_base_url = {:?}\nexperimental_realtime_webrtc_call_base_url = {:?}",
+            "context_strategy = \"compaction\"\nexperimental_realtime_ws_base_url = {:?}\nexperimental_realtime_webrtc_call_base_url = {:?}",
             realtime_server.uri(),
             format!("{}/v1", model_server.uri()),
         ))
-        .with_extra_config("[realtime]\nversion = \"v3\"\ntype = \"conversational\"")
+        .with_extra_config("[realtime]\nversion = \"v3\"\ntype = \"conversational\"\nscreenless = false")
+        // The API-key mock scripts direct tool turns, not Notes/Notebook execution.
+        .with_extra_config("[features]\ncode_mode = { enabled = false, runtime = \"v8\" }\ncode_mode_only = false")
         .write(codex_home.path())?;
     codex_login::login_with_api_key(
         codex_home.path(),
@@ -104,6 +106,9 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
         AuthKeyringBackendKind::default(),
     )?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
+    // This regression intentionally covers the supported final-only optout;
+    // screenless typed/progress speech has separate default-policy coverage.
+    app.config.realtime.screenless = false;
     app.config.sqlite = codex_state::SqliteConfig::new_for_testing(codex_home.path().abs());
     app.config.cli_auth_credentials_store_mode = AuthCredentialsStoreMode::File;
     app.config.model = Some("mock-model".to_string());

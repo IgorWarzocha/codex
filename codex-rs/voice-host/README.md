@@ -1,8 +1,8 @@
-# Private voice helper foundation
+# Private voice helper
 
-`codex-voice-host` establishes the inherited-pipe lifecycle for the proposed
-bundled voice process and owns WebRTC negotiation and opt-in local devices.
-It does not enable voice in the TUI. The existing CLI is unchanged.
+`codex-voice-host` owns the bundled TUI voice process's inherited-pipe lifecycle,
+WebRTC negotiation, and opt-in local devices. App-server sideband events remain
+the authority for typed realtime events.
 
 Frames are a big-endian u32 length followed by at most 128 KiB of JSON. SDP is
 limited to 64 KiB and redacted in diagnostics. The
@@ -20,6 +20,9 @@ After `ready`, `startTransport` gathers an `offer`; `applyAnswer` returns
 `transportReady` only when the ordered `oai-events` channel opens. This can run
 without native audio initialization and does not establish audio readiness.
 Negotiation has a deadline; `close` tears down the peer before acknowledging exit.
+After negotiation, `inspectAudio` reports `transportClosed` when media readiness
+is lost. The parent distinguishes that condition from terminal device/helper
+failures and owns any bounded call replacement.
 UDP and TCP peer tests use real sockets, without a backend or audio devices.
 
 After native initialization and transport negotiation, `openDevices` opens the
@@ -47,7 +50,7 @@ on commands instead of polling.
 `devicesOpened` confirms device opening only. Capture now uses Rubato resampling,
 Sonora echo/noise/gain processing and 20 ms Opus encoding before sending RTP.
 Mute resets retained capture history and rejects delayed pre-unmute buffers.
-The receive/decode pipeline and TUI connection remain subsequent stages.
+The helper also owns receive/decode/playout; the TUI owns session controls.
 
 The capture encoder uses `opus 0.4.0` and its bundled `opusic-sys` build, which
 requires CMake and a C compiler. This is separate from the runtime's decoder Opus

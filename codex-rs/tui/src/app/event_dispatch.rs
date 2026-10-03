@@ -1070,6 +1070,7 @@ impl App {
                     AppCommand::RealtimeConversationStart { .. }
                         | AppCommand::RealtimeConversationStop { .. }
                         | AppCommand::RealtimeConversationSpeech { .. }
+                        | AppCommand::RealtimeConversationUpdate { .. }
                 );
                 if is_user_turn {
                     let screen_size = tui.terminal.last_known_screen_size;
@@ -1084,7 +1085,8 @@ impl App {
                 let parked_voice = match &op {
                     AppCommand::RealtimeConversationStart { thread_id, .. }
                     | AppCommand::RealtimeConversationStop { thread_id }
-                    | AppCommand::RealtimeConversationSpeech { thread_id, .. } => self
+                    | AppCommand::RealtimeConversationSpeech { thread_id, .. }
+                    | AppCommand::RealtimeConversationUpdate { thread_id, .. } => self
                         .background_voice
                         .as_ref()
                         .is_some_and(|owner| owner.thread_id() == Some(*thread_id)),
@@ -2100,6 +2102,56 @@ impl App {
             } => {
                 if let Some(owner) = self.voice_widget_for_thread(thread_id) {
                     owner.on_realtime_webrtc_connected(attempt_id, result);
+                }
+            }
+            AppEvent::PrepareRealtimeRefresh {
+                thread_id,
+                attempt_id,
+                input_generation,
+                refresh_generation,
+                abort,
+            } => {
+                let client = app_server.request_handle();
+                let tx = self.app_event_tx.clone();
+                tokio::spawn(async move {
+                    let prepare = async {
+                        let request = client.request_typed::<codex_app_server_protocol::ThreadRealtimePrepareResponse>(
+                            codex_app_server_protocol::ClientRequest::ThreadRealtimePrepare {
+                                request_id: codex_app_server_protocol::RequestId::String(format!("tui-voice-prepare-{attempt_id}-{input_generation}-{refresh_generation}")),
+                                params: codex_app_server_protocol::ThreadRealtimePrepareParams { thread_id: thread_id.to_string() },
+                            },
+                        );
+                        let response = tokio::time::timeout(std::time::Duration::from_secs(10), request)
+                            .await
+                            .map_err(|_| "Voice context preparation timed out.".to_string())?
+                            .map_err(|err| err.to_string())?;
+                        Ok(crate::chatwidget::PreparedVoiceContext(response.initial_items))
+                    };
+                    if let Ok(result) = futures::future::Abortable::new(prepare, abort).await {
+                        tx.send(AppEvent::RealtimeRefreshPrepared {
+                            thread_id,
+                            attempt_id,
+                            input_generation,
+                            refresh_generation,
+                            result,
+                        });
+                    }
+                });
+            }
+            AppEvent::RealtimeRefreshPrepared {
+                thread_id,
+                attempt_id,
+                input_generation,
+                refresh_generation,
+                result,
+            } => {
+                if let Some(owner) = self.voice_widget_for_thread(thread_id) {
+                    owner.on_realtime_refresh_prepared(
+                        attempt_id,
+                        input_generation,
+                        refresh_generation,
+                        result,
+                    );
                 }
             }
             AppEvent::StopRealtimeConversation { thread_id } => {

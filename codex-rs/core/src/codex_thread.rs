@@ -990,6 +990,33 @@ impl CodexThread {
         self.session.get_config().await
     }
 
+    /// Prepare voice continuity without starting a model turn or retiring the old call.
+    pub async fn prepare_realtime_voice(
+        &self,
+    ) -> CodexResult<Vec<codex_protocol::protocol::ConversationTextParams>> {
+        let config = self.config().await;
+        crate::realtime_prompt::load_realtime_backend_prompt(
+            None,
+            config.experimental_realtime_ws_backend_prompt.clone(),
+            &config.personality_file,
+            config.personality_file_required,
+        )
+        .await?;
+        if config.experimental_realtime_ws_startup_context.is_some() {
+            return Ok(Vec::new());
+        }
+        Ok(
+            crate::realtime_context::build_realtime_current_thread_context(self.session.as_ref())
+                .await
+                .into_iter()
+                .map(|text| codex_protocol::protocol::ConversationTextParams {
+                    role: codex_protocol::protocol::ConversationTextRole::Developer,
+                    text,
+                })
+                .collect(),
+        )
+    }
+
     /// Observes this thread's published MCP connections that match the requested config.
     pub async fn mcp_connection_statuses(
         &self,

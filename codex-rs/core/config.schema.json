@@ -3902,6 +3902,22 @@
     "RealtimeToml": {
       "additionalProperties": false,
       "properties": {
+        "auto_resume": {
+          "description": "Replace an established media call once after transport closure.",
+          "type": "boolean"
+        },
+        "delegation_ack_filler": {
+          "description": "Speak brief acknowledgements while delegated work runs; unset uses the server default.",
+          "type": "boolean"
+        },
+        "refresh_on_context_change": {
+          "description": "Replace voice serially after the host context changes.",
+          "type": "boolean"
+        },
+        "screenless": {
+          "description": "Forward public progress and results for both typed and spoken tasks.",
+          "type": "boolean"
+        },
         "transport": {
           "$ref": "#/definitions/RealtimeTransport"
         },
@@ -7722,6 +7738,14 @@
         }
       ],
       "description": "Deprecated: `friendly` and `pragmatic` no longer select a style."
+    },
+    "personality_file": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      ],
+      "description": "User-owned Markdown communication preferences appended to text and voice instructions. Defaults to CODEX_HOME/codex_personality.md when that file exists."
     },
     "plan_mode_reasoning_effort": {
       "$ref": "#/definitions/ReasoningEffort"

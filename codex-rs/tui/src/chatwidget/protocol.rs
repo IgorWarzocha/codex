@@ -117,12 +117,19 @@ impl ChatWidget {
             }
             ServerNotification::AgentMessageDelta(notification) => {
                 self.restore_realtime_transcripts_before_turn(&notification.turn_id);
-                if !self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
-                    && (from_replay
-                        || !self.is_realtime_delegated_agent_item(
-                            &notification.turn_id,
-                            &notification.item_id,
-                        ))
+                let public_progress = !from_replay
+                    && self.stream_realtime_public_progress(
+                        &notification.turn_id,
+                        &notification.item_id,
+                        &notification.delta,
+                    );
+                if public_progress
+                    || (!self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
+                        && (from_replay
+                            || !self.is_realtime_delegated_agent_item(
+                                &notification.turn_id,
+                                &notification.item_id,
+                            )))
                 {
                     self.on_agent_message_delta(notification.delta);
                 }
@@ -394,6 +401,9 @@ impl ChatWidget {
             | ServerNotification::AccountLoginCompleted(_)
             | ServerNotification::ProjectChanged(_)
             | ServerNotification::ThreadProjectUpdated(_) => {}
+            ServerNotification::ContextCompacted(_) if !from_replay => {
+                self.request_realtime_context_refresh()
+            }
             ServerNotification::ContextCompacted(_) => {}
         }
         // Tool and hook activity can recreate a hidden row with its default
@@ -544,6 +554,9 @@ impl ChatWidget {
         replay_kind: Option<ReplayKind>,
     ) {
         self.restore_realtime_transcripts_before_turn(&notification.turn_id);
+        if replay_kind.is_none() {
+            self.start_realtime_public_progress(&notification.turn_id, &notification.item);
+        }
         match notification.item {
             ThreadItem::UserMessage { content, .. } if replay_kind.is_none() => {
                 self.note_realtime_user_item_started(&notification.turn_id, &content);
@@ -634,9 +647,16 @@ impl ChatWidget {
         replay_kind: Option<ReplayKind>,
     ) {
         self.restore_realtime_transcripts_before_turn(&notification.turn_id);
+        if replay_kind.is_none() {
+            self.complete_realtime_public_progress(&notification.turn_id, &notification.item);
+            if matches!(notification.item, ThreadItem::ContextCompaction { .. }) {
+                self.request_realtime_context_refresh();
+            }
+        }
         if replay_kind.is_none()
             && self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
             && realtime::is_private_realtime_agent_item(&notification.item)
+            && !self.screenless_public_progress_item(&notification.item)
             && !matches!(&notification.item, ThreadItem::AgentMessage { id, .. } | ThreadItem::Reasoning { id, .. }
             if matches!(
                 self.realtime_conversation.agent_items.get(&(notification.turn_id.clone(), id.clone())),

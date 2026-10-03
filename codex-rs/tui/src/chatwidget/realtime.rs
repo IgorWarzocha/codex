@@ -52,6 +52,7 @@ const MAX_PENDING_SPEECH_ITEM_BYTES: usize = 64 * 1024;
 const MAX_PENDING_SPEECH_TURN_ID_BYTES: usize = 512;
 // Leave room for Core's optional backend prefix within its 1,000-token speech limit.
 const MAX_SPEAKABLE_FINAL_TOKENS: usize = 990;
+const MAX_PUBLIC_PROGRESS_BYTES: usize = 3_800;
 const AUDIO_METER_SEGMENTS: usize = 5;
 const AUDIO_METER_NOISE_FLOOR: u16 = 512;
 const AUDIO_METER_FULL_SCALE: u16 = 8192;
@@ -117,6 +118,7 @@ pub(super) enum RealtimeAgentItemOrigin {
 enum RealtimeTurnOrigin {
     Typed {
         input_generation: u64,
+        may_speak: bool,
     },
     Delegated {
         may_speak: bool,
@@ -130,6 +132,30 @@ enum StartupRetry {
     Available,
     WaitingForStop,
     Used,
+}
+
+struct PublicProgressStream {
+    text: String,
+    sent_bytes: usize,
+    input_generation: u64,
+}
+
+pub(crate) struct PreparedVoiceContext(
+    pub(crate) Vec<codex_app_server_protocol::ThreadRealtimeInitialItem>,
+);
+
+impl std::fmt::Debug for PreparedVoiceContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PreparedVoiceContext(<redacted>)")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Replacement {
+    #[default]
+    None,
+    Media,
+    Context,
 }
 
 #[derive(Default)]
@@ -177,6 +203,14 @@ pub(super) struct RealtimeConversationUiState {
     delegated_reasoning_turns: VecDeque<String>,
     pub(super) agent_items: HashMap<(String, String), RealtimeAgentItemOrigin>,
     pending_speech: VecDeque<PendingRealtimeSpeech>,
+    public_progress: HashMap<(String, String), PublicProgressStream>,
+    media_resume_used: bool,
+    replacement: Replacement,
+    replacement_call: bool,
+    refresh_requested: bool,
+    refresh_generation: u64,
+    refresh_abort: Option<AbortHandle>,
+    prepared_context: Option<PreparedVoiceContext>,
 }
 
 impl RealtimeConversationUiState {
@@ -257,7 +291,9 @@ impl ChatWidget {
 
     pub(crate) fn toggle_realtime_conversation(&mut self) {
         if self.realtime_conversation.phase == RealtimeConversationPhase::Stopping {
-            self.realtime_conversation.startup_retry = StartupRetry::Used;
+            // The ordinary /voice toggle is also a stop intent while a serial
+            // replacement is waiting for its close acknowledgement.
+            self.stop_realtime_conversation();
             self.add_info_message(
                 "Voice conversation is still stopping.".to_string(),
                 /*hint*/ None,
@@ -345,6 +381,12 @@ impl ChatWidget {
     }
 
     pub(crate) fn stop_realtime_conversation(&mut self) {
+        self.realtime_conversation.replacement = Replacement::None;
+        self.realtime_conversation.refresh_requested = false;
+        self.realtime_conversation.prepared_context = None;
+        if let Some(abort) = self.realtime_conversation.refresh_abort.take() {
+            abort.abort();
+        }
         self.realtime_conversation.startup_retry = StartupRetry::Used;
         if matches!(
             self.realtime_conversation.phase,
@@ -517,8 +559,10 @@ impl ChatWidget {
                         })
                     )
                 });
-        self.realtime_conversation.latest_input_was_voice =
-            !self.turn_lifecycle.agent_turn_running || running_delegation;
+        if !self.realtime_conversation.replacement_call {
+            self.realtime_conversation.latest_input_was_voice =
+                !self.turn_lifecycle.agent_turn_running || running_delegation;
+        }
         if self.turn_lifecycle.agent_turn_running
             && let Some(turn_id) = self.turn_lifecycle.last_turn_id.clone()
         {
@@ -527,18 +571,58 @@ impl ChatWidget {
                 .entry(turn_id)
                 .or_insert(RealtimeTurnOrigin::Typed {
                     input_generation: self.realtime_conversation.input_generation,
+                    may_speak: self.config.realtime.screenless,
                 });
         }
         self.update_realtime_footer();
         self.frame_requester
             .schedule_frame_in(MICROPHONE_METER_INTERVAL);
-        self.add_info_message(
-            "Voice conversation started.".to_string(),
-            Some("Use /voice mute to mute or /voice to stop.".to_string()),
-        );
+        if self.realtime_conversation.replacement_call {
+            let mut records = self
+                .realtime_conversation
+                .accepted_transcripts
+                .iter()
+                .rev()
+                .filter(|record| record.complete)
+                .take(4)
+                .map(|record| format!("{}: {}", record.role, record.text))
+                .collect::<Vec<_>>();
+            records.reverse();
+            let tail = records.join("\n");
+            let tail = codex_utils_string::take_bytes_at_char_boundary(&tail, 4096);
+            if !tail.is_empty() {
+                self.send_realtime_update(format!("Finalized conversation tail from the previous call; context only, not new host input:\n{tail}"), false);
+            }
+        } else {
+            // appendSpeech carries literal speakable text, not an instruction
+            // to generate a greeting or a synthetic host input. Only public
+            // conversation metadata determines the contextual variant.
+            let greeting = if self.realtime_has_public_thread_context {
+                "Hi. We can continue this conversation by voice."
+            } else {
+                "Hi. What would you like to work on?"
+            };
+            self.send_realtime_update(greeting.into(), true);
+            self.add_info_message(
+                "Voice conversation started.".to_string(),
+                Some("Use /voice mute to mute or /voice to stop.".to_string()),
+            );
+        }
     }
 
     pub(crate) fn is_current_realtime_attempt(
+        &self,
+        thread_id: ThreadId,
+        attempt_id: u64,
+        input_generation: u64,
+    ) -> bool {
+        self.is_current_realtime_update(thread_id, attempt_id, input_generation)
+            && self.latest_realtime_input_can_speak()
+    }
+
+    /// Updates include lifecycle greetings and quiet context, which do not
+    /// require a task's voice-speech ownership. All still fence stale input.
+    pub(crate) fn is_current_realtime_update(
         &self,
         thread_id: ThreadId,
         attempt_id: u64,
@@ -548,39 +632,214 @@ impl ChatWidget {
             && self.realtime_conversation.thread_id == Some(thread_id)
             && self.realtime_conversation.attempt_id == attempt_id
             && self.realtime_conversation.input_generation == input_generation
-            && self.realtime_conversation.latest_input_was_voice
     }
 
     pub(super) fn note_realtime_typed_input(&mut self, text: &str) {
         self.invalidate_realtime_voice_input();
-        if self.realtime_conversation.phase == RealtimeConversationPhase::Active {
+        if self.realtime_conversation.phase != RealtimeConversationPhase::Inactive {
             self.realtime_conversation.pending_typed_input = Some(text.to_string());
         }
     }
 
+    fn send_realtime_update(&mut self, text: String, speak: bool) {
+        let Some(thread_id) = self.realtime_conversation.thread_id else {
+            return;
+        };
+        if text.trim().is_empty()
+            || self.realtime_conversation.phase != RealtimeConversationPhase::Active
+        {
+            return;
+        }
+        if !self.submit_op(AppCommand::RealtimeConversationUpdate {
+            thread_id,
+            attempt_id: self.realtime_conversation.attempt_id,
+            input_generation: self.realtime_conversation.input_generation,
+            speak,
+            text: text.into(),
+        }) {
+            self.add_realtime_error("Failed to forward voice task context.".into());
+        }
+    }
+
+    pub(super) fn latest_realtime_input_can_speak(&self) -> bool {
+        self.config.realtime.screenless || self.realtime_conversation.latest_input_was_voice
+    }
+
+    pub(super) fn screenless_public_progress_item(&self, item: &ThreadItem) -> bool {
+        self.config.realtime.screenless
+            && matches!(item,
+                ThreadItem::AgentMessage { phase: Some(MessagePhase::Commentary), text, questions: None, .. }
+                    if !text.trim_start().starts_with("[ANALYSIS]")
+            )
+    }
+
+    fn realtime_turn_may_speak(&self, turn_id: &str) -> bool {
+        match self.realtime_conversation.turn_origins.get(turn_id) {
+            Some(RealtimeTurnOrigin::Typed {
+                may_speak,
+                input_generation,
+            })
+            | Some(RealtimeTurnOrigin::Delegated {
+                may_speak,
+                input_generation,
+            }) => *may_speak && *input_generation == self.realtime_conversation.input_generation,
+            None => false,
+        }
+    }
+
+    pub(super) fn start_realtime_public_progress(&mut self, turn_id: &str, item: &ThreadItem) {
+        if !self.screenless_public_progress_item(item)
+            || self.realtime_conversation.public_progress.len() >= 32
+            || !self.latest_realtime_input_can_speak()
+            || !self.realtime_turn_may_speak(turn_id)
+        {
+            return;
+        }
+        self.realtime_conversation
+            .public_progress
+            .entry((turn_id.into(), item.id().into()))
+            .or_insert(PublicProgressStream {
+                text: String::new(),
+                sent_bytes: 0,
+                input_generation: self.realtime_conversation.input_generation,
+            });
+    }
+
+    pub(super) fn stream_realtime_public_progress(
+        &mut self,
+        turn_id: &str,
+        item_id: &str,
+        delta: &str,
+    ) -> bool {
+        let key = (turn_id.to_string(), item_id.to_string());
+        let Some(stream) = self.realtime_conversation.public_progress.get_mut(&key) else {
+            return false;
+        };
+        if stream.input_generation != self.realtime_conversation.input_generation {
+            return true;
+        }
+        let remaining = MAX_PUBLIC_PROGRESS_BYTES.saturating_sub(stream.text.len());
+        stream
+            .text
+            .push_str(&codex_utils_string::take_bytes_at_char_boundary(
+                delta, remaining,
+            ));
+        let tail = &stream.text[stream.sent_bytes..];
+        if tail.trim_start().starts_with("[ANALYSIS]") {
+            return false;
+        }
+        // Open with two complete sentences, then send settled paragraphs. Never
+        // stream reasoning deltas or an unclassified final-answer prefix.
+        let end = if stream.sent_bytes == 0 {
+            tail.char_indices()
+                .filter(|(_, c)| matches!(c, '.' | '!' | '?'))
+                .nth(1)
+                .map(|(index, _)| index + 1)
+        } else {
+            tail.rfind("\n\n").map(|index| index + 2)
+        };
+        if let Some(end) = end {
+            let text = tail[..end]
+                .trim()
+                .trim_start_matches("[COMMENTARY]")
+                .trim()
+                .to_string();
+            stream.sent_bytes += end;
+            self.send_realtime_update(text, true);
+        }
+        true
+    }
+
+    pub(super) fn complete_realtime_public_progress(&mut self, turn_id: &str, item: &ThreadItem) {
+        if !self.config.realtime.screenless {
+            return;
+        }
+        if !self.realtime_turn_may_speak(turn_id) {
+            return;
+        }
+        let text = match item {
+            ThreadItem::AgentMessage { text, .. } if self.screenless_public_progress_item(item) => {
+                text.clone()
+            }
+            ThreadItem::Reasoning { summary, .. }
+                if !self.config.hide_agent_reasoning
+                    && self.config.model_reasoning_summary.is_some_and(|summary| {
+                        summary != codex_protocol::config_types::ReasoningSummary::None
+                    }) =>
+            {
+                summary.join("\n\n")
+            }
+            _ => return,
+        };
+        if !self.latest_realtime_input_can_speak()
+            || self.realtime_conversation.public_progress.len() >= 32
+        {
+            return;
+        }
+        let generation = self.realtime_conversation.input_generation;
+        let stream = self
+            .realtime_conversation
+            .public_progress
+            .entry((turn_id.into(), item.id().into()))
+            .or_insert(PublicProgressStream {
+                text: String::new(),
+                sent_bytes: 0,
+                input_generation: generation,
+            });
+        if stream.input_generation != generation {
+            return;
+        }
+        let text =
+            codex_utils_string::take_bytes_at_char_boundary(&text, MAX_PUBLIC_PROGRESS_BYTES);
+        if stream.sent_bytes >= text.len() {
+            return;
+        }
+        let Some(tail) = text.get(stream.sent_bytes..) else {
+            return;
+        };
+        if stream.sent_bytes > 0 && !text.starts_with(&stream.text[..stream.sent_bytes]) {
+            return;
+        }
+        let tail = tail
+            .trim()
+            .trim_start_matches("[COMMENTARY]")
+            .trim()
+            .to_string();
+        stream.sent_bytes = text.len();
+        stream.text = text.to_string();
+        self.send_realtime_update(tail, true);
+    }
+
     fn invalidate_realtime_voice_input(&mut self) {
-        if self.realtime_conversation.phase != RealtimeConversationPhase::Active {
+        if self.realtime_conversation.phase == RealtimeConversationPhase::Inactive {
             return;
         }
         self.realtime_conversation.latest_input_was_voice = false;
+        // Input admitted while a replacement is stopping/starting still
+        // supersedes old work and invalidates its prepared continuity snapshot.
+        self.realtime_conversation.prepared_context = None;
         self.realtime_conversation.input_generation = self
             .realtime_conversation
             .input_generation
             .wrapping_add(/*rhs*/ 1);
         // Typing supersedes the old voice answer. Suppress the helper before
         // another queued audio frame can play, even when the mic is muted.
-        self.realtime_conversation.speaker_suppression_generation =
-            Some(self.realtime_conversation.input_generation);
-        if let Some(handle) = self.realtime_conversation.handle.as_ref() {
-            handle.set_speaker_suppressed(/*suppressed*/ true);
+        if self.config.realtime.screenless {
+            self.suppress_active_realtime_speaker();
+        } else {
+            self.realtime_conversation.speaker_suppression_generation =
+                Some(self.realtime_conversation.input_generation);
+            if let Some(handle) = self.realtime_conversation.handle.as_ref() {
+                handle.set_speaker_suppressed(/*suppressed*/ true);
+            }
         }
         self.realtime_conversation.speaker_level = 0;
         self.realtime_conversation.speaker_active_until = None;
         self.update_realtime_footer();
         for origin in self.realtime_conversation.turn_origins.values_mut() {
-            if let RealtimeTurnOrigin::Delegated { may_speak, .. } = origin {
-                *may_speak = false;
-            }
+            let (RealtimeTurnOrigin::Delegated { may_speak, .. }
+            | RealtimeTurnOrigin::Typed { may_speak, .. }) = origin;
+            *may_speak = false;
         }
         for origin in self.realtime_conversation.agent_items.values_mut() {
             if let RealtimeAgentItemOrigin::Delegated { may_speak, .. } = origin {
@@ -628,9 +887,9 @@ impl ChatWidget {
                     });
             let (typed_turn_generation, delegated_turn_generation) =
                 match self.realtime_conversation.turn_origins.get(turn_id) {
-                    Some(RealtimeTurnOrigin::Typed { input_generation }) => {
-                        (Some(*input_generation), None)
-                    }
+                    Some(RealtimeTurnOrigin::Typed {
+                        input_generation, ..
+                    }) => (Some(*input_generation), None),
                     Some(RealtimeTurnOrigin::Delegated {
                         input_generation, ..
                     }) => (None, Some(*input_generation)),
@@ -706,11 +965,27 @@ impl ChatWidget {
             turn_id.to_string(),
             RealtimeTurnOrigin::Typed {
                 input_generation: self.realtime_conversation.input_generation,
+                may_speak: self.config.realtime.screenless,
             },
         );
         self.realtime_conversation
             .delegated_reasoning_turns
             .retain(|saved| saved != turn_id);
+        if self.config.realtime.screenless {
+            let text = items
+                .iter()
+                .filter_map(|item| match item {
+                    UserInput::Text { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let text = codex_utils_string::take_bytes_at_char_boundary(&text, 4096);
+            self.send_realtime_update(
+                format!("Host input already accepted for this task (context only; do not delegate it again):\n{text}"),
+                false,
+            );
+        }
     }
 
     pub(crate) fn remember_realtime_delegated_reasoning_turn(&mut self, turn_id: &str) {
@@ -787,6 +1062,15 @@ impl ChatWidget {
                 suppressed_nonfinal: false,
                 input_generation: *input_generation,
             },
+            Some(RealtimeTurnOrigin::Typed {
+                input_generation,
+                may_speak,
+            }) if self.config.realtime.screenless => RealtimeAgentItemOrigin::Delegated {
+                may_speak: *may_speak,
+                completed: false,
+                suppressed_nonfinal: false,
+                input_generation: *input_generation,
+            },
             Some(RealtimeTurnOrigin::Typed { .. }) | None => RealtimeAgentItemOrigin::Typed,
         };
         matches!(
@@ -817,6 +1101,11 @@ impl ChatWidget {
         // The ordinary completion path opens the structured question editor.
         // A question-bearing answer must remain visible instead of being speech-only.
         if questions.is_some() {
+            return false;
+        }
+        if self.screenless_public_progress_item(item) {
+            // Public progress has its own bounded stream; it remains visible and
+            // must not enter the final-answer recovery or completion route.
             return false;
         }
         if from_replay {
@@ -921,7 +1210,7 @@ impl ChatWidget {
         let trimmed = text.trim();
         if is_private_realtime_agent_item(item)
             || trimmed.is_empty()
-            || !self.realtime_conversation.latest_input_was_voice
+            || !self.latest_realtime_input_can_speak()
         {
             return;
         }
@@ -939,13 +1228,18 @@ impl ChatWidget {
         if text.is_empty() {
             return;
         }
-        let Some(RealtimeTurnOrigin::Delegated {
-            may_speak,
-            input_generation: turn_input_generation,
-        }) = self.realtime_conversation.turn_origins.get_mut(turn_id)
-        else {
-            return;
-        };
+        let (may_speak, turn_input_generation) =
+            match self.realtime_conversation.turn_origins.get_mut(turn_id) {
+                Some(RealtimeTurnOrigin::Delegated {
+                    may_speak,
+                    input_generation,
+                }) => (may_speak, input_generation),
+                Some(RealtimeTurnOrigin::Typed {
+                    may_speak,
+                    input_generation,
+                }) if self.config.realtime.screenless => (may_speak, input_generation),
+                _ => return,
+            };
         if !*may_speak || *turn_input_generation != input_generation {
             return;
         }
@@ -1189,6 +1483,9 @@ impl ChatWidget {
     }
 
     pub(super) fn finish_realtime_turn(&mut self, turn_id: &str) {
+        self.realtime_conversation
+            .public_progress
+            .retain(|(turn, _), _| turn != turn_id);
         let mut waiting = Vec::new();
         let mut index = 0;
         while index < self.realtime_conversation.pending_speech.len() {
@@ -1669,6 +1966,130 @@ impl ChatWidget {
 
     pub(super) fn realtime_retry_cleanup_pending(&self) -> bool {
         self.realtime_conversation.startup_retry == StartupRetry::WaitingForStop
+            || self.realtime_conversation.replacement != Replacement::None
+    }
+
+    pub(super) fn request_realtime_context_refresh(&mut self) {
+        if self.config.realtime.refresh_on_context_change
+            && self.realtime_conversation.phase != RealtimeConversationPhase::Inactive
+        {
+            self.realtime_conversation.refresh_generation = self
+                .realtime_conversation
+                .refresh_generation
+                .wrapping_add(1);
+            self.realtime_conversation.refresh_requested = true;
+            self.realtime_conversation.prepared_context = None;
+            if let Some(abort) = self.realtime_conversation.refresh_abort.take() {
+                abort.abort();
+            }
+        }
+    }
+
+    pub(super) fn maybe_prepare_realtime_refresh(&mut self) {
+        if !self.realtime_conversation.refresh_requested
+            || self.realtime_conversation.refresh_abort.is_some()
+            || self.realtime_conversation.phase != RealtimeConversationPhase::Active
+            || self.turn_lifecycle.agent_turn_running
+            || !self.realtime_conversation.pending_speech.is_empty()
+            || self
+                .realtime_conversation
+                .speaker_active_until
+                .is_some_and(|until| until > Instant::now())
+            || self.has_misalignment_policy_violation()
+        {
+            return;
+        }
+        let Some(thread_id) = self.realtime_conversation.thread_id else {
+            return;
+        };
+        let (abort, registration) = AbortHandle::new_pair();
+        self.realtime_conversation.refresh_abort = Some(abort);
+        self.app_event_tx.send(AppEvent::PrepareRealtimeRefresh {
+            thread_id,
+            attempt_id: self.realtime_conversation.attempt_id,
+            input_generation: self.realtime_conversation.input_generation,
+            refresh_generation: self.realtime_conversation.refresh_generation,
+            abort: registration,
+        });
+    }
+
+    pub(crate) fn on_realtime_refresh_prepared(
+        &mut self,
+        attempt_id: u64,
+        input_generation: u64,
+        refresh_generation: u64,
+        result: Result<PreparedVoiceContext, String>,
+    ) {
+        if self.realtime_conversation.phase != RealtimeConversationPhase::Active
+            || self.realtime_conversation.attempt_id != attempt_id
+            || self.realtime_conversation.refresh_generation != refresh_generation
+            || self.realtime_conversation.refresh_abort.is_none()
+        {
+            return;
+        }
+        self.realtime_conversation.refresh_abort = None;
+        if self.realtime_conversation.input_generation != input_generation
+            || self.turn_lifecycle.agent_turn_running
+            || !self.realtime_conversation.pending_speech.is_empty()
+            || self
+                .realtime_conversation
+                .speaker_active_until
+                .is_some_and(|until| until > Instant::now())
+            || self.has_misalignment_policy_violation()
+        {
+            return;
+        }
+        self.realtime_conversation.refresh_requested = false;
+        match result {
+            Ok(context) => {
+                self.realtime_conversation.prepared_context = Some(context);
+                self.begin_realtime_replacement(Replacement::Context);
+            }
+            Err(error) => self.add_realtime_error(format!(
+                "Voice context refresh failed; keeping the current call: {error}"
+            )),
+        }
+    }
+
+    pub(crate) fn take_prepared_realtime_context(
+        &mut self,
+    ) -> Option<Vec<codex_app_server_protocol::ThreadRealtimeInitialItem>> {
+        self.realtime_conversation
+            .prepared_context
+            .take()
+            .map(|context| context.0)
+    }
+
+    fn begin_realtime_replacement(&mut self, reason: Replacement) {
+        let Some(thread_id) = self.realtime_conversation.thread_id else {
+            return;
+        };
+        self.realtime_conversation.replacement = reason;
+        if let Some(abort) = self.realtime_conversation.refresh_abort.take() {
+            abort.abort();
+        }
+        self.realtime_conversation.phase = RealtimeConversationPhase::Stopping;
+        if let Some(handle) = self.realtime_conversation.handle.take() {
+            handle.close();
+        }
+        if !self.submit_op(AppCommand::RealtimeConversationStop { thread_id }) {
+            self.record_realtime_failure();
+            self.reset_realtime_conversation();
+        }
+        self.update_realtime_footer();
+    }
+
+    pub(super) fn on_realtime_media_closed(&mut self) {
+        if self.realtime_conversation.phase == RealtimeConversationPhase::Active
+            && self.config.realtime.auto_resume
+            && !self.realtime_conversation.media_resume_used
+            && !self.has_misalignment_policy_violation()
+        {
+            self.realtime_conversation.media_resume_used = true;
+            self.begin_realtime_replacement(Replacement::Media);
+        } else {
+            self.on_realtime_error("Voice media connection closed.".into());
+        }
     }
 
     pub(crate) fn on_realtime_error(&mut self, message: String) {
@@ -1698,8 +2119,20 @@ impl ChatWidget {
             == RealtimeConversationPhase::Starting
             && self.realtime_conversation.startup_retry == StartupRetry::Available
             && reason.as_deref() == Some("transport_closed");
+        let replace_established_media = self.realtime_conversation.phase
+            == RealtimeConversationPhase::Active
+            && reason.as_deref() == Some("transport_closed")
+            && self.config.realtime.auto_resume
+            && !self.realtime_conversation.media_resume_used
+            && !self.has_misalignment_policy_violation();
+        if replace_established_media {
+            self.realtime_conversation.media_resume_used = true;
+            self.realtime_conversation.replacement = Replacement::Media;
+        }
+        let replacement = self.realtime_conversation.replacement;
         if self.realtime_conversation.phase == RealtimeConversationPhase::Stopping
             && reason.as_deref() != Some("requested")
+            && !(replacement != Replacement::None && reason.as_deref() == Some("transport_closed"))
         {
             return;
         }
@@ -1709,11 +2142,22 @@ impl ChatWidget {
         self.finish_realtime_partial_transcripts();
         let muted = self.realtime_conversation.microphone_muted;
         let thread_id = self.realtime_conversation.thread_id;
-        let retry_thread_id = if retry_after_stop || retry_after_early_close {
-            thread_id.filter(|id| Some(*id) == self.thread_id())
-        } else {
-            None
-        };
+        let retry_thread_id =
+            if retry_after_stop || retry_after_early_close || replacement != Replacement::None {
+                thread_id.filter(|id| Some(*id) == self.thread_id())
+            } else {
+                None
+            };
+        let media_resume_used = self.realtime_conversation.media_resume_used;
+        let refresh_generation = self.realtime_conversation.refresh_generation;
+        let refresh_requested = self.realtime_conversation.refresh_requested;
+        let prepared_context = self.realtime_conversation.prepared_context.take();
+        let latest_input_was_voice = self.realtime_conversation.latest_input_was_voice;
+        let latest_voice_input_fingerprint =
+            self.realtime_conversation.latest_voice_input_fingerprint;
+        let pending_typed_input = self.realtime_conversation.pending_typed_input.take();
+        let turn_origins = std::mem::take(&mut self.realtime_conversation.turn_origins);
+        let agent_items = std::mem::take(&mut self.realtime_conversation.agent_items);
         if retry_thread_id.is_none()
             && (reason.is_none() || matches!(reason.as_deref(), Some("transport_closed" | "error")))
         {
@@ -1725,6 +2169,17 @@ impl ChatWidget {
             // The old backend is closed. A late peer result belongs to its attempt ID.
             self.realtime_conversation.startup_retry = StartupRetry::Used;
             self.realtime_conversation.microphone_muted = muted;
+            self.realtime_conversation.media_resume_used = media_resume_used;
+            self.realtime_conversation.refresh_generation = refresh_generation;
+            self.realtime_conversation.refresh_requested = refresh_requested;
+            self.realtime_conversation.replacement_call = replacement != Replacement::None;
+            self.realtime_conversation.prepared_context = prepared_context;
+            self.realtime_conversation.latest_input_was_voice = latest_input_was_voice;
+            self.realtime_conversation.latest_voice_input_fingerprint =
+                latest_voice_input_fingerprint;
+            self.realtime_conversation.pending_typed_input = pending_typed_input;
+            self.realtime_conversation.turn_origins = turn_origins;
+            self.realtime_conversation.agent_items = agent_items;
             if retry_after_early_close {
                 self.add_info_message(
                     "Voice connection closed during startup. Retrying once.".into(),
@@ -1761,6 +2216,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn reset_realtime_conversation(&mut self) -> Option<ThreadId> {
+        if let Some(abort) = self.realtime_conversation.refresh_abort.take() {
+            abort.abort();
+        }
         if self.realtime_conversation_is_running() {
             self.app_event_tx
                 .send(AppEvent::RealtimeConversationStateChanged);

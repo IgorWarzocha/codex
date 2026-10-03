@@ -979,11 +979,12 @@ impl App {
                 let voices = self.realtime_voices(app_server).await?;
                 let voice = self.effective_realtime_voice(app_server, &voices).await?;
                 app_server
-                    .thread_realtime_start(
+                    .thread_realtime_start_with_context(
                         *realtime_thread_id,
                         String::from(offer_sdp.clone()),
                         model,
                         voice,
+                        self.chat_widget.take_prepared_realtime_context(),
                     )
                     .await?;
                 Ok(true)
@@ -1019,6 +1020,32 @@ impl App {
                     .thread_realtime_append_speech(*realtime_thread_id, text.as_str().to_owned())
                     .await?;
                 self.chat_widget.accept_realtime_speech(*delivery_id);
+                Ok(true)
+            }
+            AppCommand::RealtimeConversationUpdate {
+                thread_id: owner,
+                attempt_id,
+                input_generation,
+                speak,
+                text,
+            } => {
+                if *owner == thread_id
+                    && self.chat_widget.is_current_realtime_update(
+                        *owner,
+                        *attempt_id,
+                        *input_generation,
+                    )
+                {
+                    if *speak {
+                        app_server
+                            .thread_realtime_append_speech(*owner, text.as_str().to_owned())
+                            .await?;
+                    } else {
+                        app_server
+                            .thread_realtime_append_context(*owner, text.as_str().to_owned())
+                            .await?;
+                    }
+                }
                 Ok(true)
             }
             AppCommand::RunUserShellCommand { command } => {

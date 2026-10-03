@@ -109,6 +109,114 @@ const V2_HANDOFF_COMPLETE_ACKNOWLEDGEMENT: &str =
 const RESPONSE_ITEM_PREFIX: &str =
     "Use the following context to inform future responses, but do not speak it to the user.";
 
+#[tokio::test]
+async fn preparing_voice_context_failure_keeps_the_active_call_and_admits_no_host_turn()
+-> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let responses_server = create_mock_responses_server_sequence_unchecked(Vec::new()).await;
+    let realtime_server =
+        start_websocket_server(vec![vec![vec![session_started("voice_prepare")], vec![]]]).await;
+    let home = TempDir::new()?;
+    let personality = home.path().join("codex_personality.md");
+    std::fs::write(&personality, "Prefer concise communication.")?;
+    create_config_toml(
+        home.path(),
+        &responses_server.uri(),
+        realtime_server.uri(),
+        StartupContextConfig::Generated,
+    )?;
+    let config_path = home.path().join("config.toml");
+    let config = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        config_path,
+        format!(
+            "personality_file = {:?}\n{config}",
+            personality.display().to_string()
+        ),
+    )?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    login_with_api_key(&mut mcp, "sk-test-key").await?;
+    let request = mcp
+        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+        .await?;
+    let thread: ThreadStartResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    let thread_id = thread.thread.id;
+    let request = mcp
+        .send_request(
+            "thread/realtime/start",
+            Some(json!({
+                "threadId": thread_id, "outputModality": "audio", "version": "v3",
+                "transport": {"type": "websocket"}, "includeStartupContext": false,
+                "clientManagedHandoffs": true,
+            })),
+        )
+        .await?;
+    let _: ThreadRealtimeStartResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    let _: ThreadRealtimeStartedNotification =
+        read_notification(&mut mcp, "thread/realtime/started").await?;
+    let request = mcp
+        .send_request(
+            "thread/realtime/prepare",
+            Some(json!({"threadId": thread_id})),
+        )
+        .await?;
+    let prepared: codex_app_server_protocol::ThreadRealtimePrepareResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    assert!(
+        prepared.initial_items.is_empty(),
+        "a fresh thread does not borrow other threads or scan the workspace"
+    );
+    std::fs::remove_file(personality)?;
+    let request = mcp
+        .send_request(
+            "thread/realtime/prepare",
+            Some(json!({"threadId": thread_id})),
+        )
+        .await?;
+    let error = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert!(error.error.message.contains("Cannot read personality file"));
+    let request = mcp
+        .send_thread_realtime_append_text_request(ThreadRealtimeAppendTextParams {
+            thread_id: thread_id.clone(),
+            role: ConversationTextRole::Developer,
+            text: "Old call remains usable.".into(),
+        })
+        .await?;
+    let _: ThreadRealtimeAppendTextResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    let context = timeout(DEFAULT_TIMEOUT, realtime_server.wait_for_request(0, 1)).await?;
+    assert_eq!(context.body_json()["channel"], "commentary");
+    let request = mcp
+        .send_thread_read_request(codex_app_server_protocol::ThreadReadParams {
+            thread_id: thread_id.clone(),
+            include_turns: true,
+        })
+        .await?;
+    let read: codex_app_server_protocol::ThreadReadResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    assert!(
+        read.thread.turns.is_empty(),
+        "preparation and quiet context do not admit a host task"
+    );
+    let request = mcp
+        .send_thread_realtime_stop_request(ThreadRealtimeStopParams { thread_id })
+        .await?;
+    let _: ThreadRealtimeStopResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    realtime_server.shutdown().await;
+    Ok(())
+}
+
 #[path = "realtime_transcript_tests.rs"]
 mod transcript_tests;
 
@@ -1963,7 +2071,8 @@ async fn realtime_respects_managed_residency(
     let codex_home = TempDir::new()?;
     let mut config = MockResponsesConfig::new(&responses_uri)
         .with_root_config(&format!(
-            "experimental_realtime_ws_base_url = \"{realtime_uri}\"\n\
+            "context_strategy = \"compaction\"\n\
+             experimental_realtime_ws_base_url = \"{realtime_uri}\"\n\
              experimental_realtime_webrtc_call_base_url = \"{responses_uri}/v1\"\n\
              experimental_realtime_ws_startup_context = \"startup context\""
         ))
@@ -4356,13 +4465,19 @@ fn create_config_toml_with_realtime_version(
     let mut config = MockResponsesConfig::new(responses_server_uri)
         .with_sandbox_mode(sandbox.config_value())
         .with_root_config(&format!(
-            "experimental_realtime_ws_base_url = \"{realtime_server_uri}\"\n\
+            "context_strategy = \"compaction\"\n\
+             experimental_realtime_ws_base_url = \"{realtime_server_uri}\"\n\
              experimental_realtime_ws_backend_prompt = \"backend prompt\""
         ))
         .with_extra_config(&format!(
             "[realtime]\nversion = \"{}\"\ntype = \"conversational\"",
             realtime_version.config_value()
-        ));
+        ))
+        // Scripted host handoffs use direct tools under the selected sandbox.
+        // Notebook's full-access guard is not the protocol under test here.
+        .with_extra_config(
+            "[features]\ncode_mode = { enabled = false, runtime = \"v8\" }\ncode_mode_only = false",
+        );
 
     if let StartupContextConfig::Override(context) = startup_context {
         config = config.with_root_config(&format!(

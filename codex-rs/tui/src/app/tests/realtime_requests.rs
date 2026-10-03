@@ -22,6 +22,7 @@ use pretty_assertions::assert_eq;
 use std::path::Path;
 
 fn normalize_voice_snapshot_directory(rendered: &str, cwd: &Path) -> String {
+    let rendered = rendered.replace(crate::version::CODEX_CLI_VERSION, "0.0.0");
     let cwd = cwd.display().to_string();
     let placeholder = "/tmp/project";
     let padded_placeholder = format!(
@@ -81,6 +82,66 @@ fn empty_thread_snapshot(app: &App, thread_id: ThreadId) -> ThreadEventSnapshot 
 enum ItemEventKind {
     Started,
     Completed,
+}
+
+#[tokio::test]
+async fn lifecycle_greeting_uses_literal_append_speech_without_host_input_or_task_ownership()
+-> Result<()> {
+    let (mut app, _events, _ops) = make_test_app_with_channels().await;
+    let (mut app_server, requests, proxy) = start_recording_realtime_speech_app_server(
+        &app.config,
+        RealtimeRequestBehavior::AcceptSpeech,
+    )
+    .await?;
+    let thread = ThreadId::new();
+    app.active_thread_id = Some(thread);
+    app.chat_widget
+        .handle_thread_session_quiet(test_thread_session(thread, app.config.cwd.to_path_buf()));
+    crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread);
+    // This legacy-policy typed task has no right to speak its results; the
+    // first activation greeting is lifecycle output, independently fenced.
+    send_item(
+        &mut app,
+        thread,
+        "typed",
+        test_user_message("typed-user", "typed task"),
+        ItemEventKind::Started,
+    );
+    assert!(!app.chat_widget.is_current_realtime_attempt(thread, 0, 1));
+    assert!(app.chat_widget.is_current_realtime_update(thread, 0, 1));
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let greeting = || AppCommand::RealtimeConversationUpdate {
+        thread_id: thread,
+        attempt_id: 0,
+        input_generation: 1,
+        speak: true,
+        text: "Hi. What would you like to work on?".to_string().into(),
+    };
+    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(greeting()))).await?;
+    assert_eq!(
+        recorded_params(&requests, "thread/realtime/appendSpeech"),
+        vec![serde_json::json!({
+            "threadId": thread.to_string(), "text": "Hi. What would you like to work on?",
+        })]
+    );
+    assert!(recorded_params(&requests, "turn/start").is_empty());
+    assert!(recorded_params(&requests, "turn/steer").is_empty());
+    send_item(
+        &mut app,
+        thread,
+        "new",
+        test_user_message("new-user", "new typed task"),
+        ItemEventKind::Started,
+    );
+    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(greeting()))).await?;
+    assert_eq!(
+        recorded_params(&requests, "thread/realtime/appendSpeech").len(),
+        1,
+        "a late greeting cannot cross newer accepted input"
+    );
+    app_server.shutdown().await?;
+    proxy.await??;
+    Ok(())
 }
 
 #[tokio::test]
@@ -179,7 +240,7 @@ async fn check_remote_voice_start(
         serde_json::json!({
             "threadId": thread_id.to_string(),
             "clientManagedHandoffs": true,
-            "includeStartupContext": false,
+            "includeStartupContext": true,
             "outputModality": "audio",
             "version": "v3",
             "voice": expected_voice,

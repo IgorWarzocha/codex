@@ -49,8 +49,11 @@ impl AppEventSender {
                     AppCommand::RealtimeConversationStart { .. }
                         | AppCommand::RealtimeConversationStop { .. }
                         | AppCommand::RealtimeConversationSpeech { .. }
+                        | AppCommand::RealtimeConversationUpdate { .. }
                 ) | AppEvent::RealtimeWebrtcOfferCreated { .. }
                     | AppEvent::RealtimeWebrtcConnected { .. }
+                    | AppEvent::PrepareRealtimeRefresh { .. }
+                    | AppEvent::RealtimeRefreshPrepared { .. }
                     | AppEvent::StopRealtimeConversation { .. }
                     | AppEvent::RealtimeConversationStateChanged
                     | AppEvent::BackgroundVoiceError { .. }

@@ -6,6 +6,80 @@ For advanced configuration instructions, see [this documentation](https://develo
 
 For a full configuration reference, see [this documentation](https://developers.openai.com/codex/config-reference).
 
+## Communication style
+
+Create `codex_personality.md` in your Codex home (`~/.codex` by default) with your
+preferred tone and communication style. Codex appends those preferences to both
+normal text and realtime voice instructions, explicitly labelling them as the
+user's preferred communication styles. Native model instructions, task-routing
+rules, and permission controls remain in place. The file needs no version header
+or maintained copy of Codex's system prompt.
+
+To use a different user-owned UTF-8 Markdown file, set a top-level path in
+`config.toml` on the app-server machine:
+
+```toml
+personality_file = "/absolute/path/to/codex_personality.md"
+```
+
+Normal text reads preferences when configuration loads; start a new session or
+reload configuration to pick up edits. Voice rereads the file for each new call,
+including replacement calls. No rebuild is needed. Codex never creates or
+overwrites the file. An absent default file or an empty file adds nothing and
+leaves native instructions unchanged. A missing explicitly configured file, an
+unreadable existing file, invalid UTF-8, or a file larger than 64 KiB produces a
+visible error rather than silently ignoring preferences. Relative paths follow
+the usual configuration-layer path resolution.
+
+Existing text and voice base-instruction overrides retain their precedence.
+Preferences append after the selected base, including an explicitly empty base;
+an empty preferences file never clears that base. Voice settings points to the
+shared file location.
+
+## Voice continuity
+
+Brief spoken delegation acknowledgements are optional. Omitting the setting
+keeps the server default; an explicit start request takes precedence:
+
+```toml
+[realtime]
+delegation_ack_filler = true
+```
+
+Voice now carries bounded public context from the current host thread, not other
+threads or workspace scans. Supplied app-server `initialItems` (including an
+empty array) or `includeStartupContext = false` opt out of the inferred seed.
+The existing startup-context override retains its precedence. Opaque native
+checkpoints remain with the host agent rather than being decoded for voice.
+The first successful activation greets briefly, with a continuation greeting
+when the current thread already has a public user message. Replacement calls
+and sideband reconnections do not greet again.
+
+The TUI forwards public progress and final results for both typed and spoken
+tasks. It never forwards raw reasoning; completed public reasoning summaries
+require an explicit `model_reasoning_summary` setting and remain disabled by
+`hide_agent_reasoning = true`. Permissions and structured questions keep their
+normal visible controls. To keep the older spoken-delegation, final-only policy:
+
+```toml
+[realtime]
+screenless = false
+```
+
+An established media call may be replaced once after transport loss. This is
+separate from sideband reconnection and startup retry; device, permission, and
+authentication errors do not trigger automatic replacement. Host compaction or
+notes rollover refreshes voice serially after pending host work and speech settle.
+Preparation keeps the old call active, and a preparation error keeps it usable.
+Replacement preserves microphone mute and carries finalized conversational text,
+without admitting an extra host turn. These TUI lifecycle policies can be disabled:
+
+```toml
+[realtime]
+auto_resume = false
+refresh_on_context_change = false
+```
+
 ## Context continuity
 
 `context_strategy` defaults to `"notes"`. The agent saves useful task state in

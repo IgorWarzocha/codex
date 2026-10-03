@@ -133,6 +133,10 @@ async fn delegation_started_before_peer_connection_keeps_its_voice_origin() {
     complete_item(&mut chat, thread_id, turn_id, delegation);
 
     chat.on_realtime_webrtc_connected(chat.realtime_conversation.attempt_id, Ok(()));
+    assert!(
+        matches!(ops.try_recv(), Ok(AppCommand::RealtimeConversationUpdate { speak: true, text, .. })
+        if text.as_str() == "Hi. What would you like to work on?")
+    );
     let final_answer = agent_item(
         "startup-final",
         "[FINAL] Spoken answer",

@@ -61,6 +61,8 @@ fn activate_voice(chat: &mut ChatWidget) -> ThreadId {
 }
 
 pub(crate) fn activate_voice_for_thread(chat: &mut ChatWidget, thread_id: ThreadId) {
+    // Existing privacy/recovery fixtures exercise the supported final-only optout.
+    chat.config.realtime.screenless = false;
     chat.thread_id = Some(thread_id);
     chat.realtime_conversation.phase = RealtimeConversationPhase::Active;
     chat.realtime_conversation.thread_id = Some(thread_id);
@@ -147,6 +149,10 @@ mod handoff_privacy;
 mod handoffs;
 #[path = "realtime_tests/lifecycle.rs"]
 mod lifecycle;
+#[path = "realtime_tests/refresh.rs"]
+mod refresh;
+#[path = "realtime_tests/screenless.rs"]
+mod screenless;
 #[path = "realtime_tests/speech_recovery.rs"]
 mod speech_recovery;
 #[path = "realtime_tests/transcripts.rs"]

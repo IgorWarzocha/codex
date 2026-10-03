@@ -97,6 +97,39 @@ fn assistant_message(text: impl Into<String>) -> ResponseItem {
     message("assistant", ContentItem::OutputText { text: text.into() })
 }
 
+#[test]
+fn voice_thread_seed_excludes_private_and_contextual_messages() {
+    let mut private = assistant_message("private commentary");
+    if let ResponseItem::Message { phase, .. } = &mut private {
+        *phase = Some(codex_protocol::models::MessagePhase::Commentary);
+    }
+    let items = vec![
+        user_message("current task"),
+        private,
+        message(
+            "developer",
+            ContentItem::InputText {
+                text: "private instructions".into(),
+            },
+        ),
+        assistant_message("visible answer"),
+    ];
+    let seed = super::current_thread_voice_context(&items).unwrap();
+    assert!(seed.contains("current task"));
+    assert!(seed.contains("visible answer"));
+    assert!(!seed.contains("private commentary"));
+    assert!(!seed.contains("private instructions"));
+    assert!(super::current_thread_voice_context(&[]).is_none());
+    let opaque = ResponseItem::Compaction {
+        id: None,
+        encrypted_content: "opaque-private-checkpoint".into(),
+        internal_chat_message_metadata_passthrough: None,
+    };
+    let seed = super::current_thread_voice_context(&[opaque]).unwrap();
+    assert!(seed.contains("native continuity checkpoints"));
+    assert!(!seed.contains("opaque-private-checkpoint"));
+}
+
 fn long_turn_text(index: usize) -> String {
     format!(
         "turn-{index}-start {} turn-{index}-middle {} turn-{index}-end",

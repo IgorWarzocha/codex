@@ -283,6 +283,9 @@ pub struct ConfigToml {
     /// DISCOURAGED from using this field, as deviating from the instructions
     /// sanctioned by Codex will likely degrade model performance.
     pub model_instructions_file: Option<AbsolutePathBuf>,
+    /// User-owned Markdown communication preferences appended to text and voice instructions.
+    /// Defaults to CODEX_HOME/codex_personality.md when that file exists.
+    pub personality_file: Option<AbsolutePathBuf>,
 
     /// Compact prompt used for history compaction.
     pub compact_prompt: Option<String>,
@@ -674,7 +677,7 @@ pub enum RealtimeTransport {
 pub use codex_protocol::protocol::RealtimeConversationVersion as RealtimeWsVersion;
 pub use codex_protocol::protocol::RealtimeVoice;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct RealtimeConfig {
     pub version: RealtimeWsVersion,
@@ -682,6 +685,25 @@ pub struct RealtimeConfig {
     pub session_type: RealtimeWsMode,
     pub transport: RealtimeTransport,
     pub voice: Option<RealtimeVoice>,
+    pub delegation_ack_filler: Option<bool>,
+    pub screenless: bool,
+    pub auto_resume: bool,
+    pub refresh_on_context_change: bool,
+}
+
+impl Default for RealtimeConfig {
+    fn default() -> Self {
+        Self {
+            version: RealtimeWsVersion::default(),
+            session_type: RealtimeWsMode::default(),
+            transport: RealtimeTransport::default(),
+            voice: None,
+            delegation_ack_filler: None,
+            screenless: true,
+            auto_resume: true,
+            refresh_on_context_change: true,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
@@ -692,6 +714,14 @@ pub struct RealtimeToml {
     pub session_type: Option<RealtimeWsMode>,
     pub transport: Option<RealtimeTransport>,
     pub voice: Option<RealtimeVoice>,
+    /// Speak brief acknowledgements while delegated work runs; unset uses the server default.
+    pub delegation_ack_filler: Option<bool>,
+    /// Forward public progress and results for both typed and spoken tasks.
+    pub screenless: Option<bool>,
+    /// Replace an established media call once after transport closure.
+    pub auto_resume: Option<bool>,
+    /// Replace voice serially after the host context changes.
+    pub refresh_on_context_change: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]

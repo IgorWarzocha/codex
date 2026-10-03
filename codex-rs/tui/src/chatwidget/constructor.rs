@@ -189,6 +189,7 @@ impl ChatWidget {
             turn_lifecycle: TurnLifecycleState::new(prevent_idle_sleep),
             realtime_conversation: RealtimeConversationUiState::default(),
             realtime_conversation_available_for_thread: false,
+            realtime_has_public_thread_context: false,
             safety_buffering: SafetyBufferingState::default(),
             task_complete_pending: false,
             unified_exec_processes: Vec::new(),

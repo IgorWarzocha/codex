@@ -118,7 +118,7 @@ impl ChatWidget {
             && !text.trim().is_empty()
             && self.realtime_conversation.assistant_transcript_generation
                 == Some(self.realtime_conversation.input_generation)
-            && self.realtime_conversation.latest_input_was_voice
+            && self.latest_realtime_input_can_speak()
             && self.realtime_conversation.speaker_suppression_generation
                 == Some(self.realtime_conversation.input_generation)
         {
@@ -127,6 +127,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn refresh_realtime_microphone_level(&mut self) {
+        self.maybe_prepare_realtime_refresh();
         if !matches!(
             self.realtime_conversation.phase,
             RealtimeConversationPhase::Starting | RealtimeConversationPhase::Active
@@ -136,8 +137,12 @@ impl ChatWidget {
         let Some(handle) = self.realtime_conversation.handle.as_ref() else {
             return;
         };
-        if let Some(error) = handle.take_error() {
-            self.on_realtime_error(format!("Voice conversation failed: {error}"));
+        if let Some(error) = handle.take_failure() {
+            if error == codex_realtime_webrtc::ConnectionError::MediaClosed {
+                self.on_realtime_media_closed();
+            } else {
+                self.on_realtime_error(format!("Voice conversation failed: {error}"));
+            }
             return;
         }
         if self.realtime_conversation.phase == RealtimeConversationPhase::Starting {

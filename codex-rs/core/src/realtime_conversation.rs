@@ -3,9 +3,10 @@ use crate::client::X_CODEX_TURN_METADATA_HEADER;
 use crate::context::ContextualUserFragment;
 use crate::context::RealtimeDelegation;
 use crate::context::RealtimeDelegationSource;
+use crate::realtime_context::build_realtime_current_thread_context;
 use crate::realtime_context::build_realtime_startup_context;
 use crate::realtime_context::truncate_realtime_text_to_token_budget;
-use crate::realtime_prompt::prepare_realtime_backend_prompt;
+use crate::realtime_prompt::load_realtime_backend_prompt;
 use crate::responses_metadata::THREAD_SOURCE_KEY;
 use crate::session::session::Session;
 use anyhow::Context;
@@ -1502,13 +1503,29 @@ pub(crate) async fn build_realtime_session_config(
     }
 
     let config = sess.get_config().await;
-    let prompt = prepare_realtime_backend_prompt(
+    let prompt = load_realtime_backend_prompt(
         params.prompt.clone(),
         config.experimental_realtime_ws_backend_prompt.clone(),
-    );
+        &config.personality_file,
+        config.personality_file_required,
+    )
+    .await?;
+    let mut initial_items = params.initial_items.clone();
     let startup_context = if params.include_startup_context {
         match config.experimental_realtime_ws_startup_context.clone() {
             Some(startup_context) => startup_context,
+            None if version == RealtimeWsVersion::V3 => {
+                // Supplied items own their seed; never mix in inferred host context.
+                if initial_items.is_empty()
+                    && let Some(text) = build_realtime_current_thread_context(sess.as_ref()).await
+                {
+                    initial_items.push(ConversationTextParams {
+                        role: ConversationTextRole::Developer,
+                        text,
+                    });
+                }
+                String::new()
+            }
             None => {
                 build_realtime_startup_context(sess.as_ref(), REALTIME_STARTUP_CONTEXT_TOKEN_BUDGET)
                     .await
@@ -1586,8 +1603,10 @@ pub(crate) async fn build_realtime_session_config(
     validate_realtime_voice(version, voice)?;
     Ok(RealtimeSessionConfig {
         instructions: prompt,
-        initial_items: params.initial_items.clone(),
-        delegation_ack_filler: params.delegation_ack_filler,
+        initial_items,
+        delegation_ack_filler: params
+            .delegation_ack_filler
+            .or(config.realtime.delegation_ack_filler),
         model,
         session_id: Some(
             params
@@ -2159,10 +2178,9 @@ async fn send_realtime_pending_outbound(
     response_create_queue: &mut RealtimeResponseCreateQueue,
 ) -> anyhow::Result<()> {
     match pending_outbound {
-        RealtimePendingOutbound::Text(params) => writer
-            .send_conversation_item_create(params.text.clone(), params.role)
-            .await
-            .map_err(anyhow::Error::from),
+        RealtimePendingOutbound::Text(params) => {
+            handle_text_input(Ok(params.clone()), writer).await
+        }
         RealtimePendingOutbound::Handoff(output) => {
             handle_handoff_output(
                 Ok(output.clone()),
@@ -2207,6 +2225,15 @@ async fn handle_text_input(
     writer: &RealtimeWebsocketWriter,
 ) -> anyhow::Result<()> {
     let params = params.context("text input channel closed")?;
+    // On V3, roles disappear into session.context.append. Developer context is
+    // explicitly quiet; omitting the channel would make admitted typed input speakable.
+    let writer = if params.role == ConversationTextRole::Developer {
+        writer
+            .clone()
+            .with_context_append_channel(RealtimeContextAppendChannel::Commentary)
+    } else {
+        writer.clone()
+    };
     writer
         .send_conversation_item_create(params.text, params.role)
         .await

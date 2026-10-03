@@ -205,6 +205,121 @@ fn classifies_outbound_api_failures_as_transport_loss() {
 }
 
 #[tokio::test]
+async fn pending_developer_context_stays_quiet_on_a_reconnected_sideband() -> anyhow::Result<()> {
+    use codex_api::Provider;
+    use codex_api::RealtimeSessionConfig;
+    use codex_api::RealtimeSessionMode;
+    use codex_api::RealtimeTranscriptState;
+    use codex_api::RealtimeWebsocketClient;
+    use codex_api::RetryConfig;
+    use codex_http_client::HttpClientFactory;
+    use codex_http_client::OutboundProxyPolicy;
+    use codex_protocol::protocol::RealtimeOutputModality;
+    use codex_protocol::protocol::RealtimeVoice;
+    use core_test_support::responses::start_websocket_server;
+    use http::HeaderMap;
+    use serde_json::json;
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    core_test_support::skip_if_no_network!(Ok(()));
+    let server = start_websocket_server(vec![vec![vec![]], vec![vec![]]]).await;
+    let client = RealtimeWebsocketClient::new(
+        Provider {
+            name: "reconnect test".into(),
+            base_url: server.uri().into(),
+            query_params: None,
+            headers: HeaderMap::new(),
+            retry: RetryConfig {
+                max_attempts: 1,
+                base_delay: Duration::from_millis(1),
+                retry_429: false,
+                retry_5xx: false,
+                retry_transport: false,
+            },
+            stream_idle_timeout: Duration::from_secs(2),
+        },
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    )
+    .with_webrtc_sideband_base_url(server.uri().into());
+    let config = RealtimeSessionConfig {
+        instructions: "native instructions".into(),
+        initial_items: Vec::new(),
+        delegation_ack_filler: None,
+        model: None,
+        session_id: None,
+        event_parser: RealtimeEventParser::FramelessBidi,
+        session_mode: RealtimeSessionMode::Conversational,
+        output_modality: RealtimeOutputModality::Audio,
+        voice: RealtimeVoice::Cove,
+    };
+    let first = client
+        .connect_existing_call_sideband(
+            config.clone(),
+            "same_call",
+            HeaderMap::new(),
+            HeaderMap::new(),
+            RealtimeTranscriptState::default(),
+        )
+        .await?;
+    first
+        .send_conversation_item_create("before disconnect".into(), ConversationTextRole::User)
+        .await?;
+    assert!(
+        matches!(
+            timeout(Duration::from_secs(2), first.next_event()).await?,
+            Err(ApiError::Stream(_))
+        ),
+        "fixture drops the sideband without a terminal status"
+    );
+    let reconnected = client
+        .connect_existing_call_sideband(
+            config,
+            "same_call",
+            HeaderMap::new(),
+            HeaderMap::new(),
+            first.events().transcript_state(),
+        )
+        .await?;
+    let (tx, _rx) = bounded(1);
+    let state = RealtimeHandoffState {
+        output_tx: tx,
+        last_output: Arc::new(Mutex::new(None)),
+        stream: Arc::new(Mutex::new(Default::default())),
+        client_managed_handoffs: true,
+        codex_responses_as_items: false,
+        codex_response_item_prefix: None,
+        backend_reasoning_status: false,
+        codex_response_handoff_mode: CodexResponseHandoffMode::Thinking,
+        codex_response_handoff_channel_prefixes: Arc::new(BTreeMap::new()),
+        session_kind: RealtimeSessionKind::V1,
+        event_parser: RealtimeEventParser::FramelessBidi,
+    };
+    let pending = RealtimePendingOutbound::Text(ConversationTextParams {
+        text: "Already-admitted typed input and finalized tail; context only.".into(),
+        role: ConversationTextRole::Developer,
+    });
+    super::send_realtime_pending_outbound(
+        &pending,
+        &reconnected.writer(),
+        &state,
+        RealtimeEventParser::FramelessBidi,
+        &mut super::RealtimeResponseCreateQueue::default(),
+    )
+    .await?;
+    let replay = timeout(Duration::from_secs(2), server.wait_for_request(1, 0)).await?;
+    assert_eq!(
+        replay.body_json(),
+        json!({
+            "type": "session.context.append", "channel": "commentary",
+            "content": [{"type": "input_text", "text": "Already-admitted typed input and finalized tail; context only."}],
+        })
+    );
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn clears_active_handoff_explicitly() {
     let (tx, _rx) = bounded(1);
     let state = RealtimeHandoffState {

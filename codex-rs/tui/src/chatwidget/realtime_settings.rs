@@ -34,6 +34,7 @@ impl ChatWidget {
     pub(crate) fn open_realtime_settings(&mut self) {
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Voice settings".to_string()),
+            subtitle: Some("Communication style: codex_personality.md in your Codex home.".into()),
             items: vec![
                 SelectionItem {
                     name: "Set sound devices".to_string(),

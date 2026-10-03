@@ -285,6 +285,31 @@ impl TurnRequestProcessor {
             .map(|response| response.map(Into::into))
     }
 
+    pub(crate) async fn thread_realtime_prepare(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: codex_app_server_protocol::ThreadRealtimePrepareParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        self.ensure_direct_input_allowed(request_id, thread.as_ref())
+            .await?;
+        let initial_items = thread
+            .prepare_realtime_voice()
+            .await
+            .map_err(|err| invalid_request(err.to_string()))?
+            .into_iter()
+            .map(
+                |item| codex_app_server_protocol::ThreadRealtimeInitialItem {
+                    role: item.role,
+                    text: item.text,
+                },
+            )
+            .collect();
+        Ok(Some(
+            codex_app_server_protocol::ThreadRealtimePrepareResponse { initial_items }.into(),
+        ))
+    }
+
     pub(crate) async fn thread_realtime_append_audio(
         &self,
         request_id: &ConnectionRequestId,
@@ -1250,7 +1275,7 @@ impl TurnRequestProcessor {
                 output_modality: params.output_modality,
                 include_startup_context: params
                     .include_startup_context
-                    .unwrap_or(!attaches_existing_call),
+                    .unwrap_or(!attaches_existing_call && params.initial_items.is_none()),
                 initial_items: params
                     .initial_items
                     .unwrap_or_default()

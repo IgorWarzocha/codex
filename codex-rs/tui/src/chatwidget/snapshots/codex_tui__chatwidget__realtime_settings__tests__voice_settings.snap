@@ -3,6 +3,7 @@ source: tui/src/chatwidget/realtime_settings_tests.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
   Voice settings
+  Communication style: codex_personality.md in your Codex home.
 
 
 › 1. Set sound devices

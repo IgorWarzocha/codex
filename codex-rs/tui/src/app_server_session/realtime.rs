@@ -4,12 +4,15 @@ use super::AppServerSession;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ThreadRealtimeAppendSpeechParams;
 use codex_app_server_protocol::ThreadRealtimeAppendSpeechResponse;
+use codex_app_server_protocol::ThreadRealtimeAppendTextParams;
+use codex_app_server_protocol::ThreadRealtimeAppendTextResponse;
 use codex_app_server_protocol::ThreadRealtimeStartParams;
 use codex_app_server_protocol::ThreadRealtimeStartResponse;
 use codex_app_server_protocol::ThreadRealtimeStartTransport;
 use codex_app_server_protocol::ThreadRealtimeStopParams;
 use codex_app_server_protocol::ThreadRealtimeStopResponse;
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::ConversationTextRole;
 use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::RealtimeOutputModality;
 use codex_protocol::protocol::RealtimeVoice;
@@ -17,12 +20,46 @@ use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
 
 impl AppServerSession {
+    pub(crate) async fn thread_realtime_append_context(
+        &mut self,
+        thread_id: ThreadId,
+        text: String,
+    ) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: ThreadRealtimeAppendTextResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadRealtimeAppendText {
+                request_id,
+                params: ThreadRealtimeAppendTextParams {
+                    thread_id: thread_id.to_string(),
+                    role: ConversationTextRole::Developer,
+                    text,
+                },
+            })
+            .await
+            .wrap_err("thread/realtime/appendText failed in TUI")?;
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub(crate) async fn thread_realtime_start(
         &mut self,
         thread_id: ThreadId,
         offer_sdp: String,
         model: Option<String>,
         voice: Option<RealtimeVoice>,
+    ) -> Result<()> {
+        self.thread_realtime_start_with_context(thread_id, offer_sdp, model, voice, None)
+            .await
+    }
+
+    pub(crate) async fn thread_realtime_start_with_context(
+        &mut self,
+        thread_id: ThreadId,
+        offer_sdp: String,
+        model: Option<String>,
+        voice: Option<RealtimeVoice>,
+        initial_items: Option<Vec<codex_app_server_protocol::ThreadRealtimeInitialItem>>,
     ) -> Result<()> {
         let request_id = self.next_request_id();
         let _: ThreadRealtimeStartResponse = self
@@ -41,8 +78,8 @@ impl AppServerSession {
                     codex_response_handoff_channel_prefixes: None,
                     model,
                     output_modality: RealtimeOutputModality::Audio,
-                    include_startup_context: Some(false),
-                    initial_items: None,
+                    include_startup_context: Some(true),
+                    initial_items,
                     realtime_start_instructions: None,
                     realtime_end_instructions: None,
                     prompt: None,

@@ -1,5 +1,6 @@
 ---
 source: core/src/context/world_state/realtime_tests.rs
+assertion_line: 22
 expression: "render_section_cases(&[(Absent, Absent), (Absent, Known(&inactive)),\n(Absent, Known(&active)), (Known(&inactive), Known(&active)),\n(Known(&inactive), Known(&custom_active)), (Known(&active), Known(&active)),\n(Known(&custom_active), Known(&changed_custom_active)),\n(Known(&active), Known(&inactive)), (Unknown, Known(&active)),\n(Unknown, Known(&inactive)),])"
 ---
 Absent -> Absent
@@ -12,26 +13,30 @@ Absent -> {"active":true} (role - developer)
 <realtime_conversation>
 Realtime conversation started.
 
-You are operating as a backend executor behind an intermediary. The user does not talk to you directly. Any response you produce will be consumed by the intermediary and may be summarized before the user sees it.
+You are the host agent behind a voice intermediary. Typed and spoken requests have the same authority and use the same permission and structured-question controls. Your public responses may also be spoken; do not assume the user is watching the screen.
 
 When invoked, you receive the latest conversation transcript and any relevant mode or metadata. The intermediary may invoke you even when backend help is not actually needed. Use the transcript to decide whether you should do work. If backend help is unnecessary, avoid verbose responses that add user-visible latency.
 
 When user text is routed from realtime, treat it as a transcript. It may be unpunctuated or contain recognition errors.
 
-- Keep responses concise and action-oriented. Your updates should help the intermediary respond to the user.
+- Keep responses concise and action-oriented. Give meaningful public progress when work takes time, not filler or repeated holding messages. Keep private analysis, raw reasoning, encrypted content, and tool internals out of public updates.
+- Treat already-admitted typed input or carried conversation context as context, not a second task to delegate. Call-local delegation identifiers do not survive a replacement voice call.
+- Finish with a useful result, not an instruction to read the screen. Keep permissions and structured questions in their normal host controls; voice mode never bypasses them.
 </realtime_conversation>
 
 {"active":false} -> {"active":true} (role - developer)
 <realtime_conversation>
 Realtime conversation started.
 
-You are operating as a backend executor behind an intermediary. The user does not talk to you directly. Any response you produce will be consumed by the intermediary and may be summarized before the user sees it.
+You are the host agent behind a voice intermediary. Typed and spoken requests have the same authority and use the same permission and structured-question controls. Your public responses may also be spoken; do not assume the user is watching the screen.
 
 When invoked, you receive the latest conversation transcript and any relevant mode or metadata. The intermediary may invoke you even when backend help is not actually needed. Use the transcript to decide whether you should do work. If backend help is unnecessary, avoid verbose responses that add user-visible latency.
 
 When user text is routed from realtime, treat it as a transcript. It may be unpunctuated or contain recognition errors.
 
-- Keep responses concise and action-oriented. Your updates should help the intermediary respond to the user.
+- Keep responses concise and action-oriented. Give meaningful public progress when work takes time, not filler or repeated holding messages. Keep private analysis, raw reasoning, encrypted content, and tool internals out of public updates.
+- Treat already-admitted typed input or carried conversation context as context, not a second task to delegate. Call-local delegation identifiers do not survive a replacement voice call.
+- Finish with a useful result, not an instruction to read the screen. Keep permissions and structured questions in their normal host controls; voice mode never bypasses them.
 </realtime_conversation>
 
 {"active":false} -> {"active":true} (role - developer)
@@ -56,13 +61,15 @@ Unknown -> {"active":true} (role - developer)
 <realtime_conversation>
 Realtime conversation started.
 
-You are operating as a backend executor behind an intermediary. The user does not talk to you directly. Any response you produce will be consumed by the intermediary and may be summarized before the user sees it.
+You are the host agent behind a voice intermediary. Typed and spoken requests have the same authority and use the same permission and structured-question controls. Your public responses may also be spoken; do not assume the user is watching the screen.
 
 When invoked, you receive the latest conversation transcript and any relevant mode or metadata. The intermediary may invoke you even when backend help is not actually needed. Use the transcript to decide whether you should do work. If backend help is unnecessary, avoid verbose responses that add user-visible latency.
 
 When user text is routed from realtime, treat it as a transcript. It may be unpunctuated or contain recognition errors.
 
-- Keep responses concise and action-oriented. Your updates should help the intermediary respond to the user.
+- Keep responses concise and action-oriented. Give meaningful public progress when work takes time, not filler or repeated holding messages. Keep private analysis, raw reasoning, encrypted content, and tool internals out of public updates.
+- Treat already-admitted typed input or carried conversation context as context, not a second task to delegate. Call-local delegation identifiers do not survive a replacement voice call.
+- Finish with a useful result, not an instruction to read the screen. Keep permissions and structured questions in their normal host controls; voice mode never bypasses them.
 </realtime_conversation>
 
 Unknown -> {"active":false}

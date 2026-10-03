@@ -108,6 +108,7 @@ pub enum Message {
     ApplyAnswer { sdp: SessionDescription },
     TransportReady {},
     TransportTimedOut {},
+    TransportClosed {},
     ListDevices { kind: AudioDeviceKind },
     DeviceList { devices: Vec<AudioDevice> },
     OpenDevices { selection: AudioDeviceSelection },

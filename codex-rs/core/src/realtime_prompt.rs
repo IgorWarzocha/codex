@@ -1,6 +1,27 @@
+use crate::communication_preferences::append_communication_preferences;
+use crate::communication_preferences::read_communication_preferences;
 use codex_prompts::BACKEND_PROMPT;
+use codex_protocol::error::Result as CodexResult;
+use codex_utils_absolute_path::AbsolutePathBuf;
 const DEFAULT_USER_FIRST_NAME: &str = "there";
 const USER_FIRST_NAME_PLACEHOLDER: &str = "{{ user_first_name }}";
+
+/// Codex owns the base; user communication preferences append without replacing it.
+/// Reread preferences for each call, independent of the normal-text config snapshot.
+pub(crate) async fn load_realtime_backend_prompt(
+    prompt: Option<Option<String>>,
+    config_prompt: Option<String>,
+    personality_file: &AbsolutePathBuf,
+    personality_file_required: bool,
+) -> CodexResult<String> {
+    let base = prepare_realtime_backend_prompt(prompt, config_prompt);
+    let preferences =
+        read_communication_preferences(personality_file, personality_file_required).await?;
+    Ok(append_communication_preferences(
+        &base,
+        preferences.as_deref(),
+    ))
+}
 
 pub(crate) fn prepare_realtime_backend_prompt(
     prompt: Option<Option<String>>,
@@ -33,7 +54,64 @@ fn current_user_first_name() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::load_realtime_backend_prompt;
     use super::prepare_realtime_backend_prompt;
+    use codex_utils_absolute_path::AbsolutePathBuf;
+
+    #[tokio::test]
+    async fn preferences_append_to_native_or_overridden_base_and_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = AbsolutePathBuf::try_from(dir.path().join("voice.md")).unwrap();
+        for contents in [
+            "My preferred communication style",
+            "Updated preferred style",
+            "",
+        ] {
+            tokio::fs::write(path.as_path(), contents).await.unwrap();
+            for (request, inline, expected_base) in [
+                (
+                    Some(Some("request override".into())),
+                    None,
+                    "request override",
+                ),
+                (
+                    Some(Some("request override".into())),
+                    Some("inline override".into()),
+                    "inline override",
+                ),
+                (Some(None), None, ""),
+            ] {
+                let prompt = load_realtime_backend_prompt(request, inline, &path, true)
+                    .await
+                    .unwrap();
+                assert!(prompt.starts_with(expected_base));
+                if contents.is_empty() {
+                    assert_eq!(prompt, expected_base);
+                } else {
+                    assert!(prompt.contains(contents));
+                    assert!(prompt.contains("user's preferred communication styles"));
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn configured_file_errors_do_not_fall_back_to_request_or_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = AbsolutePathBuf::try_from(dir.path().join("voice.md")).unwrap();
+        let error = load_realtime_backend_prompt(None, None, &path, true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Cannot read personality file"));
+        for contents in [vec![0xff], vec![b'x'; 64 * 1024 + 1]] {
+            tokio::fs::write(path.as_path(), contents).await.unwrap();
+            assert!(
+                load_realtime_backend_prompt(None, None, &path, true)
+                    .await
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn prepare_realtime_backend_prompt_prefers_config_override() {

@@ -157,15 +157,16 @@ fn run(
             Ok(Message::InspectAudio {}) => {
                 phase.set(HelperExitStage::InspectAudio);
                 if answered && transport.as_ref().is_none_or(|peer| !*peer.ready.borrow()) {
-                    return Err(io::Error::other("voice connection closed"));
-                }
-                Message::AudioState {
-                    state: devices
-                        .as_ref()
-                        .map(devices::Devices::take_state)
-                        .transpose()
-                        .inspect_err(|_| phase.set(HelperExitStage::Device))?
-                        .unwrap_or_default(),
+                    Message::TransportClosed {}
+                } else {
+                    Message::AudioState {
+                        state: devices
+                            .as_ref()
+                            .map(devices::Devices::take_state)
+                            .transpose()
+                            .inspect_err(|_| phase.set(HelperExitStage::Device))?
+                            .unwrap_or_default(),
+                    }
                 }
             }
             Ok(Message::ListDevices { kind }) => Message::DeviceList {
@@ -253,6 +254,7 @@ fn run(
                 | Message::Offer { .. }
                 | Message::TransportReady {}
                 | Message::TransportTimedOut {}
+                | Message::TransportClosed {}
                 | Message::DeviceList { .. }
                 | Message::OpenDevices { .. }
                 | Message::DevicesOpened {}

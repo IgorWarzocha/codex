@@ -39,7 +39,7 @@ enum Command {
 struct State {
     microphone: AtomicU16,
     speaker: AtomicU16,
-    error: Mutex<Option<String>>,
+    error: Mutex<Option<ConnectionError>>,
 }
 
 struct Owner {
@@ -163,8 +163,7 @@ impl RealtimeWebrtcSession {
                     *state
                         .error
                         .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                        Some(failure.to_string());
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(failure);
                 }
             })?;
         let offer_sdp = result
@@ -233,6 +232,10 @@ impl RealtimeWebrtcSessionHandle {
     }
 
     pub fn take_error(&self) -> Option<String> {
+        self.take_failure().map(|failure| failure.to_string())
+    }
+
+    pub fn take_failure(&self) -> Option<ConnectionError> {
         self.0
             .state
             .error
@@ -256,8 +259,7 @@ impl RealtimeWebrtcSessionHandle {
                 .state
                 .error
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some("Voice control channel unavailable.".into());
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ConnectionError::Failed);
             self.close();
             anyhow::bail!("voice control channel unavailable");
         }

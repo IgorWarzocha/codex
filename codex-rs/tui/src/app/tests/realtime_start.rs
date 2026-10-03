@@ -143,6 +143,14 @@ async fn lifecycle_actions_stop_parked_voice_before_removing_owner() -> Result<(
         (AgentsOverviewAction::Delete, true),
     ] {
         let (mut app, _, _) = make_test_app_with_channels().await;
+        // This local API-key bootstrap fixture has no remote Notes backend.
+        app.config.context_strategy = codex_config::types::ContextStrategy::Compaction;
+        // The remote request deliberately omits local thread settings, so the
+        // app-server's independent reload also needs the explicit test policy.
+        std::fs::write(
+            app.config.codex_home.join("config.toml"),
+            "context_strategy = \"compaction\"\n",
+        )?;
         let (mut server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
         let started = server.start_thread(&app.config).await?;
         let root = started.session.thread_id;

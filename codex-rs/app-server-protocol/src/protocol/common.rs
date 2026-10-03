@@ -1063,6 +1063,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::TurnInterruptResponse,
     },
+    #[experimental("thread/realtime/prepare")]
+    ThreadRealtimePrepare => "thread/realtime/prepare" {
+        params: v2::ThreadRealtimePrepareParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRealtimePrepareResponse,
+    },
     #[experimental("thread/realtime/start")]
     ThreadRealtimeStart => "thread/realtime/start" {
         params: v2::ThreadRealtimeStartParams,

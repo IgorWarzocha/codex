@@ -190,6 +190,22 @@ impl From<ThreadRealtimeAudioChunk> for CoreRealtimeAudioFrame {
     }
 }
 
+/// EXPERIMENTAL - prepare public current-thread continuity and validate voice instructions
+/// without replacing the active call or admitting a host turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimePrepareParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimePrepareResponse {
+    pub initial_items: Vec<ThreadRealtimeInitialItem>,
+}
+
 /// EXPERIMENTAL - start a thread-scoped realtime session.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -233,12 +249,14 @@ pub struct ThreadRealtimeStartParams {
     /// Selects text or audio output for the realtime session. Transport and voice stay
     /// independent so clients can choose how they connect separately from what the model emits.
     pub output_modality: RealtimeOutputModality,
-    /// Set to false to start without Codex's startup context. Omitted or null includes it.
+    /// Set to false to start without Codex's startup context. V3 uses public current-thread
+    /// context only. Omitted or null includes it unless initialItems is supplied.
     #[ts(optional = nullable)]
     pub include_startup_context: Option<bool>,
     /// Adds complete role-bearing text items to the initial Frameless Bidi session history.
     /// This is only supported by realtime V3 and is sent during session startup. Requests are
-    /// limited to 128 items and 8,192 estimated text tokens in total.
+    /// limited to 128 items and 8,192 estimated text tokens in total. Supplied items, including
+    /// an empty array, suppress the default startup seed unless includeStartupContext is true.
     #[ts(optional = nullable)]
     pub initial_items: Option<Vec<ThreadRealtimeInitialItem>>,
     /// Developer instructions given to the backing Codex model when this realtime session starts.

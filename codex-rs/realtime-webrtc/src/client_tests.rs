@@ -66,6 +66,41 @@ async fn cancelling_initialization_terminates_the_owned_helper() -> anyhow::Resu
 
 #[cfg(unix)]
 #[tokio::test]
+async fn media_close_is_classified_separately_from_device_and_helper_failure() -> anyhow::Result<()>
+{
+    let spawned = codex_utils_pty::spawn_pipe_process(
+        std::path::Path::new("/bin/sleep"),
+        &["30".to_owned()],
+        std::path::Path::new("/"),
+        &child_environment(std::iter::empty()),
+        &None,
+        &[],
+    )
+    .await?;
+    drop(spawned.stderr_rx);
+    let (output, receiver) = tokio::sync::mpsc::channel(1);
+    output
+        .send(crate::encode_frame(&crate::Message::TransportClosed {})?)
+        .await?;
+    let (_, exit) = tokio::sync::oneshot::channel();
+    let mut host = super::VoiceHost {
+        process: spawned.session,
+        output: crate::message_reader::MessageReader::new(receiver),
+        exit,
+        observed_exit: None,
+    };
+    let error = host.inspect_audio().await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<crate::ConnectionError>(),
+        Some(&crate::ConnectionError::MediaClosed)
+    );
+    host.process.terminate();
+    tokio::time::timeout(std::time::Duration::from_secs(1), spawned.exit_rx).await??;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn negotiation_timeout_waits_for_helper_exit_before_allowing_retry() -> anyhow::Result<()> {
     let spawned = codex_utils_pty::spawn_pipe_process(
         std::path::Path::new("/bin/sleep"),

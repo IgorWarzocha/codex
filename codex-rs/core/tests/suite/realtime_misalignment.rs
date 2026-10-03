@@ -84,6 +84,16 @@ async fn misalignment_retires_late_voice_handoff_before_it_starts_a_turn() -> Re
     });
 
     let mut builder = test_codex().with_config(move |config| {
+        // This failure/retirement fixture scripts direct tools, not Notebook execution.
+        config
+            .features
+            .disable(codex_features::Feature::CodeMode)
+            .unwrap();
+        config
+            .features
+            .disable(codex_features::Feature::CodeModeOnly)
+            .unwrap();
+        config.code_mode.runtime = codex_features::CodeModeRuntime::V8;
         config.experimental_realtime_ws_base_url = Some(realtime_url);
         config.realtime.version = RealtimeWsVersion::V1;
     });

@@ -1668,6 +1668,11 @@ impl MessageProcessor {
                     .thread_realtime_start(&request_id, params)
                     .await
             }
+            ClientRequest::ThreadRealtimePrepare { params, .. } => {
+                self.turn_processor
+                    .thread_realtime_prepare(&request_id, params)
+                    .await
+            }
             ClientRequest::ThreadRealtimeAppendAudio { params, .. } => {
                 self.turn_processor
                     .thread_realtime_append_audio(&request_id, params)

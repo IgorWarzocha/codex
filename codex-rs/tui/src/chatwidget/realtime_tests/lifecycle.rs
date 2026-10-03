@@ -4,6 +4,103 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn first_successful_activation_emits_one_literal_public_context_aware_greeting() {
+    for contextual in [false, true] {
+        let (mut chat, _, _events, mut ops) = make_chatwidget_manual_with_sender().await;
+        let thread = ThreadId::new();
+        chat.thread_id = Some(thread);
+        if contextual {
+            complete_item(
+                &mut chat,
+                thread,
+                "prior",
+                user_item("A public earlier task"),
+            );
+            finish_turn(
+                &mut chat,
+                thread,
+                "prior",
+                Vec::new(),
+                TurnStatus::Completed,
+            );
+            assert!(
+                chat.last_rendered_user_message_display.is_none(),
+                "completed-turn dedupe state is not voice continuity metadata"
+            );
+        } else {
+            // Neither private reasoning nor private commentary is greeting context.
+            complete_item(
+                &mut chat,
+                thread,
+                "prior",
+                ThreadItem::Reasoning {
+                    id: "private".into(),
+                    summary: Vec::new(),
+                    content: vec!["private sentinel".into()],
+                },
+            );
+            complete_item(
+                &mut chat,
+                thread,
+                "prior",
+                agent_item(
+                    "analysis",
+                    "[ANALYSIS] private sentinel",
+                    Some(MessagePhase::Commentary),
+                ),
+            );
+        }
+        chat.config.realtime.screenless = false;
+        chat.turn_lifecycle.agent_turn_running = true;
+        chat.turn_lifecycle.last_turn_id = Some("typed".into());
+        chat.realtime_conversation.thread_id = Some(thread);
+        chat.realtime_conversation.phase = RealtimeConversationPhase::Starting;
+        chat.realtime_conversation.attempt_id = 42;
+        // A failed negotiation never activated; a successful startup retry greets once.
+        chat.realtime_conversation.startup_retry = super::super::StartupRetry::Used;
+        chat.on_realtime_conversation_started();
+        assert!(
+            ops.try_recv().is_err(),
+            "no greeting before media readiness"
+        );
+        chat.on_realtime_webrtc_connected(42, Ok(()));
+        assert!(!chat.realtime_conversation.latest_input_was_voice);
+        assert!(!chat.is_current_realtime_attempt(
+            thread,
+            42,
+            chat.realtime_conversation.input_generation
+        ));
+        assert!(
+            chat.is_current_realtime_update(
+                thread,
+                42,
+                chat.realtime_conversation.input_generation
+            ),
+            "greetings are lifecycle output, not speech owned by the typed task"
+        );
+        let expected = if contextual {
+            "Hi. We can continue this conversation by voice."
+        } else {
+            "Hi. What would you like to work on?"
+        };
+        assert!(
+            matches!(ops.try_recv(), Ok(AppCommand::RealtimeConversationUpdate { thread_id, speak: true, text, .. })
+            if thread_id == thread && text.as_str() == expected)
+        );
+        chat.on_realtime_conversation_started();
+        chat.on_realtime_webrtc_connected(42, Ok(()));
+        assert!(ops.try_recv().is_err(), "readiness is idempotent");
+        chat.realtime_conversation.phase = RealtimeConversationPhase::Starting;
+        chat.realtime_conversation.replacement_call = true;
+        chat.on_realtime_webrtc_connected(42, Ok(()));
+        assert!(
+            ops.try_recv().is_err(),
+            "replacement activation must not greet"
+        );
+    }
+}
+
+#[tokio::test]
 async fn enabling_voice_on_an_open_thread_snapshots_the_new_thread_notice() {
     let (mut chat, _sender, mut events, _ops) = make_chatwidget_manual_with_sender().await;
     chat.set_feature_enabled(
@@ -252,6 +349,7 @@ async fn voice_becomes_active_only_after_backend_and_current_peer_are_ready() {
 async fn normal_voice_close_renders_the_ended_message() {
     let (mut chat, _sender, mut events, _ops) = make_chatwidget_manual_with_sender().await;
     activate_voice(&mut chat);
+    chat.config.realtime.auto_resume = false;
     while events.try_recv().is_ok() {}
 
     chat.on_realtime_conversation_closed(Some("transport_closed".into()));
@@ -397,6 +495,8 @@ async fn startup_retry_is_cancelled_while_waiting_for_backend_close() {
 async fn startup_transport_close_before_peer_timeout_retries_once_and_ignores_old_result() {
     let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
     activate_voice(&mut chat);
+    // This fixture isolates startup retry; established-media replacement is covered separately.
+    chat.config.realtime.auto_resume = false;
     chat.realtime_conversation.phase = RealtimeConversationPhase::Starting;
     chat.realtime_conversation.attempt_id = 0;
     // The close can also overtake the backend's started notification.
@@ -454,6 +554,10 @@ async fn startup_transport_close_before_peer_timeout_retries_once_and_ignores_ol
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Active
+    );
+    assert!(
+        matches!(ops.try_recv(), Ok(AppCommand::RealtimeConversationUpdate { speak: true, text, .. })
+        if text.as_str() == "Hi. What would you like to work on?")
     );
     chat.on_realtime_conversation_closed(Some("transport_closed".into()));
     assert_eq!(
